@@ -15,3 +15,7 @@ lake-manifest.json
 **/.lean-dup/
 **/.lake/
 **/lake-manifest.json
+
+# macOS metadata.
+.DS_Store
+**/.DS_Store
