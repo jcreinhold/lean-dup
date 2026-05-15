@@ -1,0 +1,6 @@
+name = "External"
+version = "0.1.0"
+defaultTargets = ["External"]
+
+[[lean_lib]]
+name = "External"

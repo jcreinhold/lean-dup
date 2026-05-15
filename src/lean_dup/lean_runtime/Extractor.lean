@@ -182,20 +182,32 @@ private def isSortDomain (type : Expr) : Bool :=
   | .sort _ => true
   | _ => false
 
-private def permutationFingerprint (expr : Expr) : MetaM String := do
-  forallTelescope expr fun xs body => do
-    let mut domains := #[]
-    let mut canPermute := true
-    for x in xs do
-      let localDecl ← getFVarLocalDecl x
-      let isPropDomain ← isProp localDecl.type
-      if !isPropDomain && !isSortDomain localDecl.type then
-        canPermute := false
-      domains := domains.push (localDecl.type, isPropDomain)
-    if canPermute then
-      pure s!"(forall* [{renderPermutationDomains domains}] {looseConnectiveFingerprint body})"
-    else
-      pure <| exprFingerprint expr
+private def isPropSort (type : Expr) : Bool :=
+  match type with
+  | .sort level => level.isZero
+  | _ => false
+
+private def isPropHypothesisDomain (sawNonPropSort : Bool) (type : Expr) : Bool :=
+  match type with
+  | .bvar _ => !sawNonPropSort
+  | _ => false
+
+private def permutationFingerprint (expr : Expr) : String := Id.run do
+  let (rawDomains, conclusion) := collectForalls expr
+  let mut domains := #[]
+  let mut canPermute := true
+  let mut sawNonPropSort := false
+  for domain in rawDomains do
+    let isPropDomain := isPropSort domain || isPropHypothesisDomain sawNonPropSort domain
+    if !isPropDomain && !isSortDomain domain then
+      canPermute := false
+    if isSortDomain domain && !isPropSort domain then
+      sawNonPropSort := true
+    domains := domains.push (domain, isPropDomain)
+  if canPermute then
+    s!"(forall* [{renderPermutationDomains domains}] {looseConnectiveFingerprint conclusion})"
+  else
+    exprFingerprint expr
 
 private def pointJson (line column : Nat) : Json :=
   Json.mkObj [("line", Json.num line), ("column", Json.num column)]
@@ -205,6 +217,11 @@ private def spanJson (range : DeclarationRange) : Json :=
     [ ("start", pointJson range.pos.line range.pos.column)
     , ("end", pointJson range.endPos.line range.endPos.column)
     ]
+
+private def shortName : Name → String
+  | .anonymous => "_anonymous"
+  | .str _ segment => segment
+  | .num parent _ => shortName parent
 
 private def jsonLine
     (workspace moduleName origin filePath declKind visibility : String)
@@ -220,8 +237,8 @@ private def jsonLine
     , ("origin", Json.str origin)
     , ("file", Json.str filePath)
     , ("name", Json.str declName.toString)
-    , ("display_name", Json.str declName.getString!)
-    , ("short_name", Json.str declName.getString!)
+    , ("display_name", Json.str (shortName declName))
+    , ("short_name", Json.str (shortName declName))
     , ("kind", Json.str declKind)
     , ("visibility", Json.str visibility)
     , ("modifiers", Json.arr (if visibility == "private" then #[Json.str "private"] else #[]))
@@ -247,46 +264,53 @@ private def declarationKind? : ConstantInfo → Option String
 private def declarationVisibility (declName : Name) : String :=
   if declName.toString.contains "_private" then "private" else "public"
 
-private def collectModuleRows (workspace : String) (modules : Array ModuleEntry) : MetaM (Array Json) := do
+private def shouldReportProgress (index total : Nat) : Bool :=
+  index == 1 || index == total || index % 100 == 0
+
+private def collectModuleRows
+    (workspace : String)
+    (moduleEntry : ModuleEntry)
+    (moduleIndex moduleCount : Nat) : MetaM (Array Json) := do
   let env ← getEnv
   let mut rows := #[]
-  for moduleEntry in modules do
-    let moduleName := dottedName moduleEntry.name
-    let some modIdx := env.header.moduleNames.idxOf? moduleName | continue
-    let moduleData := env.header.moduleData[modIdx]!
-    for h : idx in *...moduleData.constNames.size do
-      let declName := moduleData.constNames[idx]
-      let constInfo := moduleData.constants[idx]!
-      let some declKind := declarationKind? constInfo | continue
-      let some rangeInfo ← findDeclarationRanges? declName | continue
-      let type := constInfo.type
-      let typeText := (← ppExpr type).pretty
-      let constants := (collectConstants type).toArray.map (·.toString) |>.qsort (· < ·)
-      let heads := headConstants type
-      let visibility := declarationVisibility declName
-      rows := rows.push <|
-        jsonLine
-          workspace
-          moduleEntry.name
-          moduleEntry.origin
-          s!"{workspace}/{moduleEntry.name.replace "." "/"}.lean"
-          declKind
-          visibility
-          declName
-          typeText
-          (exprFingerprint type)
-          (← permutationFingerprint type)
-          (connectiveFingerprint type)
-          (connectiveFingerprint (stripForalls type))
-          constants
-          heads
-          (binderCount type)
-          rangeInfo.range
+  if shouldReportProgress moduleIndex moduleCount then
+    IO.eprintln s!"lean-dup: extracting module {moduleIndex}/{moduleCount}: {moduleEntry.name}"
+  let moduleName := dottedName moduleEntry.name
+  let some modIdx := env.header.moduleNames.idxOf? moduleName | return rows
+  let moduleData := env.header.moduleData[modIdx]!
+  for h : idx in *...moduleData.constNames.size do
+    let declName := moduleData.constNames[idx]
+    let constInfo := moduleData.constants[idx]!
+    let some declKind := declarationKind? constInfo | continue
+    let some rangeInfo ← findDeclarationRanges? declName | continue
+    let type := constInfo.type
+    let typeText := (← ppExpr type).pretty
+    let constants := (collectConstants type).toArray.map (·.toString) |>.qsort (· < ·)
+    let heads := headConstants type
+    let visibility := declarationVisibility declName
+    rows := rows.push <|
+      jsonLine
+        workspace
+        moduleEntry.name
+        moduleEntry.origin
+        s!"{workspace}/{moduleEntry.name.replace "." "/"}.lean"
+        declKind
+        visibility
+        declName
+        typeText
+        (exprFingerprint type)
+        (permutationFingerprint type)
+        (connectiveFingerprint type)
+        (connectiveFingerprint (stripForalls type))
+        constants
+        heads
+        (binderCount type)
+        rangeInfo.range
   pure rows
 
-private def writeRows (path : System.FilePath) (rows : Array Json) : IO Unit := do
-  let text := String.intercalate "\n" (rows.toList.map Json.compress)
-  IO.FS.writeFile path (if text.isEmpty then "" else text ++ "\n")
+private def writeRows (handle : IO.FS.Handle) (rows : Array Json) : IO Unit := do
+  for row in rows do
+    handle.putStrLn row.compress
 
 unsafe def run (workspace manifestPath outputPath : String) : IO UInt32 := do
   match ← parseModuleManifest manifestPath with
@@ -296,14 +320,32 @@ unsafe def run (workspace manifestPath outputPath : String) : IO UInt32 := do
   | Except.ok modules =>
       enableInitializersExecution
       let imports := modules.map fun moduleEntry => Import.mk (dottedName moduleEntry.name) false true false
+      IO.eprintln s!"lean-dup: importing {modules.size} modules"
       let env ← importModules imports Options.empty (loadExts := true)
+      IO.eprintln "lean-dup: import complete"
       let coreCtx : Core.Context := {
         fileName := "<lean-dup-extractor>"
         fileMap := default
         options := Options.empty
       }
-      let (rows, _, _) ← MetaM.toIO (collectModuleRows workspace modules) coreCtx { env := env } {} {}
-      writeRows outputPath rows
+      let declarationCount ← IO.FS.withFile outputPath IO.FS.Mode.write fun handle => do
+        let mut declarationCount := 0
+        let mut moduleIndex := 0
+        for moduleEntry in modules do
+          moduleIndex := moduleIndex + 1
+          let (rows, _, _) ←
+            MetaM.toIO
+              (collectModuleRows workspace moduleEntry moduleIndex modules.size)
+              coreCtx
+              { env := env }
+              {}
+              {}
+          writeRows handle rows
+          declarationCount := declarationCount + rows.size
+          if declarationCount > 0 && declarationCount % 5000 < rows.size then
+            IO.eprintln s!"lean-dup: wrote {declarationCount} declarations"
+        pure declarationCount
+      IO.eprintln s!"lean-dup: wrote {declarationCount} declarations"
       pure 0
 
 end LeanDup

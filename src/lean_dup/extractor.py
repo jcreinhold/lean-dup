@@ -45,7 +45,7 @@ def load_or_build_index(workspace: Workspace, options: AuditOptions) -> Extracte
             cache_hit=True,
             timings={"load_index": time.perf_counter() - started},
         )
-    raw_path = _run_extractor(workspace)
+    raw_path = run_extractor(workspace, build=True)
     declarations = _augment_with_private_source_declarations(workspace, _read_index(raw_path))
     cache_path.write_text(raw_path.read_text(encoding="utf-8"), encoding="utf-8")
     raw_path.unlink(missing_ok=True)
@@ -62,20 +62,30 @@ def extractor_path() -> Path:
     return Path(__file__).resolve().parent / "lean_runtime" / "Extractor.lean"
 
 
-def _run_extractor(workspace: Workspace) -> Path:
-    build_targets = ["lake", "build", *workspace.workspace_modules]
-    build = subprocess.run(
-        build_targets,
-        cwd=workspace.root,
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    if build.returncode != 0:
-        details = "\n".join(part for part in (build.stdout.strip(), build.stderr.strip()) if part)
-        msg = details or "`lake build` failed"
-        raise RuntimeError(msg)
+def run_extractor(workspace: Workspace, *, build: bool, progress: bool = False) -> Path:
+    """Run the bundled Lean extractor for a resolved project."""
+
+    if build:
+        build_targets = ["lake", "build", *workspace.workspace_modules]
+        if progress:
+            print(
+                f"lean-dup: building {len(workspace.workspace_modules)} module(s) in {workspace.root}",
+                flush=True,
+            )
+        completed_build = subprocess.run(
+            build_targets,
+            cwd=workspace.root,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if completed_build.returncode != 0:
+            details = "\n".join(
+                part for part in (completed_build.stdout.strip(), completed_build.stderr.strip()) if part
+            )
+            msg = details or "`lake build` failed"
+            raise RuntimeError(msg)
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as manifest:
         json.dump(
             [
@@ -101,20 +111,30 @@ def _run_extractor(workspace: Workspace) -> Path:
         str(manifest_path),
         str(output_path),
     ]
-    try:
-        completed = subprocess.run(
-            command,
-            cwd=workspace.root,
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+    if progress:
+        print(
+            f"lean-dup: starting Lean extraction for {len(workspace.extraction_modules)} module(s)",
+            flush=True,
         )
+    try:
+        if progress:
+            completed = subprocess.run(command, cwd=workspace.root, check=False, text=True)
+        else:
+            completed = subprocess.run(
+                command,
+                cwd=workspace.root,
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
     finally:
         manifest_path.unlink(missing_ok=True)
     if completed.returncode != 0:
         output_path.unlink(missing_ok=True)
-        details = "\n".join(part for part in (completed.stdout.strip(), completed.stderr.strip()) if part)
+        stdout = completed.stdout or ""
+        stderr = completed.stderr or ""
+        details = "\n".join(part for part in (stdout.strip(), stderr.strip()) if part)
         msg = details or "Lean extractor failed"
         raise RuntimeError(msg)
     return output_path

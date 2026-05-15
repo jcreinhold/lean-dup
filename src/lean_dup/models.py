@@ -121,8 +121,21 @@ class AuditReport(JsonableDataclass):
     module_root: str | None
     declaration_count: int
     cache_hit: bool
+    external_indexes: tuple[ExternalIndexMetadata, ...]
     warnings: tuple[str, ...]
     groups: tuple[DuplicateGroup, ...]
+
+
+@dataclass(frozen=True)
+class ExternalIndexMetadata(JsonableDataclass):
+    """Metadata for one external comparison index used by an audit."""
+
+    label: str
+    path: Path
+    workspace: Path
+    module_root: str
+    declaration_count: int
+    cache_hit: bool
 
 
 @dataclass(frozen=True)
@@ -134,5 +147,8 @@ class AuditOptions(JsonableDataclass):
     include_private: bool = True
     include_imports: bool = False
     import_roots: tuple[str, ...] = ()
+    compare_indexes: tuple[str, ...] = ()
+    compare_mathlib: bool = False
+    mathlib_workspace: Path | None = None
     threshold: float = 0.78
     profile: bool = False

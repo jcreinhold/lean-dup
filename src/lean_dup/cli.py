@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from lean_dup.audit import run_audit
+from lean_dup.external_index import MATHLIB_DEFAULT_WORKSPACE, build_external_index, build_mathlib_index
 from lean_dup.extractor import extractor_path
 from lean_dup.models import AuditOptions, AuditReport
 from lean_dup.workspace import resolve_workspace
@@ -24,6 +25,20 @@ def main(argv: list[str] | None = None) -> int:
     doctor.add_argument("--workspace", required=True, type=Path)
     doctor.add_argument("--module", dest="module_root")
 
+    index = subparsers.add_parser("index", help="build or reuse an external comparison index")
+    index.add_argument("--workspace", required=True, type=Path)
+    index.add_argument("--module", dest="module_root", required=True)
+    index.add_argument("--label", required=True)
+    index.add_argument("--force", action="store_true")
+    index.add_argument("--profile", action="store_true")
+    index.add_argument("--progress", action="store_true")
+
+    index_mathlib = subparsers.add_parser("index-mathlib", help="build or reuse the mathlib comparison index")
+    index_mathlib.add_argument("--workspace", type=Path, default=MATHLIB_DEFAULT_WORKSPACE)
+    index_mathlib.add_argument("--force", action="store_true")
+    index_mathlib.add_argument("--profile", action="store_true")
+    index_mathlib.add_argument("--progress", action="store_true")
+
     audit = subparsers.add_parser("audit", help="audit a Lake workspace")
     audit.add_argument("--workspace", required=True, type=Path)
     audit.add_argument("--module", dest="module_root")
@@ -33,6 +48,9 @@ def main(argv: list[str] | None = None) -> int:
     audit.add_argument("--no-include-private", dest="include_private", action="store_false")
     audit.add_argument("--include-imports", action="store_true")
     audit.add_argument("--import-root", action="append", default=[])
+    audit.add_argument("--compare-index", action="append", default=[])
+    audit.add_argument("--compare-mathlib", action="store_true")
+    audit.add_argument("--mathlib-workspace", type=Path)
     audit.add_argument("--threshold", type=float, default=0.78)
     audit.add_argument("--profile", action="store_true")
 
@@ -44,6 +62,26 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "doctor":
             return _doctor(workspace=args.workspace, module_root=args.module_root)
+        if args.command == "index":
+            metadata = build_external_index(
+                workspace=args.workspace,
+                module_root=args.module_root,
+                label=args.label,
+                force=args.force,
+                profile=args.profile,
+                progress=args.progress,
+            )
+            print(_render_index_metadata(metadata))
+            return 0
+        if args.command == "index-mathlib":
+            metadata = build_mathlib_index(
+                workspace=args.workspace,
+                force=args.force,
+                profile=args.profile,
+                progress=args.progress,
+            )
+            print(_render_index_metadata(metadata))
+            return 0
         if args.command == "audit":
             include_private = args.include_private and not args.public_only
             report = run_audit(
@@ -54,6 +92,9 @@ def main(argv: list[str] | None = None) -> int:
                     include_private=include_private,
                     include_imports=args.include_imports,
                     import_roots=tuple(args.import_root),
+                    compare_indexes=tuple(args.compare_index),
+                    compare_mathlib=args.compare_mathlib,
+                    mathlib_workspace=args.mathlib_workspace,
                     threshold=args.threshold,
                     profile=args.profile,
                 ),
@@ -106,6 +147,12 @@ def _render_report(report: AuditReport) -> str:
         f"cache: {'hit' if report.cache_hit else 'miss'}",
         f"groups: {len(report.groups)}",
     ]
+    for external in report.external_indexes:
+        lines.append(
+            "external index: "
+            f"{external.label} declarations={external.declaration_count} "
+            f"cache={'hit' if external.cache_hit else 'miss'}"
+        )
     for warning in report.warnings:
         lines.append(f"warning: {warning}")
     for group in report.groups:
@@ -137,6 +184,19 @@ def _render_group(*, workspace: Path, group_id: str) -> str:
             lines.append(f"  type: {member['type_text']}")
         return "\n".join(lines)
     raise RuntimeError(f"group not found in latest report: {group_id}")
+
+
+def _render_index_metadata(metadata: Any) -> str:
+    return "\n".join(
+        [
+            f"label: {metadata.label}",
+            f"workspace: {metadata.workspace}",
+            f"module root: {metadata.module_root}",
+            f"declarations: {metadata.declaration_count}",
+            f"cache: {'hit' if metadata.cache_hit else 'miss'}",
+            f"path: {metadata.path}",
+        ]
+    )
 
 
 def _write_latest_report(report: AuditReport) -> None:
