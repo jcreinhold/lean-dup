@@ -22,6 +22,7 @@ def test_cli_audit_json() -> None:
             "Tiny",
             "--format",
             "json",
+            "--profile",
         ],
         cwd=ROOT,
         check=False,
@@ -31,5 +32,6 @@ def test_cli_audit_json() -> None:
     )
     assert completed.returncode == 0, completed.stderr + completed.stdout
     payload = json.loads(completed.stdout)
-    assert payload["declaration_count"] >= 4
+    assert payload["declaration_count"] >= 10
     assert "groups" in payload
+    assert "warnings" in payload

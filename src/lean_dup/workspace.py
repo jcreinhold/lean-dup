@@ -12,10 +12,31 @@ class Workspace:
     """Resolved Lake workspace facts."""
 
     root: Path
-    modules: tuple[str, ...]
+    workspace_modules: tuple[str, ...]
+    extraction_modules: tuple[ModuleEntry, ...]
+
+    @property
+    def modules(self) -> tuple[str, ...]:
+        """Return local workspace modules for compatibility with older callers."""
+
+        return self.workspace_modules
 
 
-def resolve_workspace(path: Path, module_root: str | None) -> Workspace:
+@dataclass(frozen=True)
+class ModuleEntry:
+    """One module included in extraction."""
+
+    name: str
+    origin: str
+
+
+def resolve_workspace(
+    path: Path,
+    module_root: str | None,
+    *,
+    include_imports: bool = False,
+    import_roots: tuple[str, ...] = (),
+) -> Workspace:
     """Resolve modules to audit for one Lake workspace."""
 
     root = path.expanduser().resolve()
@@ -30,7 +51,21 @@ def resolve_workspace(path: Path, module_root: str | None) -> Workspace:
     if not modules:
         msg = f"no Lean modules found under {root}"
         raise RuntimeError(msg)
-    return Workspace(root=root, modules=tuple(modules))
+    entries = [ModuleEntry(name=module, origin="workspace") for module in modules]
+    if include_imports:
+        workspace_set = set(modules)
+        direct_imports = sorted(
+            {
+                imported
+                for module in modules
+                for imported in _direct_imports(module_to_file(root, module))
+                if imported not in workspace_set
+            }
+        )
+        entries.extend(ModuleEntry(name=module, origin="direct-import") for module in direct_imports)
+    entries.extend(ModuleEntry(name=module, origin="named-import") for module in import_roots)
+    deduped = tuple(dict.fromkeys(entries))
+    return Workspace(root=root, workspace_modules=tuple(modules), extraction_modules=deduped)
 
 
 def module_to_file(root: Path, module: str) -> Path:
@@ -64,3 +99,15 @@ def _modules_under(root: Path, module_root: str) -> tuple[str, ...]:
             rel = path.relative_to(root).with_suffix("")
             modules.append(".".join(rel.parts))
     return tuple(modules)
+
+
+def _direct_imports(path: Path) -> tuple[str, ...]:
+    if not path.exists():
+        return ()
+    imports: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("import "):
+            continue
+        imports.extend(part for part in stripped.removeprefix("import ").split() if part)
+    return tuple(imports)

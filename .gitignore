@@ -2,8 +2,16 @@
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+*.egg-info/
+
+# Python build outputs.
+build/
+dist/
+
+# lean-dup audit caches and Lake build outputs, including fixture workspaces.
+.lean-dup/
 .lake/
 lake-manifest.json
-dist/
-*.egg-info/
-.lean-dup/
+**/.lean-dup/
+**/.lake/
+**/lake-manifest.json

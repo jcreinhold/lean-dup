@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from lean_dup.models import Declaration, SourcePoint, SourceSpan
+from lean_dup.models import AuditOptions, Declaration, SourcePoint, SourceSpan
 from lean_dup.text import normalize_source, stable_hash
 from lean_dup.workspace import Workspace, module_to_file
 
-EXTRACTOR_VERSION = "extractor.v1"
+EXTRACTOR_VERSION = "extractor.v2"
+PRIVATE_DECL_RE = re.compile(r"^\s*private\s+(?P<kind>theorem|lemma)\s+(?P<name>[A-Za-z_][\w.']*)\b")
 
 
 @dataclass(frozen=True)
@@ -23,32 +26,44 @@ class ExtractedIndex:
 
     declarations: tuple[Declaration, ...]
     cache_hit: bool
+    timings: dict[str, float]
 
 
-def load_or_build_index(workspace: Workspace) -> ExtractedIndex:
+def load_or_build_index(workspace: Workspace, options: AuditOptions) -> ExtractedIndex:
     """Load a cached declaration index or ask Lean to build it."""
 
+    started = time.perf_counter()
     cache_dir = workspace.root / ".lean-dup" / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_key = _cache_key(workspace)
+    cache_key = _cache_key(workspace, options)
     cache_id = sha256(json.dumps(cache_key, sort_keys=True).encode("utf-8")).hexdigest()
     cache_path = cache_dir / f"{cache_id}.jsonl"
     if cache_path.exists():
-        return ExtractedIndex(declarations=_read_index(cache_path), cache_hit=True)
+        declarations = _augment_with_private_source_declarations(workspace, _read_index(cache_path))
+        return ExtractedIndex(
+            declarations=declarations,
+            cache_hit=True,
+            timings={"load_index": time.perf_counter() - started},
+        )
     raw_path = _run_extractor(workspace)
-    declarations = _read_index(raw_path)
+    declarations = _augment_with_private_source_declarations(workspace, _read_index(raw_path))
     cache_path.write_text(raw_path.read_text(encoding="utf-8"), encoding="utf-8")
-    return ExtractedIndex(declarations=declarations, cache_hit=False)
+    raw_path.unlink(missing_ok=True)
+    return ExtractedIndex(
+        declarations=declarations,
+        cache_hit=False,
+        timings={"build_index": time.perf_counter() - started},
+    )
 
 
 def extractor_path() -> Path:
     """Return the bundled Lean extractor source path."""
 
-    return Path(__file__).resolve().parents[2] / "lean-runtime" / "Extractor.lean"
+    return Path(__file__).resolve().parent / "lean_runtime" / "Extractor.lean"
 
 
 def _run_extractor(workspace: Workspace) -> Path:
-    build_targets = ["lake", "build", *workspace.modules]
+    build_targets = ["lake", "build", *workspace.workspace_modules]
     build = subprocess.run(
         build_targets,
         cwd=workspace.root,
@@ -62,7 +77,16 @@ def _run_extractor(workspace: Workspace) -> Path:
         msg = details or "`lake build` failed"
         raise RuntimeError(msg)
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as manifest:
-        json.dump(list(workspace.modules), manifest)
+        json.dump(
+            [
+                {
+                    "name": module.name,
+                    "origin": module.origin,
+                }
+                for module in workspace.extraction_modules
+            ],
+            manifest,
+        )
         manifest_path = Path(manifest.name)
     output = tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".jsonl", delete=False)
     output_path = Path(output.name)
@@ -106,30 +130,139 @@ def _read_index(path: Path) -> tuple[Declaration, ...]:
     return tuple(declarations)
 
 
+def _augment_with_private_source_declarations(
+    workspace: Workspace,
+    declarations: tuple[Declaration, ...],
+) -> tuple[Declaration, ...]:
+    existing = {(declaration.module, declaration.display_name) for declaration in declarations}
+    private_declarations: list[Declaration] = []
+    for module in workspace.workspace_modules:
+        file_path = module_to_file(workspace.root, module)
+        private_declarations.extend(
+            declaration
+            for declaration in _private_source_declarations(
+                workspace_root=workspace.root,
+                module=module,
+                file_path=file_path,
+            )
+            if (declaration.module, declaration.display_name) not in existing
+        )
+    return tuple([*declarations, *private_declarations])
+
+
 def _declaration_from_row(row: dict[str, Any]) -> Declaration:
     workspace = Path(str(row["workspace"])).expanduser().resolve()
     file_path = Path(str(row["file"])).expanduser().resolve()
     span = _span_from_json(row["span"])
     source_fingerprint = _source_fingerprint(file_path, span, str(row["name"]))
     normalized_type = str(row["normalized_type"])
+    permutation_type = str(row["permutation_normalized_type"])
+    connective_type = str(row["connective_normalized_type"])
     conclusion = str(row["conclusion_normalized_type"])
     return Declaration(
         workspace=workspace,
         module=str(row["module"]),
         name=str(row["name"]),
+        display_name=str(row.get("display_name", row["short_name"])),
         short_name=str(row["short_name"]),
         kind=str(row["kind"]),
+        visibility=str(row.get("visibility", "public")),
+        origin=str(row.get("origin", "workspace")),
+        modifiers=tuple(row.get("modifiers", [])),
         file=file_path,
         span=span,
         type_text=str(row["type_text"]),
         normalized_type=normalized_type,
         type_fingerprint=stable_hash(normalized_type),
+        permutation_fingerprint=stable_hash(permutation_type),
+        connective_fingerprint=stable_hash(connective_type),
         conclusion_fingerprint=stable_hash(conclusion),
         constants=tuple(row.get("constants", [])),
         type_heads=tuple(row.get("type_heads", [])),
         binder_count=int(row.get("binder_count", 0)),
         source_fingerprint=source_fingerprint,
     )
+
+
+def _private_source_declarations(*, workspace_root: Path, module: str, file_path: Path) -> list[Declaration]:
+    if not file_path.exists():
+        return []
+    lines = file_path.read_text(encoding="utf-8").splitlines()
+    declarations: list[Declaration] = []
+    for index, line in enumerate(lines):
+        match = PRIVATE_DECL_RE.match(line)
+        if match is None:
+            continue
+        snippet_lines = _declaration_header(lines, index)
+        snippet = "\n".join(snippet_lines)
+        display_name = match.group("name")
+        kind = "theorem" if match.group("kind") in {"theorem", "lemma"} else match.group("kind")
+        normalized = _source_statement_fingerprint(snippet, display_name)
+        fingerprint = stable_hash(normalized)
+        span = SourceSpan(
+            start=SourcePoint(line=index + 1, column=0),
+            end=SourcePoint(line=index + len(snippet_lines), column=len(snippet_lines[-1])),
+        )
+        declarations.append(
+            Declaration(
+                workspace=workspace_root,
+                module=module,
+                name=f"{module}.{display_name}",
+                display_name=display_name,
+                short_name=display_name,
+                kind=kind,
+                visibility="private",
+                origin="workspace",
+                modifiers=("private",),
+                file=file_path,
+                span=span,
+                type_text=normalize_source(snippet),
+                normalized_type=normalized,
+                type_fingerprint=fingerprint,
+                permutation_fingerprint=fingerprint,
+                connective_fingerprint=fingerprint,
+                conclusion_fingerprint=stable_hash(_source_conclusion(snippet)),
+                constants=tuple(sorted(set(re.findall(r"\b[A-Z][A-Za-z0-9_.']*", snippet)))),
+                type_heads=tuple(sorted(set(re.findall(r"[→∧∨=↔]", snippet)))),
+                binder_count=snippet.count("(") + snippet.count("{") + snippet.count("["),
+                source_fingerprint=stable_hash(normalize_source(snippet).replace(display_name, "_decl", 1)),
+            )
+        )
+    return declarations
+
+
+def _declaration_header(lines: list[str], start: int) -> list[str]:
+    collected: list[str] = []
+    for line in lines[start : min(len(lines), start + 12)]:
+        collected.append(line)
+        if ":=" in line or " where" in line:
+            break
+    return collected
+
+
+def _source_statement_fingerprint(snippet: str, display_name: str) -> str:
+    text = normalize_source(snippet)
+    text = text.replace(display_name, "_decl", 1)
+    text = re.sub(r"\b[A-Za-z_][A-Za-z0-9_']*\b(?=\s*:)", "_", text)
+    text = re.sub(r"\b[A-Za-z_][A-Za-z0-9_']*\b", _normalize_source_identifier, text)
+    return text
+
+
+def _normalize_source_identifier(match: re.Match[str]) -> str:
+    word = match.group(0)
+    if word in {"private", "theorem", "lemma", "by", "Prop", "Type", "Sort"}:
+        return word
+    if word[:1].isupper():
+        return word
+    return "v"
+
+
+def _source_conclusion(snippet: str) -> str:
+    text = normalize_source(snippet)
+    before_body = text.split(":=", 1)[0].split(" where", 1)[0]
+    if ":" not in before_body:
+        return before_body
+    return before_body.rsplit(":", 1)[-1].strip()
 
 
 def _span_from_json(value: dict[str, Any]) -> SourceSpan:
@@ -156,18 +289,22 @@ def _source_fingerprint(file_path: Path, span: SourceSpan, declaration_name: str
     return stable_hash(skeleton)
 
 
-def _cache_key(workspace: Workspace) -> dict[str, Any]:
+def _cache_key(workspace: Workspace, options: AuditOptions) -> dict[str, Any]:
     return {
         "schema": EXTRACTOR_VERSION,
         "extractor": _file_hash(extractor_path()),
         "lean_toolchain": _file_text(workspace.root / "lean-toolchain"),
         "lake_manifest": _file_hash(workspace.root / "lake-manifest.json"),
+        "include_imports": options.include_imports,
+        "include_private": options.include_private,
+        "import_roots": list(options.import_roots),
         "modules": [
             {
-                "name": module,
-                "source": _file_hash(module_to_file(workspace.root, module)),
+                "name": module.name,
+                "origin": module.origin,
+                "source": _file_hash(module_to_file(workspace.root, module.name)),
             }
-            for module in workspace.modules
+            for module in workspace.extraction_modules
         ],
     }
 

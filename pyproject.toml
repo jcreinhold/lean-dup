@@ -3,6 +3,7 @@ name = "lean-dup"
 version = "0.1.0"
 description = "General-purpose duplication auditor for Lean 4 projects."
 readme = "README.md"
+license = "MIT OR Apache-2.0"
 requires-python = ">=3.12"
 dependencies = []
 

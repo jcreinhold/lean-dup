@@ -8,6 +8,34 @@ theorem same_right (a b : Prop) : a → b → a := by
   intro ha _hb
   exact ha
 
+theorem reordered_left (p q r : Prop) : p → q → r → r := by
+  intro _hp _hq hr
+  exact hr
+
+theorem reordered_right (p q r : Prop) : q → p → r → r := by
+  intro _hq _hp hr
+  exact hr
+
+theorem and_left (p q : Prop) : p ∧ q → q ∧ p := by
+  intro h
+  exact And.intro h.right h.left
+
+theorem and_right (p q : Prop) : q ∧ p → p ∧ q := by
+  intro h
+  exact And.intro h.right h.left
+
+theorem dependent_left (α : Type) (x y : α) : x = x := rfl
+
+theorem dependent_right (α : Type) (x y : α) : y = y := rfl
+
+private theorem private_dup_left (p q : Prop) : p → q → p := by
+  intro hp _hq
+  exact hp
+
+private theorem private_dup_right (a b : Prop) : a → b → a := by
+  intro ha _hb
+  exact ha
+
 def clone_one (n : Nat) : Nat := n + 1
 
 end Tiny

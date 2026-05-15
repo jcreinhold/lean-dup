@@ -4,3 +4,6 @@ defaultTargets = ["Tiny"]
 
 [[lean_lib]]
 name = "Tiny"
+
+[[lean_lib]]
+name = "Other"

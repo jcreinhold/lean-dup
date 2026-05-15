@@ -1,3 +1,5 @@
+import Other
+
 namespace Tiny
 
 def clone_two (n : Nat) : Nat := n + 1

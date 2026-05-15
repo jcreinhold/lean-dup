@@ -10,7 +10,7 @@ from typing import Any
 
 from lean_dup.audit import run_audit
 from lean_dup.extractor import extractor_path
-from lean_dup.models import AuditReport
+from lean_dup.models import AuditOptions, AuditReport
 from lean_dup.workspace import resolve_workspace
 
 
@@ -28,6 +28,13 @@ def main(argv: list[str] | None = None) -> int:
     audit.add_argument("--workspace", required=True, type=Path)
     audit.add_argument("--module", dest="module_root")
     audit.add_argument("--format", choices=("text", "json"), default="text")
+    audit.add_argument("--public-only", action="store_true")
+    audit.add_argument("--include-private", dest="include_private", action="store_true", default=True)
+    audit.add_argument("--no-include-private", dest="include_private", action="store_false")
+    audit.add_argument("--include-imports", action="store_true")
+    audit.add_argument("--import-root", action="append", default=[])
+    audit.add_argument("--threshold", type=float, default=0.78)
+    audit.add_argument("--profile", action="store_true")
 
     show = subparsers.add_parser("show", help="show one group from the latest audit")
     show.add_argument("--workspace", required=True, type=Path)
@@ -38,7 +45,19 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "doctor":
             return _doctor(workspace=args.workspace, module_root=args.module_root)
         if args.command == "audit":
-            report = run_audit(workspace=args.workspace, module_root=args.module_root)
+            include_private = args.include_private and not args.public_only
+            report = run_audit(
+                workspace=args.workspace,
+                options=AuditOptions(
+                    workspace=args.workspace,
+                    module_root=args.module_root,
+                    include_private=include_private,
+                    include_imports=args.include_imports,
+                    import_roots=tuple(args.import_root),
+                    threshold=args.threshold,
+                    profile=args.profile,
+                ),
+            )
             _write_latest_report(report)
             if args.format == "json":
                 print(json.dumps(report.to_jsonable(), indent=2, sort_keys=True))
@@ -87,12 +106,18 @@ def _render_report(report: AuditReport) -> str:
         f"cache: {'hit' if report.cache_hit else 'miss'}",
         f"groups: {len(report.groups)}",
     ]
+    for warning in report.warnings:
+        lines.append(f"warning: {warning}")
     for group in report.groups:
         lines.append("")
         lines.append(f"{group.id} [{group.kind}] confidence={group.confidence:.2f}")
         lines.append(f"  {group.reason}")
+        for evidence in group.evidence:
+            lines.append(f"  evidence: {evidence}")
         for member in group.members:
-            lines.append(f"  - {member.name} ({member.file}:{member.line})")
+            visibility = "" if member.visibility == "public" else f" {member.visibility}"
+            origin = "" if member.origin == "workspace" else f" {member.origin}"
+            lines.append(f"  - {member.display_name} ({member.file}:{member.line}){visibility}{origin}")
     return "\n".join(lines)
 
 
@@ -107,6 +132,8 @@ def _render_group(*, workspace: Path, group_id: str) -> str:
             lines.append(f"{member['name']}")
             lines.append(f"  file: {member['file']}:{member['line']}")
             lines.append(f"  kind: {member['kind']}")
+            lines.append(f"  visibility: {member.get('visibility', 'public')}")
+            lines.append(f"  origin: {member.get('origin', 'workspace')}")
             lines.append(f"  type: {member['type_text']}")
         return "\n".join(lines)
     raise RuntimeError(f"group not found in latest report: {group_id}")

@@ -8,10 +8,36 @@ from pathlib import Path
 from typing import Any
 
 
+class JsonableDataclass:
+    """Shared JSON conversion for report dataclasses."""
+
+    def to_jsonable(self) -> dict[str, Any]:
+        """Return a JSON-serializable representation."""
+
+        def convert(value: Any) -> Any:
+            if isinstance(value, Path):
+                return str(value)
+            if isinstance(value, StrEnum):
+                return str(value)
+            if isinstance(value, tuple):
+                return [convert(item) for item in value]
+            if isinstance(value, list):
+                return [convert(item) for item in value]
+            if isinstance(value, dict):
+                return {key: convert(item) for key, item in value.items()}
+            if hasattr(value, "__dataclass_fields__"):
+                return convert(asdict(value))
+            return value
+
+        return convert(self)
+
+
 class DuplicateKind(StrEnum):
     """Kinds of duplication reported by v1."""
 
     EXACT_STATEMENT = "exact-statement"
+    PERMUTED_STATEMENT = "permuted-statement"
+    CONNECTIVE_EQUIVALENT = "connective-equivalent"
     NEAR_STATEMENT = "near-statement"
     SOURCE_CLONE = "source-clone"
     SUBSUMPTION_CANDIDATE = "subsumption-candidate"
@@ -40,13 +66,19 @@ class Declaration:
     workspace: Path
     module: str
     name: str
+    display_name: str
     short_name: str
     kind: str
+    visibility: str
+    origin: str
+    modifiers: tuple[str, ...]
     file: Path
     span: SourceSpan
     type_text: str
     normalized_type: str
     type_fingerprint: str
+    permutation_fingerprint: str
+    connective_fingerprint: str
     conclusion_fingerprint: str
     constants: tuple[str, ...]
     type_heads: tuple[str, ...]
@@ -59,10 +91,13 @@ class DuplicateMember:
     """One declaration inside a duplicate group."""
 
     name: str
+    display_name: str
     module: str
     file: Path
     line: int
     kind: str
+    visibility: str
+    origin: str
     type_text: str
 
 
@@ -74,35 +109,30 @@ class DuplicateGroup:
     kind: DuplicateKind
     confidence: float
     reason: str
+    evidence: tuple[str, ...]
     members: tuple[DuplicateMember, ...]
 
 
 @dataclass(frozen=True)
-class AuditReport:
+class AuditReport(JsonableDataclass):
     """Complete audit result."""
 
     workspace: Path
     module_root: str | None
     declaration_count: int
     cache_hit: bool
+    warnings: tuple[str, ...]
     groups: tuple[DuplicateGroup, ...]
 
-    def to_jsonable(self) -> dict[str, Any]:
-        """Return a JSON-serializable representation."""
 
-        def convert(value: Any) -> Any:
-            if isinstance(value, Path):
-                return str(value)
-            if isinstance(value, StrEnum):
-                return str(value)
-            if isinstance(value, tuple):
-                return [convert(item) for item in value]
-            if isinstance(value, list):
-                return [convert(item) for item in value]
-            if isinstance(value, dict):
-                return {key: convert(item) for key, item in value.items()}
-            if hasattr(value, "__dataclass_fields__"):
-                return convert(asdict(value))
-            return value
+@dataclass(frozen=True)
+class AuditOptions(JsonableDataclass):
+    """Options for one audit run."""
 
-        return convert(self)
+    workspace: Path
+    module_root: str | None = None
+    include_private: bool = True
+    include_imports: bool = False
+    import_roots: tuple[str, ...] = ()
+    threshold: float = 0.78
+    profile: bool = False
