@@ -53,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     audit.add_argument("--mathlib-workspace", type=Path)
     audit.add_argument("--threshold", type=float, default=0.78)
     audit.add_argument("--profile", action="store_true")
+    audit.add_argument("--progress", action="store_true")
 
     show = subparsers.add_parser("show", help="show one group from the latest audit")
     show.add_argument("--workspace", required=True, type=Path)
@@ -97,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
                     mathlib_workspace=args.mathlib_workspace,
                     threshold=args.threshold,
                     profile=args.profile,
+                    progress=args.progress,
                 ),
             )
             _write_latest_report(report)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import dataclass
@@ -39,14 +40,26 @@ def load_or_build_index(workspace: Workspace, options: AuditOptions) -> Extracte
     cache_id = sha256(json.dumps(cache_key, sort_keys=True).encode("utf-8")).hexdigest()
     cache_path = cache_dir / f"{cache_id}.jsonl"
     if cache_path.exists():
-        declarations = _augment_with_private_source_declarations(workspace, _read_index(cache_path))
+        if options.progress:
+            _log(f"lean-dup: loading cached workspace index {cache_path}")
+        declarations = _augment_with_private_source_declarations(
+            workspace,
+            _read_index(cache_path, progress=options.progress),
+            progress=options.progress,
+        )
         return ExtractedIndex(
             declarations=declarations,
             cache_hit=True,
             timings={"load_index": time.perf_counter() - started},
         )
-    raw_path = run_extractor(workspace, build=True)
-    declarations = _augment_with_private_source_declarations(workspace, _read_index(raw_path))
+    if options.progress:
+        _log("lean-dup: workspace index cache miss")
+    raw_path = run_extractor(workspace, build=True, progress=options.progress)
+    declarations = _augment_with_private_source_declarations(
+        workspace,
+        _read_index(raw_path, progress=options.progress),
+        progress=options.progress,
+    )
     cache_path.write_text(raw_path.read_text(encoding="utf-8"), encoding="utf-8")
     raw_path.unlink(missing_ok=True)
     return ExtractedIndex(
@@ -68,10 +81,7 @@ def run_extractor(workspace: Workspace, *, build: bool, progress: bool = False) 
     if build:
         build_targets = ["lake", "build", *workspace.workspace_modules]
         if progress:
-            print(
-                f"lean-dup: building {len(workspace.workspace_modules)} module(s) in {workspace.root}",
-                flush=True,
-            )
+            _log(f"lean-dup: building {len(workspace.workspace_modules)} module(s) in {workspace.root}")
         completed_build = subprocess.run(
             build_targets,
             cwd=workspace.root,
@@ -112,13 +122,17 @@ def run_extractor(workspace: Workspace, *, build: bool, progress: bool = False) 
         str(output_path),
     ]
     if progress:
-        print(
-            f"lean-dup: starting Lean extraction for {len(workspace.extraction_modules)} module(s)",
-            flush=True,
-        )
+        _log(f"lean-dup: starting Lean extraction for {len(workspace.extraction_modules)} module(s)")
     try:
         if progress:
-            completed = subprocess.run(command, cwd=workspace.root, check=False, text=True)
+            completed = subprocess.run(
+                command,
+                cwd=workspace.root,
+                check=False,
+                text=True,
+                stdout=sys.stderr,
+                stderr=sys.stderr,
+            )
         else:
             completed = subprocess.run(
                 command,
@@ -140,23 +154,32 @@ def run_extractor(workspace: Workspace, *, build: bool, progress: bool = False) 
     return output_path
 
 
-def _read_index(path: Path) -> tuple[Declaration, ...]:
+def _read_index(path: Path, *, progress: bool = False) -> tuple[Declaration, ...]:
     declarations: list[Declaration] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip():
             continue
+        if progress and line_number % 5000 == 0:
+            _log(f"lean-dup: read {line_number} workspace declaration row(s)")
         row = json.loads(line)
         declarations.append(_declaration_from_row(row))
+    if progress:
+        _log(f"lean-dup: read {len(declarations)} workspace declaration row(s)")
     return tuple(declarations)
 
 
 def _augment_with_private_source_declarations(
     workspace: Workspace,
     declarations: tuple[Declaration, ...],
+    *,
+    progress: bool = False,
 ) -> tuple[Declaration, ...]:
     existing = {(declaration.module, declaration.display_name) for declaration in declarations}
     private_declarations: list[Declaration] = []
-    for module in workspace.workspace_modules:
+    total = len(workspace.workspace_modules)
+    for index, module in enumerate(workspace.workspace_modules, start=1):
+        if progress and (index == 1 or index == total or index % 250 == 0):
+            _log(f"lean-dup: scanning private source declarations {index}/{total}: {module}")
         file_path = module_to_file(workspace.root, module)
         private_declarations.extend(
             declaration
@@ -339,3 +362,7 @@ def _file_text(path: Path) -> str | None:
     if not path.exists():
         return None
     return path.read_text(encoding="utf-8").strip()
+
+
+def _log(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)

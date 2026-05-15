@@ -6,6 +6,7 @@ import time
 from collections import Counter, defaultdict
 from itertools import combinations
 from pathlib import Path
+import sys
 
 from lean_dup.extractor import load_or_build_index
 from lean_dup.external_index import ExternalIndex, load_external_indexes
@@ -23,6 +24,7 @@ from lean_dup.models import (
 from lean_dup.workspace import resolve_workspace
 
 MAX_NEAR_CANDIDATES_PER_DECLARATION = 350
+MAX_NEAR_CANDIDATES_TOTAL = 120_000
 SUBSUMPTION_MIN_CONSTANTS = 0.50
 SUBSUMPTION_MIN_NAME_TOKENS = 0.30
 
@@ -48,14 +50,26 @@ def run_audit(
             mathlib_workspace=options.mathlib_workspace,
             threshold=options.threshold,
             profile=options.profile,
+            progress=options.progress,
         )
+    if resolved_options.progress:
+        _log(f"lean-dup: resolving audit workspace {resolved_options.workspace}")
     resolved = resolve_workspace(
         resolved_options.workspace,
         resolved_options.module_root,
         include_imports=resolved_options.include_imports,
         import_roots=resolved_options.import_roots,
     )
+    if resolved_options.progress:
+        _log(
+            "lean-dup: auditing "
+            f"{len(resolved.workspace_modules)} workspace module(s), "
+            f"{len(resolved.extraction_modules)} extraction module(s)"
+        )
     extracted = load_or_build_index(resolved, resolved_options)
+    if resolved_options.progress:
+        cache = "hit" if extracted.cache_hit else "miss"
+        _log(f"lean-dup: workspace index {cache}; loaded {len(extracted.declarations)} declaration row(s)")
     external_indexes, external_metadata, external_warnings = load_external_indexes(
         references=resolved_options.compare_indexes,
         compare_mathlib=resolved_options.compare_mathlib,
@@ -67,6 +81,7 @@ def run_audit(
         declarations,
         external_indexes=external_indexes,
         threshold=resolved_options.threshold,
+        progress=resolved_options.progress,
     )
     warnings = (*external_warnings, *classified.warnings)
     if resolved_options.profile:
@@ -112,6 +127,7 @@ def _classify(
     *,
     external_indexes: tuple[ExternalIndex, ...],
     threshold: float,
+    progress: bool = False,
 ) -> ClassifiedGroups:
     started = time.perf_counter()
     warnings: list[str] = []
@@ -121,6 +137,12 @@ def _classify(
     workspace_declarations = tuple(declaration for declaration in declarations if _is_workspace(declaration))
     local_statements = tuple(_statement_declarations(declarations))
     workspace_statements = tuple(_statement_declarations(workspace_declarations))
+    if progress:
+        _log(
+            "lean-dup: classifying "
+            f"{len(workspace_statements)} workspace statement(s) "
+            f"against {len(external_indexes)} external index(es)"
+        )
 
     for kind, key_name, confidence, reason in (
         (
@@ -148,6 +170,8 @@ def _classify(
             "same conclusion shape with compatible statement features",
         ),
     ):
+        if progress:
+            _log(f"lean-dup: fingerprint pass {kind}")
         keyed_groups = _fingerprint_groups(
             declarations=local_statements,
             key_name=key_name,
@@ -183,6 +207,8 @@ def _classify(
         group_count=group_count,
     )
     groups.extend(_groups_with_workspace_member(source_groups))
+    if progress:
+        _log("lean-dup: near-statement pass")
 
     near_groups = _near_statement_groups(
         declarations=local_statements,
@@ -190,6 +216,7 @@ def _classify(
         exact_pairs=used_exact_pairs,
         warnings=warnings,
         group_count=group_count,
+        progress=progress,
     )
     groups.extend(near_groups)
     near_external_groups = _near_statement_groups_against_external(
@@ -199,10 +226,15 @@ def _classify(
         exact_pairs=used_exact_pairs,
         warnings=warnings,
         group_count=group_count,
+        progress=progress,
     )
     groups.extend(near_external_groups)
+    if progress:
+        _log(f"lean-dup: suppressing redundant groups from {len(groups)} candidate group(s)")
     groups = _suppress_redundant_groups(groups)
     groups.sort(key=lambda group: (-group.confidence, _kind_priority(group.kind), group.id))
+    if progress:
+        _log(f"lean-dup: classification complete; {len(groups)} group(s)")
     return ClassifiedGroups(
         groups=groups,
         warnings=_dedupe_warnings(warnings),
@@ -315,8 +347,11 @@ def _near_statement_groups(
     exact_pairs: set[frozenset[str]],
     warnings: list[str],
     group_count: Counter[DuplicateKind],
+    progress: bool,
 ) -> list[DuplicateGroup]:
-    candidates = _near_candidates(declarations, warnings=warnings)
+    candidates = _near_candidates(declarations, warnings=warnings, progress=progress)
+    if progress:
+        _log(f"lean-dup: scoring {len(candidates)} local near candidate pair(s)")
     scored: list[tuple[float, Declaration, Declaration, tuple[str, ...]]] = []
     for first, second in candidates:
         pair_key = frozenset({first.name, second.name})
@@ -336,12 +371,16 @@ def _near_statement_groups_against_external(
     exact_pairs: set[frozenset[str]],
     warnings: list[str],
     group_count: Counter[DuplicateKind],
+    progress: bool,
 ) -> list[DuplicateGroup]:
     candidates = _near_candidates_against_external(
         workspace_declarations=workspace_declarations,
         external_indexes=external_indexes,
         warnings=warnings,
+        progress=progress,
     )
+    if progress:
+        _log(f"lean-dup: scoring {len(candidates)} external near candidate pair(s)")
     scored: list[tuple[float, Declaration, Declaration, tuple[str, ...]]] = []
     for first, second in candidates:
         pair_key = frozenset({first.name, second.name})
@@ -358,6 +397,7 @@ def _near_candidates_against_external(
     workspace_declarations: tuple[Declaration, ...],
     external_indexes: tuple[ExternalIndex, ...],
     warnings: list[str],
+    progress: bool,
 ) -> set[tuple[Declaration, Declaration]]:
     if not workspace_declarations or not external_indexes:
         return set()
@@ -367,6 +407,8 @@ def _near_candidates_against_external(
         for declaration in workspace_declarations
     }
     workspace_keys = {key for keys in workspace_keys_by_decl.values() for key in keys}
+    if progress:
+        _log(f"lean-dup: querying {len(workspace_keys)} external near bucket key(s)")
 
     candidates: set[tuple[Declaration, Declaration]] = set()
     seen_for_decl: dict[str, int] = defaultdict(int)
@@ -374,9 +416,19 @@ def _near_candidates_against_external(
     for index in external_indexes:
         buckets, bucket_warnings = index.near_matches(keys=workspace_keys)
         warnings.extend(bucket_warnings)
+        if progress:
+            matched = sum(len(members) for members in buckets.values())
+            _log(f"lean-dup: external near buckets matched {matched} declaration reference(s)")
         for key, declarations in buckets.items():
             external_buckets[key] = (*external_buckets.get(key, ()), *declarations)
-    for declaration in workspace_declarations:
+    pruned_for_total = False
+    for declaration_index, declaration in enumerate(workspace_declarations, start=1):
+        if progress and (declaration_index == 1 or declaration_index % 500 == 0):
+            _log(
+                "lean-dup: external near candidates "
+                f"{declaration_index}/{len(workspace_declarations)} workspace statement(s), "
+                f"{len(candidates)} pair(s)"
+            )
         for key in workspace_keys_by_decl[declaration.name]:
             members = tuple(dict.fromkeys(external_buckets.get(key, ())))
             if not members:
@@ -385,6 +437,9 @@ def _near_candidates_against_external(
                 warnings.append(f"pruned external near bucket {key}: {len(members)} declarations exceeds {MAX_BUCKET_SIZE}")
                 continue
             for external in members:
+                if len(candidates) >= MAX_NEAR_CANDIDATES_TOTAL:
+                    pruned_for_total = True
+                    break
                 if seen_for_decl[declaration.name] > MAX_NEAR_CANDIDATES_PER_DECLARATION:
                     break
                 if seen_for_decl[external.name] > MAX_NEAR_CANDIDATES_PER_DECLARATION:
@@ -392,6 +447,15 @@ def _near_candidates_against_external(
                 candidates.add((declaration, external))
                 seen_for_decl[declaration.name] += 1
                 seen_for_decl[external.name] += 1
+            if pruned_for_total:
+                break
+        if pruned_for_total:
+            break
+    if pruned_for_total:
+        warnings.append(
+            f"pruned external near candidates after {MAX_NEAR_CANDIDATES_TOTAL} pair(s); "
+            "raise the threshold or narrow --module for exhaustive near matching"
+        )
     return candidates
 
 
@@ -399,6 +463,7 @@ def _near_candidates(
     declarations: tuple[Declaration, ...],
     *,
     warnings: list[str],
+    progress: bool,
 ) -> set[tuple[Declaration, Declaration]]:
     constants_by_decl = {declaration.name: set(declaration.constants) for declaration in declarations}
     frequency = Counter(constant for constants in constants_by_decl.values() for constant in constants)
@@ -409,7 +474,10 @@ def _near_candidates(
 
     candidates: set[tuple[Declaration, Declaration]] = set()
     seen_for_decl: dict[str, int] = defaultdict(int)
-    for key, members in index.items():
+    pruned_for_total = False
+    for key_index, (key, members) in enumerate(index.items(), start=1):
+        if progress and (key_index == 1 or key_index % 500 == 0):
+            _log(f"lean-dup: local near bucket {key_index}/{len(index)}, {len(candidates)} pair(s)")
         unique = tuple(dict.fromkeys(members))
         if not any(_is_workspace(declaration) for declaration in unique):
             continue
@@ -417,6 +485,9 @@ def _near_candidates(
             warnings.append(f"pruned near bucket {key}: {len(unique)} declarations exceeds {MAX_BUCKET_SIZE}")
             continue
         for first, second in combinations(sorted(unique, key=lambda item: item.name), 2):
+            if len(candidates) >= MAX_NEAR_CANDIDATES_TOTAL:
+                pruned_for_total = True
+                break
             if not (_is_workspace(first) or _is_workspace(second)):
                 continue
             if seen_for_decl[first.name] > MAX_NEAR_CANDIDATES_PER_DECLARATION:
@@ -426,6 +497,13 @@ def _near_candidates(
             candidates.add((first, second))
             seen_for_decl[first.name] += 1
             seen_for_decl[second.name] += 1
+        if pruned_for_total:
+            break
+    if pruned_for_total:
+        warnings.append(
+            f"pruned local near candidates after {MAX_NEAR_CANDIDATES_TOTAL} pair(s); "
+            "raise the threshold or narrow --module for exhaustive near matching"
+        )
     return candidates
 
 
@@ -641,3 +719,7 @@ def _group(
         evidence=evidence,
         members=members,
     )
+
+
+def _log(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)

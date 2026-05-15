@@ -152,3 +152,4 @@ class AuditOptions(JsonableDataclass):
     mathlib_workspace: Path | None = None
     threshold: float = 0.78
     profile: bool = False
+    progress: bool = False
