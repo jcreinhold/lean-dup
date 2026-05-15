@@ -6,7 +6,7 @@ from pathlib import Path
 
 from lean_dup.audit import run_audit
 from lean_dup.external_index import build_external_index
-from lean_dup.models import AuditOptions, DuplicateKind
+from lean_dup.models import AuditOptions, DuplicateKind, ReviewPriority
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tiny"
@@ -20,6 +20,8 @@ def test_tiny_workspace_reports_expected_groups() -> None:
     assert DuplicateKind.PERMUTED_STATEMENT in kinds
     assert DuplicateKind.CONNECTIVE_EQUIVALENT in kinds
     assert DuplicateKind.SOURCE_CLONE in kinds
+    assert all(group.recommended_action for group in report.groups)
+    assert all(group.review_priority in set(ReviewPriority) for group in report.groups)
     assert report.declaration_count >= 10
     assert not any(
         group.kind is DuplicateKind.PERMUTED_STATEMENT
@@ -92,6 +94,9 @@ def test_external_index_reports_workspace_matches(monkeypatch, tmp_path) -> None
     assert any(
         group.kind is DuplicateKind.EXACT_STATEMENT
         and any(member.display_name == "same_as_tiny" for member in group.members)
+        and group.recommended_action == "local-alias"
+        and group.review_priority is ReviewPriority.HIGH
+        and "probe:same-statement" in group.signals
         for group in report.groups
     )
     assert not any(
@@ -121,6 +126,27 @@ def test_external_index_reports_workspace_matches(monkeypatch, tmp_path) -> None
             ),
         )
         assert path_report.external_indexes[0].path == first.path
+
+
+def test_mathlib_labeled_external_match_gets_action(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("LEAN_DUP_CACHE_DIR", str(tmp_path))
+    build_external_index(workspace=EXTERNAL, module_root="External", label="mathlib")
+    report = run_audit(
+        workspace=FIXTURE,
+        options=AuditOptions(
+            workspace=FIXTURE,
+            module_root="Tiny",
+            compare_indexes=("mathlib",),
+        ),
+    )
+    assert any(
+        group.kind is DuplicateKind.EXACT_STATEMENT
+        and group.recommended_action == "already-in-mathlib"
+        and group.review_priority is ReviewPriority.HIGH
+        and "same-imported-mathlib-declaration" in group.signals
+        and any(member.origin == "mathlib" for member in group.members)
+        for group in report.groups
+    )
 
 
 def test_source_clones_ignore_external_indexes(monkeypatch, tmp_path) -> None:

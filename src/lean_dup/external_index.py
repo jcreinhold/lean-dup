@@ -101,15 +101,20 @@ class ExternalIndex:
                 if not allowed:
                     continue
                 allowed_placeholders = ",".join("?" for _ in allowed)
-                matches = connection.execute(
-                    "SELECT b.key, d.* FROM near_bucket b JOIN declarations d ON d.id = b.decl_id "
-                    f"WHERE b.key IN ({allowed_placeholders}) ORDER BY b.key, d.name",
+                refs = connection.execute(
+                    "SELECT key, decl_id FROM near_bucket "
+                    f"WHERE key IN ({allowed_placeholders}) ORDER BY key, decl_id",
                     allowed,
                 ).fetchall()
-                for row in matches:
-                    key = str(row[0])
+                declarations = _declarations_by_id(
+                    connection=connection,
+                    decl_ids=tuple(sorted({int(row[1]) for row in refs})),
+                )
+                for key_value, decl_id in refs:
+                    key = str(key_value)
+                    declaration = declarations[int(decl_id)]
                     result.setdefault(key, tuple())
-                    result[key] = (*result[key], _declaration_from_sqlite_row(row[1:]))
+                    result[key] = (*result[key], declaration)
         return result, tuple(warnings)
 
 
@@ -467,6 +472,25 @@ def _declaration_from_sqlite_row(row: sqlite3.Row | tuple[Any, ...]) -> Declarat
         binder_count=int(binder_count),
         source_fingerprint=None,
     )
+
+
+def _declarations_by_id(
+    *,
+    connection: sqlite3.Connection,
+    decl_ids: tuple[int, ...],
+) -> dict[int, Declaration]:
+    if not decl_ids:
+        return {}
+    result: dict[int, Declaration] = {}
+    for chunk in _chunks(tuple(str(decl_id) for decl_id in decl_ids), 500):
+        placeholders = ",".join("?" for _ in chunk)
+        rows = connection.execute(
+            f"SELECT * FROM declarations WHERE id IN ({placeholders})",
+            chunk,
+        ).fetchall()
+        for row in rows:
+            result[int(row[0])] = _declaration_from_sqlite_row(row)
+    return result
 
 
 def _external_declaration_from_row(row: dict[str, Any], label: str) -> Declaration:

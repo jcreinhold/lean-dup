@@ -43,6 +43,15 @@ class DuplicateKind(StrEnum):
     SUBSUMPTION_CANDIDATE = "subsumption-candidate"
 
 
+class ReviewPriority(StrEnum):
+    """Triage priority for manual cleanup review."""
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    NOISE = "noise"
+
+
 @dataclass(frozen=True)
 class SourcePoint:
     """One 1-based source position."""
@@ -111,6 +120,10 @@ class DuplicateGroup:
     reason: str
     evidence: tuple[str, ...]
     members: tuple[DuplicateMember, ...]
+    signals: tuple[str, ...] = ()
+    blockers: tuple[str, ...] = ()
+    recommended_action: str = "review"
+    review_priority: ReviewPriority = ReviewPriority.MEDIUM
 
 
 @dataclass(frozen=True)
@@ -153,3 +166,6 @@ class AuditOptions(JsonableDataclass):
     threshold: float = 0.78
     profile: bool = False
     progress: bool = False
+    include_generated: bool = False
+    show_noise: bool = False
+    min_priority: ReviewPriority = ReviewPriority.LOW

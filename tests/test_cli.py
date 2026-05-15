@@ -91,3 +91,30 @@ def test_cli_external_index(tmp_path, monkeypatch) -> None:
         for group in payload["groups"]
         for member in group["members"]
     )
+
+
+def test_cli_text_filters_by_priority() -> None:
+    completed = subprocess.run(
+        [
+            "uv",
+            "run",
+            "lean-dup",
+            "audit",
+            "--workspace",
+            str(FIXTURE),
+            "--module",
+            "Tiny",
+            "--format",
+            "text",
+            "--min-priority",
+            "high",
+        ],
+        cwd=ROOT,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert completed.returncode == 0, completed.stderr + completed.stdout
+    assert "priority=high" in completed.stdout
+    assert "priority=low" not in completed.stdout

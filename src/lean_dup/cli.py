@@ -11,7 +11,8 @@ from typing import Any
 from lean_dup.audit import run_audit
 from lean_dup.external_index import MATHLIB_DEFAULT_WORKSPACE, build_external_index, build_mathlib_index
 from lean_dup.extractor import extractor_path
-from lean_dup.models import AuditOptions, AuditReport
+from lean_dup.models import AuditOptions, AuditReport, ReviewPriority
+from lean_dup.ranking import actionable
 from lean_dup.workspace import resolve_workspace
 
 
@@ -54,6 +55,9 @@ def main(argv: list[str] | None = None) -> int:
     audit.add_argument("--threshold", type=float, default=0.78)
     audit.add_argument("--profile", action="store_true")
     audit.add_argument("--progress", action="store_true")
+    audit.add_argument("--include-generated", action="store_true")
+    audit.add_argument("--show-noise", action="store_true")
+    audit.add_argument("--min-priority", choices=tuple(ReviewPriority), default=ReviewPriority.LOW)
 
     show = subparsers.add_parser("show", help="show one group from the latest audit")
     show.add_argument("--workspace", required=True, type=Path)
@@ -85,27 +89,31 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "audit":
             include_private = args.include_private and not args.public_only
+            audit_options = AuditOptions(
+                workspace=args.workspace,
+                module_root=args.module_root,
+                include_private=include_private,
+                include_imports=args.include_imports,
+                import_roots=tuple(args.import_root),
+                compare_indexes=tuple(args.compare_index),
+                compare_mathlib=args.compare_mathlib,
+                mathlib_workspace=args.mathlib_workspace,
+                threshold=args.threshold,
+                profile=args.profile,
+                progress=args.progress,
+                include_generated=args.include_generated,
+                show_noise=args.show_noise,
+                min_priority=ReviewPriority(args.min_priority),
+            )
             report = run_audit(
                 workspace=args.workspace,
-                options=AuditOptions(
-                    workspace=args.workspace,
-                    module_root=args.module_root,
-                    include_private=include_private,
-                    include_imports=args.include_imports,
-                    import_roots=tuple(args.import_root),
-                    compare_indexes=tuple(args.compare_index),
-                    compare_mathlib=args.compare_mathlib,
-                    mathlib_workspace=args.mathlib_workspace,
-                    threshold=args.threshold,
-                    profile=args.profile,
-                    progress=args.progress,
-                ),
+                options=audit_options,
             )
             _write_latest_report(report)
             if args.format == "json":
                 print(json.dumps(report.to_jsonable(), indent=2, sort_keys=True))
             else:
-                print(_render_report(report))
+                print(_render_report(report, options=audit_options))
             return 0
         if args.command == "show":
             print(_render_group(workspace=args.workspace, group_id=args.group))
@@ -141,13 +149,23 @@ def _run(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _render_report(report: AuditReport) -> str:
+def _render_report(report: AuditReport, *, options: AuditOptions) -> str:
+    shown_groups = [
+        group
+        for group in report.groups
+        if actionable(
+            group,
+            include_generated=options.include_generated,
+            show_noise=options.show_noise,
+            min_priority=options.min_priority,
+        )
+    ]
     lines = [
         f"workspace: {report.workspace}",
         f"module root: {report.module_root or '(inferred)'}",
         f"declarations: {report.declaration_count}",
         f"cache: {'hit' if report.cache_hit else 'miss'}",
-        f"groups: {len(report.groups)}",
+        f"groups: {len(shown_groups)} shown / {len(report.groups)} total",
     ]
     for external in report.external_indexes:
         lines.append(
@@ -157,10 +175,18 @@ def _render_report(report: AuditReport) -> str:
         )
     for warning in report.warnings:
         lines.append(f"warning: {warning}")
-    for group in report.groups:
+    for group in shown_groups:
         lines.append("")
-        lines.append(f"{group.id} [{group.kind}] confidence={group.confidence:.2f}")
+        lines.append(
+            f"{group.id} [{group.kind}] "
+            f"priority={group.review_priority} action={group.recommended_action} "
+            f"confidence={group.confidence:.2f}"
+        )
         lines.append(f"  {group.reason}")
+        for signal in group.signals[:8]:
+            lines.append(f"  signal: {signal}")
+        for blocker in group.blockers:
+            lines.append(f"  blocker: {blocker}")
         for evidence in group.evidence:
             lines.append(f"  evidence: {evidence}")
         for member in group.members:
@@ -176,6 +202,12 @@ def _render_group(*, workspace: Path, group_id: str) -> str:
         if group["id"] != group_id:
             continue
         lines = [f"{group['id']} [{group['kind']}]", f"reason: {group['reason']}"]
+        lines.append(f"priority: {group.get('review_priority', 'medium')}")
+        lines.append(f"recommended action: {group.get('recommended_action', 'review')}")
+        for signal in group.get("signals", []):
+            lines.append(f"signal: {signal}")
+        for blocker in group.get("blockers", []):
+            lines.append(f"blocker: {blocker}")
         for member in group["members"]:
             lines.append("")
             lines.append(f"{member['name']}")
