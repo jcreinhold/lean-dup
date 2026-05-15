@@ -115,7 +115,8 @@ def _adjust_confidence(confidence: float, priority: ReviewPriority, blockers: se
 
 
 def _member_is_generated(member: DuplicateMember) -> bool:
-    return member.display_name in {
+    short_name = member.name.rsplit(".", 1)[-1]
+    return short_name in {
         "rec",
         "recOn",
         "casesOn",
@@ -123,7 +124,7 @@ def _member_is_generated(member: DuplicateMember) -> bool:
         "noConfusionType",
         "ctorElim",
         "elim",
-    } or member.name.startswith("_aux_") or "._aux_" in member.name
+    } or member.name.startswith("_aux_") or "._aux_" in member.name or short_name.startswith("term_")
 
 
 def _member_is_backport(member: DuplicateMember) -> bool:

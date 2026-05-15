@@ -533,7 +533,7 @@ def _dedupe_warnings(warnings: list[str]) -> tuple[str, ...]:
 
 
 def _statement_declarations(declarations: tuple[Declaration, ...]) -> tuple[Declaration, ...]:
-    return tuple(declaration for declaration in declarations if declaration.kind in {"theorem", "axiom", "def"})
+    return tuple(declaration for declaration in declarations if declaration.kind in {"theorem", "axiom"})
 
 
 def _groups_with_workspace_member(groups: list[DuplicateGroup]) -> list[DuplicateGroup]:
