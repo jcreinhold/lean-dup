@@ -12,4 +12,8 @@ theorem related_right (p q : Prop) : p ∧ q → q := by
   intro h
   exact h.right
 
+theorem impossible_tiny (n : Nat) : n ≠ n → False := by
+  intro h
+  exact h rfl
+
 end Tiny

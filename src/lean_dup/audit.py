@@ -8,7 +8,10 @@ from itertools import combinations
 from pathlib import Path
 
 from lean_dup.extractor import load_or_build_index
-from lean_dup.external_index import load_external_indexes
+from lean_dup.external_index import ExternalIndex, load_external_indexes
+from lean_dup.matching import MAX_BUCKET_SIZE, jaccard as _jaccard
+from lean_dup.matching import name_tokens as _name_tokens
+from lean_dup.matching import near_index_keys
 from lean_dup.models import (
     AuditOptions,
     AuditReport,
@@ -19,8 +22,9 @@ from lean_dup.models import (
 )
 from lean_dup.workspace import resolve_workspace
 
-MAX_BUCKET_SIZE = 400
 MAX_NEAR_CANDIDATES_PER_DECLARATION = 350
+SUBSUMPTION_MIN_CONSTANTS = 0.50
+SUBSUMPTION_MIN_NAME_TOKENS = 0.30
 
 
 def run_audit(
@@ -52,17 +56,18 @@ def run_audit(
         import_roots=resolved_options.import_roots,
     )
     extracted = load_or_build_index(resolved, resolved_options)
-    external_declarations, external_metadata, external_warnings = load_external_indexes(
+    external_indexes, external_metadata, external_warnings = load_external_indexes(
         references=resolved_options.compare_indexes,
         compare_mathlib=resolved_options.compare_mathlib,
         mathlib_workspace=resolved_options.mathlib_workspace,
         profile=resolved_options.profile,
     )
-    declarations = _filter_declarations(
-        (*extracted.declarations, *external_declarations),
-        resolved_options,
+    declarations = _filter_declarations(extracted.declarations, resolved_options)
+    classified = _classify(
+        declarations,
+        external_indexes=external_indexes,
+        threshold=resolved_options.threshold,
     )
-    classified = _classify(declarations, threshold=resolved_options.threshold)
     warnings = (*external_warnings, *classified.warnings)
     if resolved_options.profile:
         warnings += tuple(f"profile.{key}={value:.3f}s" for key, value in extracted.timings.items())
@@ -70,7 +75,7 @@ def run_audit(
     return AuditReport(
         workspace=resolved.root,
         module_root=resolved_options.module_root,
-        declaration_count=len(declarations),
+        declaration_count=len(declarations) + sum(metadata.declaration_count for metadata in external_metadata),
         cache_hit=extracted.cache_hit,
         external_indexes=external_metadata,
         warnings=warnings,
@@ -102,16 +107,20 @@ def _filter_declarations(
     return tuple(declaration for declaration in declarations if declaration.visibility != "private")
 
 
-def _classify(declarations: tuple[Declaration, ...], *, threshold: float) -> ClassifiedGroups:
+def _classify(
+    declarations: tuple[Declaration, ...],
+    *,
+    external_indexes: tuple[ExternalIndex, ...],
+    threshold: float,
+) -> ClassifiedGroups:
     started = time.perf_counter()
     warnings: list[str] = []
     groups: list[DuplicateGroup] = []
     used_exact_pairs: set[frozenset[str]] = set()
     group_count: Counter[DuplicateKind] = Counter()
     workspace_declarations = tuple(declaration for declaration in declarations if _is_workspace(declaration))
-    external_declarations = tuple(declaration for declaration in declarations if not _is_workspace(declaration))
+    local_statements = tuple(_statement_declarations(declarations))
     workspace_statements = tuple(_statement_declarations(workspace_declarations))
-    external_statements = tuple(_statement_declarations(external_declarations))
 
     for kind, key_name, confidence, reason in (
         (
@@ -140,7 +149,7 @@ def _classify(declarations: tuple[Declaration, ...], *, threshold: float) -> Cla
         ),
     ):
         keyed_groups = _fingerprint_groups(
-            declarations=workspace_statements,
+            declarations=local_statements,
             key_name=key_name,
             kind=kind,
             confidence=confidence,
@@ -151,7 +160,7 @@ def _classify(declarations: tuple[Declaration, ...], *, threshold: float) -> Cla
         groups.extend(keyed_groups)
         external_groups = _external_fingerprint_groups(
             workspace_declarations=workspace_statements,
-            external_declarations=external_statements,
+            external_indexes=external_indexes,
             key_name=key_name,
             kind=kind,
             confidence=confidence,
@@ -176,7 +185,7 @@ def _classify(declarations: tuple[Declaration, ...], *, threshold: float) -> Cla
     groups.extend(_groups_with_workspace_member(source_groups))
 
     near_groups = _near_statement_groups(
-        declarations=workspace_statements,
+        declarations=local_statements,
         threshold=threshold,
         exact_pairs=used_exact_pairs,
         warnings=warnings,
@@ -185,17 +194,18 @@ def _classify(declarations: tuple[Declaration, ...], *, threshold: float) -> Cla
     groups.extend(near_groups)
     near_external_groups = _near_statement_groups_against_external(
         workspace_declarations=workspace_statements,
-        external_declarations=external_statements,
+        external_indexes=external_indexes,
         threshold=threshold,
         exact_pairs=used_exact_pairs,
         warnings=warnings,
         group_count=group_count,
     )
     groups.extend(near_external_groups)
-    groups.sort(key=lambda group: (-group.confidence, str(group.kind), group.id))
+    groups = _suppress_redundant_groups(groups)
+    groups.sort(key=lambda group: (-group.confidence, _kind_priority(group.kind), group.id))
     return ClassifiedGroups(
         groups=groups,
-        warnings=warnings,
+        warnings=_dedupe_warnings(warnings),
         timings={"classify": time.perf_counter() - started},
     )
 
@@ -248,7 +258,7 @@ def _fingerprint_groups(
 def _external_fingerprint_groups(
     *,
     workspace_declarations: tuple[Declaration, ...],
-    external_declarations: tuple[Declaration, ...],
+    external_indexes: tuple[ExternalIndex, ...],
     key_name: str,
     kind: DuplicateKind,
     confidence: float,
@@ -264,35 +274,37 @@ def _external_fingerprint_groups(
     if not workspace_buckets:
         return []
 
-    external_buckets: dict[str, list[Declaration]] = defaultdict(list)
-    workspace_keys = set(workspace_buckets)
-    for declaration in external_declarations:
-        key = getattr(declaration, key_name)
-        if key in workspace_keys:
-            external_buckets[key].append(declaration)
-
     groups: list[DuplicateGroup] = []
-    for key, external_members in external_buckets.items():
-        members = [*workspace_buckets[key], *external_members]
-        if len(members) > MAX_BUCKET_SIZE:
-            warnings.append(
-                f"pruned {kind} external bucket {key}: {len(members)} declarations exceeds {MAX_BUCKET_SIZE}"
-            )
-            continue
-        group_count[kind] += 1
-        group_reason = reason
-        if kind is DuplicateKind.EXACT_STATEMENT:
-            group_reason = "workspace declaration matches an external elaborated statement fingerprint"
-        groups.append(
-            _group(
-                group_id=f"{kind}-{group_count[kind]}",
-                kind=kind,
-                confidence=confidence,
-                reason=group_reason,
-                evidence=(f"{key_name}={key}",),
-                declarations=members,
-            )
+    for external_index in external_indexes:
+        external_buckets = external_index.fingerprint_matches(
+            key_name=key_name,
+            keys=workspace_buckets.keys(),
         )
+        for key, external_members in external_buckets.items():
+            members = [*workspace_buckets[key], *external_members]
+            if kind is DuplicateKind.SUBSUMPTION_CANDIDATE:
+                members = _strict_subsumption_members(workspace_buckets[key], external_members)
+                if len(members) < 2:
+                    continue
+            if len(members) > MAX_BUCKET_SIZE:
+                warnings.append(
+                    f"pruned {kind} external bucket {key}: {len(members)} declarations exceeds {MAX_BUCKET_SIZE}"
+                )
+                continue
+            group_count[kind] += 1
+            group_reason = reason
+            if kind is DuplicateKind.EXACT_STATEMENT:
+                group_reason = "workspace declaration matches an external elaborated statement fingerprint"
+            groups.append(
+                _group(
+                    group_id=f"{kind}-{group_count[kind]}",
+                    kind=kind,
+                    confidence=confidence,
+                    reason=group_reason,
+                    evidence=(f"{key_name}={key}",),
+                    declarations=members,
+                )
+            )
     return groups
 
 
@@ -319,7 +331,7 @@ def _near_statement_groups(
 def _near_statement_groups_against_external(
     *,
     workspace_declarations: tuple[Declaration, ...],
-    external_declarations: tuple[Declaration, ...],
+    external_indexes: tuple[ExternalIndex, ...],
     threshold: float,
     exact_pairs: set[frozenset[str]],
     warnings: list[str],
@@ -327,7 +339,7 @@ def _near_statement_groups_against_external(
 ) -> list[DuplicateGroup]:
     candidates = _near_candidates_against_external(
         workspace_declarations=workspace_declarations,
-        external_declarations=external_declarations,
+        external_indexes=external_indexes,
         warnings=warnings,
     )
     scored: list[tuple[float, Declaration, Declaration, tuple[str, ...]]] = []
@@ -344,32 +356,29 @@ def _near_statement_groups_against_external(
 def _near_candidates_against_external(
     *,
     workspace_declarations: tuple[Declaration, ...],
-    external_declarations: tuple[Declaration, ...],
+    external_indexes: tuple[ExternalIndex, ...],
     warnings: list[str],
 ) -> set[tuple[Declaration, Declaration]]:
-    if not workspace_declarations or not external_declarations:
+    if not workspace_declarations or not external_indexes:
         return set()
-    constants_frequency = Counter(
-        constant
-        for declaration in (*workspace_declarations, *external_declarations)
-        for constant in declaration.constants
-    )
+    constants_frequency = Counter(constant for declaration in workspace_declarations for constant in declaration.constants)
     workspace_keys_by_decl = {
-        declaration.name: _near_index_keys(declaration, constants_frequency=constants_frequency)
+        declaration.name: near_index_keys(declaration, constants_frequency=constants_frequency)
         for declaration in workspace_declarations
     }
     workspace_keys = {key for keys in workspace_keys_by_decl.values() for key in keys}
-    external_index: dict[str, list[Declaration]] = defaultdict(list)
-    for declaration in external_declarations:
-        for key in _near_index_keys(declaration, constants_frequency=constants_frequency):
-            if key in workspace_keys:
-                external_index[key].append(declaration)
 
     candidates: set[tuple[Declaration, Declaration]] = set()
     seen_for_decl: dict[str, int] = defaultdict(int)
+    external_buckets: dict[str, tuple[Declaration, ...]] = {}
+    for index in external_indexes:
+        buckets, bucket_warnings = index.near_matches(keys=workspace_keys)
+        warnings.extend(bucket_warnings)
+        for key, declarations in buckets.items():
+            external_buckets[key] = (*external_buckets.get(key, ()), *declarations)
     for declaration in workspace_declarations:
         for key in workspace_keys_by_decl[declaration.name]:
-            members = tuple(dict.fromkeys(external_index.get(key, ())))
+            members = tuple(dict.fromkeys(external_buckets.get(key, ())))
             if not members:
                 continue
             if len(members) > MAX_BUCKET_SIZE:
@@ -395,7 +404,7 @@ def _near_candidates(
     frequency = Counter(constant for constants in constants_by_decl.values() for constant in constants)
     index: dict[str, list[Declaration]] = defaultdict(list)
     for declaration in declarations:
-        for key in _near_index_keys(declaration, constants_frequency=frequency):
+        for key in near_index_keys(declaration, constants_frequency=frequency):
             index[key].append(declaration)
 
     candidates: set[tuple[Declaration, Declaration]] = set()
@@ -418,17 +427,6 @@ def _near_candidates(
             seen_for_decl[first.name] += 1
             seen_for_decl[second.name] += 1
     return candidates
-
-
-def _near_index_keys(declaration: Declaration, *, constants_frequency: Counter[str]) -> tuple[str, ...]:
-    keys: list[str] = []
-    for constant in declaration.constants:
-        if 1 < constants_frequency[constant] <= MAX_BUCKET_SIZE:
-            keys.append(f"const:{constant}")
-    keys.extend(f"head:{head}" for head in declaration.type_heads)
-    keys.extend(f"name:{token}" for token in _name_tokens(declaration.short_name))
-    keys.append(f"conclusion:{declaration.conclusion_fingerprint}")
-    return tuple(keys)
 
 
 def _cluster_scored_pairs(
@@ -493,6 +491,70 @@ def _cluster_scored_pairs(
     return groups
 
 
+def _strict_subsumption_members(
+    workspace_members: list[Declaration],
+    external_members: tuple[Declaration, ...],
+) -> list[Declaration]:
+    members: list[Declaration] = []
+    for workspace in workspace_members:
+        matched = [
+            external
+            for external in external_members
+            if _is_meaningful_subsumption_candidate(workspace, external)
+        ]
+        if matched:
+            members.append(workspace)
+            members.extend(matched)
+    return list(dict.fromkeys(members))
+
+
+def _is_meaningful_subsumption_candidate(workspace: Declaration, external: Declaration) -> bool:
+    constants = _jaccard(set(workspace.constants), set(external.constants))
+    if constants >= SUBSUMPTION_MIN_CONSTANTS:
+        return True
+    heads = bool(set(workspace.type_heads) & set(external.type_heads))
+    names = _jaccard(_name_tokens(workspace.short_name), _name_tokens(external.short_name))
+    if heads and names >= SUBSUMPTION_MIN_NAME_TOKENS:
+        return True
+    namespace_tail_matches = _namespace_tail(workspace.name) == _namespace_tail(external.name)
+    return namespace_tail_matches and abs(workspace.binder_count - external.binder_count) <= 1
+
+
+def _suppress_redundant_groups(groups: list[DuplicateGroup]) -> list[DuplicateGroup]:
+    covered: list[frozenset[str]] = []
+    kept: list[DuplicateGroup] = []
+    for group in sorted(
+        groups,
+        key=lambda item: (_kind_priority(item.kind), _external_rank(item), -item.confidence, item.id),
+    ):
+        workspace_names = frozenset(member.name for member in group.members if member.origin == "workspace")
+        if workspace_names and any(workspace_names <= existing for existing in covered):
+            continue
+        kept.append(group)
+        if workspace_names:
+            covered.append(workspace_names)
+    return kept
+
+
+def _external_rank(group: DuplicateGroup) -> int:
+    return 0 if any(member.origin != "workspace" for member in group.members) else 1
+
+
+def _kind_priority(kind: DuplicateKind) -> int:
+    return {
+        DuplicateKind.EXACT_STATEMENT: 0,
+        DuplicateKind.PERMUTED_STATEMENT: 1,
+        DuplicateKind.CONNECTIVE_EQUIVALENT: 2,
+        DuplicateKind.NEAR_STATEMENT: 3,
+        DuplicateKind.SUBSUMPTION_CANDIDATE: 4,
+        DuplicateKind.SOURCE_CLONE: 5,
+    }[kind]
+
+
+def _dedupe_warnings(warnings: list[str]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(warnings))
+
+
 def _statement_declarations(declarations: tuple[Declaration, ...]) -> tuple[Declaration, ...]:
     return tuple(declaration for declaration in declarations if declaration.kind in {"theorem", "axiom"})
 
@@ -538,14 +600,10 @@ def _near_score(first: Declaration, second: Declaration) -> tuple[float, tuple[s
     return score, tuple(evidence)
 
 
-def _jaccard(first: set[str], second: set[str]) -> float:
-    if not first and not second:
-        return 0.0
-    return len(first & second) / len(first | second)
-
-
-def _name_tokens(name: str) -> set[str]:
-    return {part for part in name.replace("'", "").split("_") if part}
+def _namespace_tail(name: str) -> str:
+    namespace = name.rsplit(".", 1)[0]
+    parts = namespace.split(".")
+    return ".".join(parts[-2:])
 
 
 def _pairs_for_group(group: DuplicateGroup) -> frozenset[str]:

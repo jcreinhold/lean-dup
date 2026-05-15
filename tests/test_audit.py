@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 from pathlib import Path
 
 from lean_dup.audit import run_audit
@@ -64,6 +66,16 @@ def test_external_index_reports_workspace_matches(monkeypatch, tmp_path) -> None
     second = build_external_index(workspace=EXTERNAL, module_root="External", label="fixture")
     assert not first.cache_hit
     assert second.cache_hit
+    assert first.path.name == "index.sqlite"
+    assert first.path.parent.name
+    assert first.path.exists()
+    assert not (first.path.parent / "declarations.jsonl.gz").exists()
+    assert not (first.path.parent / "buckets.sqlite").exists()
+    with sqlite3.connect(first.path) as connection:
+        metadata = dict(connection.execute("SELECT key, value FROM metadata").fetchall())
+    assert metadata["schema_version"] == "external-index.sqlite.v1"
+    latest = json.loads((tmp_path / "indexes" / "fixture" / "latest.json").read_text(encoding="utf-8"))
+    assert Path(latest["index_dir"]) == first.path.parent
 
     report = run_audit(
         workspace=FIXTURE,
@@ -83,10 +95,32 @@ def test_external_index_reports_workspace_matches(monkeypatch, tmp_path) -> None
         for group in report.groups
     )
     assert not any(
+        group.kind in {DuplicateKind.PERMUTED_STATEMENT, DuplicateKind.CONNECTIVE_EQUIVALENT}
+        and any(member.display_name == "same_as_tiny" and member.origin != "workspace" for member in group.members)
+        for group in report.groups
+    )
+    assert not any(
+        group.kind is DuplicateKind.SUBSUMPTION_CANDIDATE
+        and any(member.display_name == "impossible_tiny" for member in group.members)
+        and any(member.origin != "workspace" for member in group.members)
+        for group in report.groups
+    )
+    assert not any(
         group.members
         and all(member.origin != "workspace" for member in group.members)
         for group in report.groups
     )
+
+    for reference in (str(first.path.parent), str(first.path)):
+        path_report = run_audit(
+            workspace=FIXTURE,
+            options=AuditOptions(
+                workspace=FIXTURE,
+                module_root="Tiny",
+                compare_indexes=(reference,),
+            ),
+        )
+        assert path_report.external_indexes[0].path == first.path
 
 
 def test_source_clones_ignore_external_indexes(monkeypatch, tmp_path) -> None:

@@ -2,34 +2,115 @@
 
 from __future__ import annotations
 
-import gzip
 import json
 import os
-import pickle
+import sqlite3
 import subprocess
+import sys
 import time
+from collections import Counter
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from lean_dup.extractor import EXTRACTOR_VERSION, extractor_path, run_extractor
+from lean_dup.matching import MAX_BUCKET_SIZE, near_index_keys
 from lean_dup.models import Declaration, ExternalIndexMetadata, SourcePoint, SourceSpan
 from lean_dup.text import stable_hash
 from lean_dup.workspace import ModuleEntry, Workspace, module_to_file, resolve_workspace
 
 MATHLIB_DEFAULT_WORKSPACE = Path("/Users/jcreinhold/Code/mathlib4")
-DERIVED_DECLARATION_CACHE_VERSION = "external-declarations.v1"
+INDEX_SCHEMA_VERSION = "external-index.sqlite.v1"
+FINGERPRINT_COLUMNS = {
+    "type_fingerprint",
+    "permutation_fingerprint",
+    "connective_fingerprint",
+    "conclusion_fingerprint",
+}
 
 
 @dataclass(frozen=True)
 class ExternalIndex:
-    """One loaded external declaration index."""
+    """One queryable external declaration index."""
 
     metadata: ExternalIndexMetadata
-    declarations: tuple[Declaration, ...]
+    index_dir: Path
+    index_path: Path
     warnings: tuple[str, ...] = ()
-    timings: dict[str, float] | None = None
+
+    def fingerprint_matches(self, *, key_name: str, keys: Iterable[str]) -> dict[str, tuple[Declaration, ...]]:
+        """Return external declarations bucketed by requested fingerprint key."""
+
+        if key_name not in FINGERPRINT_COLUMNS:
+            raise RuntimeError(f"unknown external fingerprint key: {key_name}")
+        key_values = tuple(sorted(set(key for key in keys if key)))
+        if not key_values:
+            return {}
+        result: dict[str, tuple[Declaration, ...]] = {}
+        with sqlite3.connect(self.index_path) as connection:
+            for chunk in _chunks(key_values, 250):
+                placeholders = ",".join("?" for _ in chunk)
+                rows = connection.execute(
+                    "SELECT key, COUNT(*) FROM fingerprint_bucket "
+                    f"WHERE kind = ? AND key IN ({placeholders}) GROUP BY key",
+                    (key_name, *chunk),
+                ).fetchall()
+                allowed = [str(row[0]) for row in rows if int(row[1]) <= MAX_BUCKET_SIZE]
+                if not allowed:
+                    continue
+                allowed_placeholders = ",".join("?" for _ in allowed)
+                matches = connection.execute(
+                    "SELECT b.key, d.* FROM fingerprint_bucket b "
+                    "JOIN declarations d ON d.id = b.decl_id "
+                    f"WHERE b.kind = ? AND b.key IN ({allowed_placeholders}) "
+                    "ORDER BY b.key, d.name",
+                    (key_name, *allowed),
+                ).fetchall()
+                for row in matches:
+                    key = str(row[0])
+                    result.setdefault(key, tuple())
+                    result[key] = (*result[key], _declaration_from_sqlite_row(row[1:]))
+        return result
+
+    def near_matches(self, *, keys: Iterable[str]) -> tuple[dict[str, tuple[Declaration, ...]], tuple[str, ...]]:
+        """Return external declarations bucketed by requested near keys."""
+
+        key_values = tuple(sorted(set(key for key in keys if key)))
+        if not key_values:
+            return {}, ()
+        result: dict[str, tuple[Declaration, ...]] = {}
+        warnings: list[str] = []
+        seen_warnings: set[str] = set()
+        with sqlite3.connect(self.index_path) as connection:
+            for chunk in _chunks(key_values, 250):
+                placeholders = ",".join("?" for _ in chunk)
+                rows = connection.execute(
+                    f"SELECT key, COUNT(*) FROM near_bucket WHERE key IN ({placeholders}) GROUP BY key",
+                    chunk,
+                ).fetchall()
+                allowed = []
+                for key, count in rows:
+                    if int(count) > MAX_BUCKET_SIZE:
+                        warning = f"pruned external near bucket {key}: {count} declarations exceeds {MAX_BUCKET_SIZE}"
+                        if warning not in seen_warnings:
+                            seen_warnings.add(warning)
+                            warnings.append(warning)
+                    else:
+                        allowed.append(str(key))
+                if not allowed:
+                    continue
+                allowed_placeholders = ",".join("?" for _ in allowed)
+                matches = connection.execute(
+                    "SELECT b.key, d.* FROM near_bucket b JOIN declarations d ON d.id = b.decl_id "
+                    f"WHERE b.key IN ({allowed_placeholders}) ORDER BY b.key, d.name",
+                    allowed,
+                ).fetchall()
+                for row in matches:
+                    key = str(row[0])
+                    result.setdefault(key, tuple())
+                    result[key] = (*result[key], _declaration_from_sqlite_row(row[1:]))
+        return result, tuple(warnings)
 
 
 def cache_root() -> Path:
@@ -55,29 +136,37 @@ def build_external_index(
     """Build or reuse a persistent external declaration index."""
 
     started = time.perf_counter()
-    show_progress = progress or profile
+    show_progress = progress
     if show_progress:
-        print(f"lean-dup: resolving workspace {workspace}", flush=True)
+        _log(f"lean-dup: resolving workspace {workspace}")
     project = resolve_workspace(workspace, module_root)
     if show_progress:
-        print(f"lean-dup: discovered {len(project.workspace_modules)} module(s) under {module_root}", flush=True)
+        _log(f"lean-dup: discovered {len(project.workspace_modules)} module(s) under {module_root}")
     if require_oleans:
         _require_oleans(project, progress=show_progress)
-    key = _external_cache_key(project=project, label=label, module_root=module_root, progress=show_progress)
-    cache_id = sha256(json.dumps(key, sort_keys=True).encode("utf-8")).hexdigest()
-    index_dir = _label_dir(label)
-    index_dir.mkdir(parents=True, exist_ok=True)
-    index_path = index_dir / f"{cache_id}.jsonl.gz"
-    metadata_path = index_dir / f"{cache_id}.metadata.json"
-    if index_path.exists() and metadata_path.exists() and not force:
-        metadata = _read_metadata(metadata_path, cache_hit=True)
+    cache_key = _external_cache_key(project=project, label=label, module_root=module_root, progress=show_progress)
+    cache_id = sha256(json.dumps(cache_key, sort_keys=True).encode("utf-8")).hexdigest()
+    index_dir = _label_dir(label) / cache_id
+    index_path = index_dir / "index.sqlite"
+    if index_path.exists() and not force and _sqlite_cache_is_current(index_path=index_path, cache_key=cache_key):
+        metadata = _metadata_from_sqlite(index_path=index_path, cache_hit=True)
+        _write_label_pointer(label=label, index_dir=index_dir)
         if profile:
-            print(f"profile.external_index_load={time.perf_counter() - started:.3f}s")
+            _log(f"profile.external_index_load={time.perf_counter() - started:.3f}s")
         return metadata
 
+    index_dir.mkdir(parents=True, exist_ok=True)
     extracted = run_extractor(_with_origin(project, label), build=build, progress=show_progress)
     try:
-        line_count = _write_gzip_index(source=extracted, target=index_path, progress=show_progress)
+        declaration_count = _build_sqlite_index(
+            extracted=extracted,
+            index_path=index_path,
+            cache_key=cache_key,
+            label=label,
+            workspace=project.root,
+            module_root=module_root,
+            progress=show_progress,
+        )
     finally:
         extracted.unlink(missing_ok=True)
     metadata = ExternalIndexMetadata(
@@ -85,16 +174,12 @@ def build_external_index(
         path=index_path,
         workspace=project.root,
         module_root=module_root,
-        declaration_count=line_count,
+        declaration_count=declaration_count,
         cache_hit=False,
     )
-    metadata_path.write_text(
-        json.dumps(metadata.to_jsonable(), indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
-    _write_label_pointer(label=label, metadata_path=metadata_path)
+    _write_label_pointer(label=label, index_dir=index_dir)
     if profile:
-        print(f"profile.external_index_build={time.perf_counter() - started:.3f}s")
+        _log(f"profile.external_index_build={time.perf_counter() - started:.3f}s")
     return metadata
 
 
@@ -125,60 +210,263 @@ def load_external_indexes(
     compare_mathlib: bool,
     mathlib_workspace: Path | None,
     profile: bool = False,
-) -> tuple[tuple[Declaration, ...], tuple[ExternalIndexMetadata, ...], tuple[str, ...]]:
-    """Load external comparison declarations and their metadata."""
+) -> tuple[tuple[ExternalIndex, ...], tuple[ExternalIndexMetadata, ...], tuple[str, ...]]:
+    """Load external comparison indexes and their metadata."""
 
     all_references = list(references)
     if compare_mathlib:
         metadata = build_mathlib_index(workspace=mathlib_workspace, profile=profile)
-        all_references.append(str(metadata.path))
+        all_references.append(str(metadata.path.parent))
 
-    declarations: list[Declaration] = []
+    indexes: list[ExternalIndex] = []
     metadata_entries: list[ExternalIndexMetadata] = []
     warnings: list[str] = []
     for reference in all_references:
         index = load_external_index(reference, profile=profile)
-        declarations.extend(index.declarations)
+        indexes.append(index)
         metadata_entries.append(index.metadata)
         warnings.extend(index.warnings)
-    return tuple(declarations), tuple(metadata_entries), tuple(warnings)
+    return tuple(indexes), tuple(metadata_entries), tuple(warnings)
 
 
 def load_external_index(reference: str, *, profile: bool = False) -> ExternalIndex:
-    """Load one external index by label or path."""
+    """Load one external index by label, index directory, or SQLite path."""
 
     started = time.perf_counter()
-    index_path, metadata_path = _resolve_index_reference(reference)
-    metadata = _read_metadata(metadata_path, cache_hit=True)
-    declarations = tuple(_external_declarations(index_path, metadata.label, profile=profile))
+    index_dir, index_path = _resolve_index_reference(reference)
+    metadata = _metadata_from_sqlite(index_path=index_path, cache_hit=True)
     if profile:
-        print(
-            f"profile.external_declaration_load.{metadata.label}={time.perf_counter() - started:.3f}s",
-            flush=True,
+        _log(f"profile.external_index_open.{metadata.label}={time.perf_counter() - started:.3f}s")
+    return ExternalIndex(metadata=metadata, index_dir=index_dir, index_path=index_path)
+
+
+def _build_sqlite_index(
+    *,
+    extracted: Path,
+    index_path: Path,
+    cache_key: dict[str, Any],
+    label: str,
+    workspace: Path,
+    module_root: str,
+    progress: bool,
+) -> int:
+    temp_path = index_path.with_suffix(".tmp.sqlite")
+    temp_path.unlink(missing_ok=True)
+    declaration_count = 0
+    constants_frequency: Counter[str] = Counter()
+    with sqlite3.connect(temp_path) as connection:
+        _initialize_schema(connection)
+        with extracted.open("rt", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                declaration_count += 1
+                if progress and declaration_count % 5000 == 0:
+                    _log(f"lean-dup: indexed {declaration_count} declaration row(s)")
+                row = json.loads(line)
+                declaration = _external_declaration_from_row(row, label)
+                constants_frequency.update(set(declaration.constants))
+                connection.execute(
+                    """
+                    INSERT INTO declarations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    _sqlite_declaration_values(declaration_count, declaration),
+                )
+                for kind in FINGERPRINT_COLUMNS:
+                    key = getattr(declaration, kind)
+                    if key:
+                        connection.execute(
+                            "INSERT INTO fingerprint_bucket VALUES (?, ?, ?)",
+                            (kind, key, declaration_count),
+                        )
+        for row in connection.execute("SELECT * FROM declarations ORDER BY id"):
+            declaration = _declaration_from_sqlite_row(row)
+            for key in near_index_keys(declaration, constants_frequency=constants_frequency):
+                connection.execute("INSERT INTO near_bucket VALUES (?, ?)", (key, int(row[0])))
+        _write_sqlite_metadata(
+            connection=connection,
+            label=label,
+            workspace=workspace,
+            module_root=module_root,
+            index_path=index_path,
+            declaration_count=declaration_count,
+            cache_key=cache_key,
         )
-    return ExternalIndex(metadata=metadata, declarations=declarations)
+        connection.execute("CREATE INDEX fingerprint_bucket_key ON fingerprint_bucket(kind, key)")
+        connection.execute("CREATE INDEX near_bucket_key ON near_bucket(key)")
+        connection.execute("CREATE INDEX declarations_name ON declarations(name)")
+        connection.commit()
+    temp_path.replace(index_path)
+    if progress:
+        _log(f"lean-dup: indexed {declaration_count} declaration row(s)")
+    return declaration_count
 
 
-def _external_declarations(path: Path, label: str, *, profile: bool = False) -> tuple[Declaration, ...]:
-    cache_path = _derived_declaration_cache_path(path=path, label=label)
-    cache_key = _derived_declaration_cache_key(path=path, label=label)
-    cached = _read_derived_declaration_cache(cache_path=cache_path, cache_key=cache_key)
-    if cached is not None:
-        if profile:
-            print(f"lean-dup: external declaration cache hit: {label}", flush=True)
-        return cached
-    if profile:
-        print(f"lean-dup: building external declaration cache: {label}", flush=True)
-    declarations: list[Declaration] = []
-    with gzip.open(path, "rt", encoding="utf-8") as handle:
-        for line in handle:
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            declarations.append(_external_declaration_from_row(row, label))
-    result = tuple(declarations)
-    _write_derived_declaration_cache(cache_path=cache_path, cache_key=cache_key, declarations=result)
-    return result
+def _initialize_schema(connection: sqlite3.Connection) -> None:
+    connection.executescript(
+        """
+        PRAGMA journal_mode = OFF;
+        PRAGMA synchronous = OFF;
+        CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE declarations (
+          id INTEGER PRIMARY KEY,
+          workspace TEXT NOT NULL,
+          name TEXT NOT NULL,
+          display_name TEXT NOT NULL,
+          short_name TEXT NOT NULL,
+          module TEXT NOT NULL,
+          origin TEXT NOT NULL,
+          file TEXT NOT NULL,
+          line INTEGER NOT NULL,
+          column INTEGER NOT NULL,
+          kind TEXT NOT NULL,
+          visibility TEXT NOT NULL,
+          type_text TEXT NOT NULL,
+          normalized_type TEXT NOT NULL,
+          type_fingerprint TEXT NOT NULL,
+          permutation_fingerprint TEXT NOT NULL,
+          connective_fingerprint TEXT NOT NULL,
+          conclusion_fingerprint TEXT NOT NULL,
+          constants_json TEXT NOT NULL,
+          heads_json TEXT NOT NULL,
+          binder_count INTEGER NOT NULL
+        );
+        CREATE TABLE fingerprint_bucket (kind TEXT NOT NULL, key TEXT NOT NULL, decl_id INTEGER NOT NULL);
+        CREATE TABLE near_bucket (key TEXT NOT NULL, decl_id INTEGER NOT NULL);
+        """
+    )
+
+
+def _write_sqlite_metadata(
+    *,
+    connection: sqlite3.Connection,
+    label: str,
+    workspace: Path,
+    module_root: str,
+    index_path: Path,
+    declaration_count: int,
+    cache_key: dict[str, Any],
+) -> None:
+    values = {
+        "schema_version": INDEX_SCHEMA_VERSION,
+        "extractor_schema": EXTRACTOR_VERSION,
+        "label": label,
+        "path": str(index_path),
+        "workspace": str(workspace),
+        "module_root": module_root,
+        "declaration_count": str(declaration_count),
+        "cache_key": json.dumps(cache_key, sort_keys=True),
+    }
+    connection.executemany("INSERT INTO metadata VALUES (?, ?)", values.items())
+
+
+def _sqlite_cache_is_current(*, index_path: Path, cache_key: dict[str, Any]) -> bool:
+    try:
+        with sqlite3.connect(index_path) as connection:
+            metadata = dict(connection.execute("SELECT key, value FROM metadata").fetchall())
+    except sqlite3.Error:
+        return False
+    return (
+        metadata.get("schema_version") == INDEX_SCHEMA_VERSION
+        and metadata.get("extractor_schema") == EXTRACTOR_VERSION
+        and metadata.get("cache_key") == json.dumps(cache_key, sort_keys=True)
+    )
+
+
+def _metadata_from_sqlite(*, index_path: Path, cache_hit: bool) -> ExternalIndexMetadata:
+    try:
+        with sqlite3.connect(index_path) as connection:
+            metadata = dict(connection.execute("SELECT key, value FROM metadata").fetchall())
+    except sqlite3.Error as error:
+        raise RuntimeError(f"could not read external index metadata: {index_path}") from error
+    if metadata.get("schema_version") != INDEX_SCHEMA_VERSION:
+        raise RuntimeError(f"unsupported external index schema in: {index_path}")
+    return ExternalIndexMetadata(
+        label=str(metadata["label"]),
+        path=index_path,
+        workspace=Path(str(metadata["workspace"])).expanduser().resolve(),
+        module_root=str(metadata["module_root"]),
+        declaration_count=int(metadata["declaration_count"]),
+        cache_hit=cache_hit,
+    )
+
+
+def _sqlite_declaration_values(decl_id: int, declaration: Declaration) -> tuple[Any, ...]:
+    return (
+        decl_id,
+        str(declaration.workspace),
+        declaration.name,
+        declaration.display_name,
+        declaration.short_name,
+        declaration.module,
+        declaration.origin,
+        str(declaration.file),
+        declaration.span.start.line,
+        declaration.span.start.column,
+        declaration.kind,
+        declaration.visibility,
+        declaration.type_text,
+        declaration.normalized_type,
+        declaration.type_fingerprint,
+        declaration.permutation_fingerprint,
+        declaration.connective_fingerprint,
+        declaration.conclusion_fingerprint,
+        json.dumps(declaration.constants),
+        json.dumps(declaration.type_heads),
+        declaration.binder_count,
+    )
+
+
+def _declaration_from_sqlite_row(row: sqlite3.Row | tuple[Any, ...]) -> Declaration:
+    (
+        _decl_id,
+        workspace,
+        name,
+        display_name,
+        short_name,
+        module,
+        origin,
+        file,
+        line,
+        column,
+        kind,
+        visibility,
+        type_text,
+        normalized_type,
+        type_fingerprint,
+        permutation_fingerprint,
+        connective_fingerprint,
+        conclusion_fingerprint,
+        constants_json,
+        heads_json,
+        binder_count,
+    ) = row
+    return Declaration(
+        workspace=Path(str(workspace)).expanduser().resolve(),
+        module=str(module),
+        name=str(name),
+        display_name=str(display_name),
+        short_name=str(short_name),
+        kind=str(kind),
+        visibility=str(visibility),
+        origin=str(origin),
+        modifiers=("private",) if visibility == "private" else (),
+        file=Path(str(file)).expanduser().resolve(),
+        span=SourceSpan(
+            start=SourcePoint(line=int(line), column=int(column)),
+            end=SourcePoint(line=int(line), column=int(column)),
+        ),
+        type_text=str(type_text),
+        normalized_type=str(normalized_type),
+        type_fingerprint=str(type_fingerprint),
+        permutation_fingerprint=str(permutation_fingerprint),
+        connective_fingerprint=str(connective_fingerprint),
+        conclusion_fingerprint=str(conclusion_fingerprint),
+        constants=tuple(json.loads(str(constants_json))),
+        type_heads=tuple(json.loads(str(heads_json))),
+        binder_count=int(binder_count),
+        source_fingerprint=None,
+    )
 
 
 def _external_declaration_from_row(row: dict[str, Any], label: str) -> Declaration:
@@ -221,57 +509,6 @@ def _span_from_json(payload: dict[str, Any]) -> SourceSpan:
     )
 
 
-def _derived_declaration_cache_path(*, path: Path, label: str) -> Path:
-    safe_label = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in label)
-    return path.parent / f"{path.name}.{safe_label}.decls.pickle.gz"
-
-
-def _derived_declaration_cache_key(*, path: Path, label: str) -> dict[str, Any]:
-    stat = path.stat()
-    return {
-        "version": DERIVED_DECLARATION_CACHE_VERSION,
-        "label": label,
-        "index": str(path),
-        "index_mtime_ns": stat.st_mtime_ns,
-        "index_size": stat.st_size,
-    }
-
-
-def _read_derived_declaration_cache(
-    *,
-    cache_path: Path,
-    cache_key: dict[str, Any],
-) -> tuple[Declaration, ...] | None:
-    if not cache_path.exists():
-        return None
-    try:
-        with gzip.open(cache_path, "rb") as handle:
-            payload = pickle.load(handle)  # noqa: S301 - local cache generated by this tool.
-    except (OSError, EOFError, pickle.PickleError, ValueError, TypeError):
-        return None
-    if not isinstance(payload, dict) or payload.get("cache_key") != cache_key:
-        return None
-    declarations = payload.get("declarations")
-    if not isinstance(declarations, tuple):
-        return None
-    return declarations
-
-
-def _write_derived_declaration_cache(
-    *,
-    cache_path: Path,
-    cache_key: dict[str, Any],
-    declarations: tuple[Declaration, ...],
-) -> None:
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    with gzip.open(cache_path, "wb") as handle:
-        pickle.dump(
-            {"cache_key": cache_key, "declarations": declarations},
-            handle,
-            protocol=pickle.HIGHEST_PROTOCOL,
-        )
-
-
 def _with_origin(project: Workspace, label: str) -> Workspace:
     origin = "mathlib" if label == "mathlib" else f"external:{label}"
     return Workspace(
@@ -286,7 +523,7 @@ def _external_cache_key(*, project: Workspace, label: str, module_root: str, pro
     total = len(project.workspace_modules)
     for index, module in enumerate(project.workspace_modules, start=1):
         if progress and (index == 1 or index == total or index % 250 == 0):
-            print(f"lean-dup: cache-key source scan {index}/{total}: {module}", flush=True)
+            _log(f"lean-dup: cache-key source scan {index}/{total}: {module}")
         module_stamps.append(
             {
                 "name": module,
@@ -295,6 +532,7 @@ def _external_cache_key(*, project: Workspace, label: str, module_root: str, pro
         )
     return {
         "schema": EXTRACTOR_VERSION,
+        "index_schema": INDEX_SCHEMA_VERSION,
         "label": label,
         "root": str(project.root),
         "module_root": module_root,
@@ -312,7 +550,7 @@ def _require_oleans(project: Workspace, *, progress: bool = False) -> None:
     total = len(project.workspace_modules)
     for index, module in enumerate(project.workspace_modules, start=1):
         if progress and (index == 1 or index == total or index % 250 == 0):
-            print(f"lean-dup: checking oleans {index}/{total}: {module}", flush=True)
+            _log(f"lean-dup: checking oleans {index}/{total}: {module}")
         if not _olean_exists(project.root, module):
             missing.append(module)
     if missing:
@@ -329,63 +567,36 @@ def _olean_exists(root: Path, module: str) -> bool:
     return any((base / relative).exists() for base in (root / ".lake").glob("build/lib*/lean"))
 
 
-def _write_gzip_index(*, source: Path, target: Path, progress: bool = False) -> int:
-    count = 0
-    with source.open("rt", encoding="utf-8") as source_handle:
-        with gzip.open(target, "wt", encoding="utf-8") as target_handle:
-            for line in source_handle:
-                if line.strip():
-                    count += 1
-                    if progress and count % 5000 == 0:
-                        print(f"lean-dup: compressed {count} declaration row(s)", flush=True)
-                target_handle.write(line)
-    if progress:
-        print(f"lean-dup: compressed {count} declaration row(s)", flush=True)
-    return count
-
-
 def _label_dir(label: str) -> Path:
     safe_label = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in label)
     return cache_root() / "indexes" / safe_label
 
 
-def _write_label_pointer(*, label: str, metadata_path: Path) -> None:
+def _write_label_pointer(*, label: str, index_dir: Path) -> None:
     pointer = _label_dir(label) / "latest.json"
-    pointer.write_text(json.dumps({"metadata": str(metadata_path)}, indent=2), encoding="utf-8")
+    pointer.parent.mkdir(parents=True, exist_ok=True)
+    pointer.write_text(json.dumps({"index_dir": str(index_dir)}, indent=2), encoding="utf-8")
 
 
 def _resolve_index_reference(reference: str) -> tuple[Path, Path]:
     candidate = Path(reference).expanduser()
     if candidate.exists():
-        index_path = candidate.resolve()
-        metadata_path = index_path.with_suffix("").with_suffix(".metadata.json")
-        if not metadata_path.exists():
-            raise RuntimeError(f"missing external index metadata: {metadata_path}")
-        return index_path, metadata_path
+        resolved = candidate.resolve()
+        index_dir = resolved if resolved.is_dir() else resolved.parent
+        index_path = resolved if resolved.is_file() else index_dir / "index.sqlite"
+        if index_path.name != "index.sqlite" or not index_path.exists():
+            raise RuntimeError(f"missing external index SQLite file in: {index_dir}")
+        return index_dir, index_path
 
     pointer = _label_dir(reference) / "latest.json"
     if not pointer.exists():
         raise RuntimeError(f"external index not found by label or path: {reference}")
     payload = json.loads(pointer.read_text(encoding="utf-8"))
-    metadata_path = Path(str(payload["metadata"])).expanduser().resolve()
-    if not metadata_path.exists():
-        raise RuntimeError(f"stale external index pointer for {reference}: {metadata_path}")
-    metadata = _read_metadata(metadata_path, cache_hit=True)
-    if not metadata.path.exists():
-        raise RuntimeError(f"missing external index file for {reference}: {metadata.path}")
-    return metadata.path, metadata_path
-
-
-def _read_metadata(path: Path, *, cache_hit: bool) -> ExternalIndexMetadata:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    return ExternalIndexMetadata(
-        label=str(payload["label"]),
-        path=Path(str(payload["path"])).expanduser().resolve(),
-        workspace=Path(str(payload["workspace"])).expanduser().resolve(),
-        module_root=str(payload["module_root"]),
-        declaration_count=int(payload["declaration_count"]),
-        cache_hit=cache_hit,
-    )
+    index_dir = Path(str(payload["index_dir"])).expanduser().resolve()
+    index_path = index_dir / "index.sqlite"
+    if not index_path.exists():
+        raise RuntimeError(f"stale external index pointer for {reference}: {index_dir}")
+    return index_dir, index_path
 
 
 def _file_hash(path: Path) -> str | None:
@@ -430,3 +641,12 @@ def _git(root: Path, *args: str) -> str | None:
     if completed.returncode != 0:
         return None
     return completed.stdout.strip()
+
+
+def _chunks(values: tuple[str, ...], size: int) -> Iterable[tuple[str, ...]]:
+    for index in range(0, len(values), size):
+        yield values[index : index + size]
+
+
+def _log(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)
