@@ -1,4 +1,5 @@
 import Lean
+import LeanDup.Extract
 import LeanDup.Protocol
 
 /-!
@@ -68,13 +69,41 @@ private unsafe def handleDoctor (request : Request) : IO (Except ProtocolError (
       let exitCode : UInt32 := if result.ok then 0 else 1
       pure <| .ok (completed request #[row], exitCode)
 
+private def toExtractModules (modules : Array ModuleDescriptor) : Array LeanDup.Extract.ModuleSpec :=
+  modules.map fun descriptor =>
+    { module := descriptor.module
+      origin := descriptor.origin }
+
+private def extractErrorCode : LeanDup.Extract.ErrorKind → ErrorCode
+  | .invalidRequest => .invalidRequest
+  | .importFailed => .importFailed
+  | .internalError => .internalError
+
+private def extractError (request : Request) (err : LeanDup.Extract.Error) : ProtocolError :=
+  { requestId? := some request.requestId
+    command? := some request.command
+    code := extractErrorCode err.kind
+    fatal := true
+    message := err.message
+    details := err.details }
+
+private unsafe def handleExtract (request : Request) : IO (Except ProtocolError (Array Envelope × UInt32)) := do
+  match request.modules with
+  | .error err => pure <| .error err
+  | .ok modules =>
+      match ← LeanDup.Extract.run request.payload (toExtractModules modules) with
+      | .error err => pure <| .error (extractError request err)
+      | .ok payloads =>
+          let rows := payloads.map fun payload => envelope request .declarationRow payload
+          pure <| .ok (completed request rows, 0)
+
 private unsafe def dispatch (request : Request) : IO (Except ProtocolError (Array Envelope × UInt32)) := do
   match request.command with
   | .version =>
       let row := envelope request .versionResult currentVersionResult.toJson
       pure <| .ok (completed request #[row], 0)
   | .doctor => handleDoctor request
-  | .extract
+  | .extract => handleExtract request
   | .features
   | .probe =>
       pure <| .ok (completed request #[], 0)

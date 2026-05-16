@@ -30,6 +30,10 @@ theorem dependent_left (α : Type) (x y : α) : x = x := rfl
 
 theorem dependent_right (α : Type) (x y : α) : y = y := rfl
 
+inductive GeneratedProbe where
+  | leaf : GeneratedProbe
+  | node : GeneratedProbe → GeneratedProbe
+
 private theorem private_dup_left (p q : Prop) : p → q → p := by
   intro hp _hq
   exact hp
