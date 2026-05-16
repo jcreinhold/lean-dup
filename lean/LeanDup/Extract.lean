@@ -52,6 +52,19 @@ private structure Context where
   modules : Array ModuleSpec
   options : Options
 
+/--
+One declaration accepted by extraction filters.
+
+This value is for other Lean worker modules that need the same declaration
+universe as `extract`; it is not a protocol row and is never emitted directly.
+-/
+structure AcceptedDeclaration where
+  moduleSpec : ModuleSpec
+  declName : Name
+  constInfo : ConstantInfo
+  generated : Bool
+  range? : Option DeclarationRanges
+
 private def invalidRequest (message : String) (details : Option Json := none) : Error :=
   { kind := .invalidRequest, message := message, details := details }
 
@@ -189,18 +202,23 @@ private def statusFlagsJson (generated : Bool) (sourceSpan? : Option Json) : Jso
     | none => flags.push "source-range-unavailable"
   stringArrayJson flags
 
-private def declarationId (moduleSpec : ModuleSpec) (declName : Name) : String :=
+/-- Build the opaque declaration id shared by declaration and feature rows. -/
+def declarationId (moduleSpec : ModuleSpec) (declName : Name) : String :=
   s!"{moduleSpec.origin}:{moduleSpec.module}:{declName}"
+
+/-- Return the opaque declaration id for an accepted declaration. -/
+def AcceptedDeclaration.declarationId (decl : AcceptedDeclaration) : String :=
+  LeanDup.Extract.declarationId decl.moduleSpec decl.declName
 
 private def statementText (kind displayName typeText : String) : String :=
   s!"{kind} {displayName} : {typeText}"
 
-private def rowPayload (context : Context) (moduleSpec : ModuleSpec) (declName : Name)
+private def rowPayload (options : Options) (moduleSpec : ModuleSpec) (declName : Name)
     (constInfo : ConstantInfo) (generated : Bool) (range? : Option DeclarationRanges)
     (typeText : String) : Json :=
   let kind := declarationKind constInfo
   let vis := visibility declName
-  let sourceSpan? := sourceSpanJson? context.options moduleSpec.module range?
+  let sourceSpan? := sourceSpanJson? options moduleSpec.module range?
   Json.mkObj
     [ ("declaration_id", Json.str (declarationId moduleSpec declName))
     , ("origin", Json.str moduleSpec.origin)
@@ -215,13 +233,13 @@ private def rowPayload (context : Context) (moduleSpec : ModuleSpec) (declName :
     , ("status_flags", statusFlagsJson generated sourceSpan?)
     ]
 
-private def collectModuleRows (context : Context) (moduleSpec : ModuleSpec) :
-    MetaM (Array Json) := do
+private def collectModuleDeclarations (context : Context) (moduleSpec : ModuleSpec) :
+    MetaM (Array AcceptedDeclaration) := do
   let env ← getEnv
   let moduleName := dottedName moduleSpec.module
   let some moduleIdx := env.header.moduleNames.idxOf? moduleName | return #[]
   let moduleData := env.header.moduleData[moduleIdx]!
-  let mut rows := #[]
+  let mut declarations := #[]
   for declName in moduleData.constNames do
     let some constInfo := env.find? declName | continue
     let range? ← findDeclarationRanges? declName
@@ -231,16 +249,40 @@ private def collectModuleRows (context : Context) (moduleSpec : ModuleSpec) :
       continue
     if visibility declName == "private" && !context.options.includePrivate then
       continue
-    let typeText := (← ppExpr constInfo.type).pretty
-    rows := rows.push <| rowPayload context moduleSpec declName constInfo generated range? typeText
-  pure rows
+    declarations :=
+      declarations.push
+        { moduleSpec := moduleSpec
+          declName := declName
+          constInfo := constInfo
+          generated := generated
+          range? := range? }
+  pure declarations
 
-private def collectRows (context : Context) : MetaM (Array Json) := do
-  let mut rows := #[]
+private def collectAcceptedDeclarations (context : Context) : MetaM (Array AcceptedDeclaration) := do
+  let mut declarations := #[]
   for moduleSpec in context.modules do
-    let moduleRows ← collectModuleRows context moduleSpec
-    for row in moduleRows do
-      rows := rows.push row
+    let moduleDeclarations ← collectModuleDeclarations context moduleSpec
+    for declaration in moduleDeclarations do
+      declarations := declarations.push declaration
+  pure declarations
+
+private def rowPayloadFromAccepted (options : Options) (decl : AcceptedDeclaration) : MetaM Json := do
+  let typeText := (← ppExpr decl.constInfo.type).pretty
+  pure <|
+    rowPayload
+      options
+      decl.moduleSpec
+      decl.declName
+      decl.constInfo
+      decl.generated
+      decl.range?
+      typeText
+
+private def collectRows (options : Options) (declarations : Array AcceptedDeclaration) :
+    MetaM (Array Json) := do
+  let mut rows := #[]
+  for declaration in declarations do
+    rows := rows.push (← rowPayloadFromAccepted options declaration)
   pure rows
 
 private def uniqueModuleImports (modules : Array ModuleSpec) : Array Import := Id.run do
@@ -268,13 +310,20 @@ private unsafe def importRequestedModules (modules : Array ModuleSpec) :
           details := some <| Json.mkObj [("modules", moduleArrayJson modules)] }
 
 /--
-Import the requested modules once and return declaration-row payloads accepted
-by the supplied extraction options.
+Import requested modules and run a Lean action over declarations accepted by the
+same filters used by `extract`.
+
+The action receives Lean environment facts, not protocol rows. Callers must emit
+their own command-specific payloads and must not treat `statement_text` or source
+snippets as semantic input.
 -/
-unsafe def run (payload : Json) (modules : Array ModuleSpec) :
-    IO (Except Error (Array Json)) := do
+unsafe def withAcceptedDeclarations {α : Type}
+    (payload : Json)
+    (modules : Array ModuleSpec)
+    (operation : Options → Array AcceptedDeclaration → MetaM α) :
+    IO (Except Error α) := do
   if modules.isEmpty then
-    return .error <| invalidRequest "`extract` requires at least one module"
+    return .error <| invalidRequest "`modules` must contain at least one module"
   match parseOptions payload with
   | .error err => pure <| .error err
   | .ok options =>
@@ -287,19 +336,30 @@ unsafe def run (payload : Json) (modules : Array ModuleSpec) :
               fileMap := default
               options := Options.empty }
           try
-            let (rows, _, _) ←
+            let (result, _, _) ←
               MetaM.toIO
-                (collectRows context)
+                (do
+                  let declarations ← collectAcceptedDeclarations context
+                  operation options declarations)
                 coreContext
                 { env := env }
                 {}
                 {}
-            pure <| .ok rows
+            pure <| .ok result
           catch error =>
             pure <|
               .error
                 { kind := .internalError
-                  message := s!"declaration extraction failed: {error}"
+                  message := s!"declaration processing failed: {error}"
                   details := none }
+
+/--
+Import the requested modules once and return declaration-row payloads accepted
+by the supplied extraction options.
+-/
+unsafe def run (payload : Json) (modules : Array ModuleSpec) :
+    IO (Except Error (Array Json)) := do
+  withAcceptedDeclarations payload modules fun options declarations =>
+    collectRows options declarations
 
 end LeanDup.Extract

@@ -30,6 +30,28 @@ theorem dependent_left (α : Type) (x y : α) : x = x := rfl
 
 theorem dependent_right (α : Type) (x y : α) : y = y := rfl
 
+axiom independent_arrow_left (P Q R : Prop) : P → Q → R
+
+axiom independent_arrow_right (P Q R : Prop) : Q → P → R
+
+axiom connective_and_left (P Q : Prop) : P ∧ Q
+
+axiom connective_and_right (P Q : Prop) : Q ∧ P
+
+axiom symmetric_eq_left (α : Type) (x y : α) : x = y
+
+axiom symmetric_eq_right (α : Type) (x y : α) : y = x
+
+axiom nat_domain_key (n : Nat) : n = n
+
+axiom bool_domain_key (b : Bool) : b = b
+
+universe u
+
+axiom universe_structure_left (α : Type u) : α = α
+
+axiom universe_structure_right (α : Type (u + 1)) : α = α
+
 inductive GeneratedProbe where
   | leaf : GeneratedProbe
   | node : GeneratedProbe → GeneratedProbe

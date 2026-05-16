@@ -1,5 +1,6 @@
 import Lean
 import LeanDup.Extract
+import LeanDup.Features
 import LeanDup.Protocol
 
 /-!
@@ -97,6 +98,29 @@ private unsafe def handleExtract (request : Request) : IO (Except ProtocolError 
           let rows := payloads.map fun payload => envelope request .declarationRow payload
           pure <| .ok (completed request rows, 0)
 
+private def featureErrorCode : LeanDup.Features.ErrorKind → ErrorCode
+  | .invalidRequest => .invalidRequest
+  | .importFailed => .importFailed
+  | .internalError => .internalError
+
+private def featureError (request : Request) (err : LeanDup.Features.Error) : ProtocolError :=
+  { requestId? := some request.requestId
+    command? := some request.command
+    code := featureErrorCode err.kind
+    fatal := true
+    message := err.message
+    details := err.details }
+
+private unsafe def handleFeatures (request : Request) : IO (Except ProtocolError (Array Envelope × UInt32)) := do
+  match request.modules with
+  | .error err => pure <| .error err
+  | .ok modules =>
+      match ← LeanDup.Features.run request.payload (toExtractModules modules) with
+      | .error err => pure <| .error (featureError request err)
+      | .ok payloads =>
+          let rows := payloads.map fun payload => envelope request .featureRow payload
+          pure <| .ok (completed request rows, 0)
+
 private unsafe def dispatch (request : Request) : IO (Except ProtocolError (Array Envelope × UInt32)) := do
   match request.command with
   | .version =>
@@ -104,7 +128,7 @@ private unsafe def dispatch (request : Request) : IO (Except ProtocolError (Arra
       pure <| .ok (completed request #[row], 0)
   | .doctor => handleDoctor request
   | .extract => handleExtract request
-  | .features
+  | .features => handleFeatures request
   | .probe =>
       pure <| .ok (completed request #[], 0)
 
