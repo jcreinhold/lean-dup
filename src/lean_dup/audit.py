@@ -23,6 +23,7 @@ from lean_dup.models import (
     DuplicateMember,
 )
 from lean_dup.ranking import rank_group
+from lean_dup.replacement_hints import add_replacement_hints
 from lean_dup.semantic_probes import probe_candidate_groups
 from lean_dup.workspace import Workspace, resolve_workspace
 
@@ -56,6 +57,7 @@ def run_audit(
             show_noise=options.show_noise,
             min_priority=options.min_priority,
             semantic_probes=options.semantic_probes,
+            replacement_hints=options.replacement_hints,
         )
     if resolved_options.progress:
         _log(f"lean-dup: resolving audit workspace {resolved_options.workspace}")
@@ -89,6 +91,7 @@ def run_audit(
         declarations=declarations,
         external_indexes=external_indexes,
         semantic_probes=resolved_options.semantic_probes,
+        replacement_hints=resolved_options.replacement_hints,
         threshold=resolved_options.threshold,
         progress=resolved_options.progress,
     )
@@ -140,6 +143,7 @@ def _classify(
     *,
     external_indexes: tuple[ExternalIndex, ...],
     semantic_probes: bool,
+    replacement_hints: bool,
     threshold: float,
     progress: bool = False,
 ) -> ClassifiedGroups:
@@ -275,13 +279,25 @@ def _classify(
         )
         for group in groups
     ]
+    hint_started = time.perf_counter()
+    groups = list(
+        add_replacement_hints(
+            workspace=workspace,
+            groups=tuple(groups),
+            declarations_by_key=declaration_by_key,
+            enabled=replacement_hints,
+        )
+    )
     groups.sort(key=lambda group: (-group.confidence, _kind_priority(group.kind), group.id))
     if progress:
         _log(f"lean-dup: classification complete; {len(groups)} group(s)")
     return ClassifiedGroups(
         groups=groups,
         warnings=_dedupe_warnings(warnings),
-        timings={"classify": time.perf_counter() - started},
+        timings={
+            "replacement_hints": time.perf_counter() - hint_started,
+            "classify": time.perf_counter() - started,
+        },
     )
 
 

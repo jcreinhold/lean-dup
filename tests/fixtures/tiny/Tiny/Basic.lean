@@ -4,6 +4,8 @@ theorem same_left (p q : Prop) : p → q → p := by
   intro hp _hq
   exact hp
 
+theorem use_same_left (p q : Prop) : p → q → p := same_left p q
+
 theorem same_right (a b : Prop) : a → b → a := by
   intro ha _hb
   exact ha

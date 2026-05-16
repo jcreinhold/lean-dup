@@ -5,6 +5,7 @@ import sqlite3
 from pathlib import Path
 
 from lean_dup.audit import run_audit
+from lean_dup.cli import _render_report
 from lean_dup.external_index import build_external_index
 from lean_dup.models import (
     AuditOptions,
@@ -174,6 +175,12 @@ def test_mathlib_labeled_external_match_gets_action(monkeypatch, tmp_path) -> No
         and group.recommended_action == "already-in-mathlib"
         and group.review_priority is ReviewPriority.HIGH
         and group.recommended_target == "External.same_as_tiny"
+        and group.replacement_hint is not None
+        and group.replacement_hint.target_decl == "External.same_as_tiny"
+        and group.replacement_hint.target_module == "External.Basic"
+        and group.replacement_hint.import_line == "import External.Basic"
+        and group.replacement_hint.import_status == "missing"
+        and group.replacement_hint.action in {"replace-with-import", "replace-local-uses"}
         and "same-imported-mathlib-declaration" in group.signals
         and any(member.origin == "mathlib" for member in group.members)
         for group in report.groups
@@ -196,6 +203,31 @@ def test_source_clones_ignore_external_indexes(monkeypatch, tmp_path) -> None:
         and any(member.origin != "workspace" for member in group.members)
         for group in report.groups
     )
+
+
+def test_replacement_hints_can_be_disabled(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("LEAN_DUP_CACHE_DIR", str(tmp_path))
+    build_external_index(workspace=EXTERNAL, module_root="External", label="mathlib")
+    report = run_audit(
+        workspace=FIXTURE,
+        options=AuditOptions(
+            workspace=FIXTURE,
+            module_root="Tiny",
+            compare_indexes=("mathlib",),
+            replacement_hints=False,
+        ),
+    )
+    assert not any(group.replacement_hint is not None for group in report.groups)
+
+
+def test_text_report_includes_replacement_hint(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("LEAN_DUP_CACHE_DIR", str(tmp_path))
+    build_external_index(workspace=EXTERNAL, module_root="External", label="mathlib")
+    options = AuditOptions(workspace=FIXTURE, module_root="Tiny", compare_indexes=("mathlib",))
+    report = run_audit(workspace=FIXTURE, options=options)
+    text = _render_report(report, options=options)
+    assert "replacement:" in text
+    assert "import: import External.Basic (missing)" in text
 
 
 def test_semantic_probe_cache_reuses_and_invalidates(monkeypatch, tmp_path) -> None:

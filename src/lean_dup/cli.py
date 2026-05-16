@@ -67,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
     audit.add_argument("--show-noise", action="store_true")
     audit.add_argument("--min-priority", choices=tuple(ReviewPriority), default=ReviewPriority.LOW)
     audit.add_argument("--no-semantic-probes", dest="semantic_probes", action="store_false")
+    audit.add_argument("--no-replacement-hints", dest="replacement_hints", action="store_false")
 
     show = subparsers.add_parser("show", help="show one group from the latest audit")
     show.add_argument("--workspace", required=True, type=Path)
@@ -114,6 +115,7 @@ def main(argv: list[str] | None = None) -> int:
                 show_noise=args.show_noise,
                 min_priority=ReviewPriority(args.min_priority),
                 semantic_probes=args.semantic_probes,
+                replacement_hints=args.replacement_hints,
             )
             report = run_audit(
                 workspace=args.workspace,
@@ -201,6 +203,17 @@ def _render_report(report: AuditReport, *, options: AuditOptions) -> str:
             lines.append(f"  probe: {group.probe_summary}")
         if group.recommended_target:
             lines.append(f"  target: {group.recommended_target}")
+        if group.replacement_hint:
+            hint = group.replacement_hint
+            lines.append(f"  replacement: {hint.action} -> {hint.target_decl}")
+            lines.append(
+                f"  import: {hint.import_line} ({hint.import_status})"
+            )
+            if hint.reference_count:
+                lines.append(
+                    "  references: "
+                    f"{len(hint.references_shown)} shown / {hint.reference_count} total"
+                )
         for evidence in group.evidence:
             lines.append(f"  evidence: {evidence}")
         for member in group.members:
@@ -224,6 +237,22 @@ def _render_group(*, workspace: Path, group_id: str) -> str:
             lines.append(f"recommended target: {group['recommended_target']}")
         if group.get("probe_summary"):
             lines.append(f"probe summary: {group['probe_summary']}")
+        if hint := group.get("replacement_hint"):
+            lines.append("replacement hint:")
+            lines.append(f"  action: {hint['action']}")
+            lines.append(f"  target: {hint['target_decl']}")
+            lines.append(f"  import: {hint['import_line']} ({hint['import_status']})")
+            lines.append(f"  references: {hint['reference_count']}")
+            for note in hint.get("notes", []):
+                lines.append(f"  note: {note}")
+            for blocker in hint.get("blockers", []):
+                lines.append(f"  blocker: {blocker}")
+            for reference in hint.get("references_shown", []):
+                lines.append(
+                    "  reference: "
+                    f"{reference['file']}:{reference['line']}:{reference['column']}: "
+                    f"{reference['text']}"
+                )
         for signal in group.get("signals", []):
             lines.append(f"signal: {signal}")
         for blocker in group.get("blockers", []):

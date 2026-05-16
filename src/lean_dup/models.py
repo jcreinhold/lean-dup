@@ -111,6 +111,31 @@ class DuplicateMember:
 
 
 @dataclass(frozen=True)
+class SourceReference:
+    """One source reference to a local declaration name."""
+
+    file: Path
+    line: int
+    column: int
+    text: str
+
+
+@dataclass(frozen=True)
+class ReplacementHint:
+    """Actionable, read-only guidance for replacing a duplicate declaration."""
+
+    action: str
+    target_decl: str
+    target_module: str
+    import_line: str
+    import_status: str
+    references_shown: tuple[SourceReference, ...]
+    reference_count: int
+    notes: tuple[str, ...] = ()
+    blockers: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class DuplicateGroup:
     """One reported cluster of related declarations."""
 
@@ -126,6 +151,7 @@ class DuplicateGroup:
     review_priority: ReviewPriority = ReviewPriority.MEDIUM
     recommended_target: str | None = None
     probe_summary: str | None = None
+    replacement_hint: ReplacementHint | None = None
 
 
 @dataclass(frozen=True)
@@ -172,3 +198,4 @@ class AuditOptions(JsonableDataclass):
     show_noise: bool = False
     min_priority: ReviewPriority = ReviewPriority.LOW
     semantic_probes: bool = True
+    replacement_hints: bool = True
