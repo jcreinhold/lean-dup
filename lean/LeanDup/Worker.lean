@@ -1,6 +1,7 @@
 import Lean
 import LeanDup.Extract
 import LeanDup.Features
+import LeanDup.Probe
 import LeanDup.Protocol
 
 /-!
@@ -121,6 +122,29 @@ private unsafe def handleFeatures (request : Request) : IO (Except ProtocolError
           let rows := payloads.map fun payload => envelope request .featureRow payload
           pure <| .ok (completed request rows, 0)
 
+private def probeErrorCode : LeanDup.Probe.ErrorKind → ErrorCode
+  | .invalidRequest => .invalidRequest
+  | .importFailed => .importFailed
+  | .internalError => .internalError
+
+private def probeError (request : Request) (err : LeanDup.Probe.Error) : ProtocolError :=
+  { requestId? := some request.requestId
+    command? := some request.command
+    code := probeErrorCode err.kind
+    fatal := true
+    message := err.message
+    details := err.details }
+
+private unsafe def handleProbe (request : Request) : IO (Except ProtocolError (Array Envelope × UInt32)) := do
+  match request.modules with
+  | .error err => pure <| .error err
+  | .ok modules =>
+      match ← LeanDup.Probe.run request.payload (toExtractModules modules) with
+      | .error err => pure <| .error (probeError request err)
+      | .ok payloads =>
+          let rows := payloads.map fun payload => envelope request .probeResult payload
+          pure <| .ok (completed request rows, 0)
+
 private unsafe def dispatch (request : Request) : IO (Except ProtocolError (Array Envelope × UInt32)) := do
   match request.command with
   | .version =>
@@ -129,8 +153,7 @@ private unsafe def dispatch (request : Request) : IO (Except ProtocolError (Arra
   | .doctor => handleDoctor request
   | .extract => handleExtract request
   | .features => handleFeatures request
-  | .probe =>
-      pure <| .ok (completed request #[], 0)
+  | .probe => handleProbe request
 
 private def writeJsonLine (json : Json) : IO Unit := do
   IO.println json.compress

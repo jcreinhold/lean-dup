@@ -62,6 +62,22 @@ axiom broad_eq_only (n m : Nat) : n = m
 
 axiom broad_iff_only (P Q : Prop) : P ↔ Q
 
+axiom specialization_general (n : Nat) : n = n
+
+axiom specialization_specific (n : Nat) (h : True) : n = n
+
+axiom same_conclusion_nat_domain (n : Nat) : True
+
+axiom same_conclusion_bool_domain (b : Bool) : True
+
+def probe_small_def_left (n : Nat) : Nat := n + 1
+
+def probe_small_def_right (n : Nat) : Nat := n + 1
+
+opaque probe_opaque_def_left : Nat := 1
+
+opaque probe_opaque_def_right : Nat := 1
+
 inductive GeneratedProbe where
   | leaf : GeneratedProbe
   | node : GeneratedProbe → GeneratedProbe
