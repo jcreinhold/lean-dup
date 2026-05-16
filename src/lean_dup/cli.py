@@ -58,6 +58,7 @@ def main(argv: list[str] | None = None) -> int:
     audit.add_argument("--include-generated", action="store_true")
     audit.add_argument("--show-noise", action="store_true")
     audit.add_argument("--min-priority", choices=tuple(ReviewPriority), default=ReviewPriority.LOW)
+    audit.add_argument("--no-semantic-probes", dest="semantic_probes", action="store_false")
 
     show = subparsers.add_parser("show", help="show one group from the latest audit")
     show.add_argument("--workspace", required=True, type=Path)
@@ -104,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
                 include_generated=args.include_generated,
                 show_noise=args.show_noise,
                 min_priority=ReviewPriority(args.min_priority),
+                semantic_probes=args.semantic_probes,
             )
             report = run_audit(
                 workspace=args.workspace,
@@ -187,6 +189,10 @@ def _render_report(report: AuditReport, *, options: AuditOptions) -> str:
             lines.append(f"  signal: {signal}")
         for blocker in group.blockers:
             lines.append(f"  blocker: {blocker}")
+        if group.probe_summary:
+            lines.append(f"  probe: {group.probe_summary}")
+        if group.recommended_target:
+            lines.append(f"  target: {group.recommended_target}")
         for evidence in group.evidence:
             lines.append(f"  evidence: {evidence}")
         for member in group.members:
@@ -204,6 +210,10 @@ def _render_group(*, workspace: Path, group_id: str) -> str:
         lines = [f"{group['id']} [{group['kind']}]", f"reason: {group['reason']}"]
         lines.append(f"priority: {group.get('review_priority', 'medium')}")
         lines.append(f"recommended action: {group.get('recommended_action', 'review')}")
+        if group.get("recommended_target"):
+            lines.append(f"recommended target: {group['recommended_target']}")
+        if group.get("probe_summary"):
+            lines.append(f"probe summary: {group['probe_summary']}")
         for signal in group.get("signals", []):
             lines.append(f"signal: {signal}")
         for blocker in group.get("blockers", []):

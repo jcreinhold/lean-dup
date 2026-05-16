@@ -124,6 +124,8 @@ class DuplicateGroup:
     blockers: tuple[str, ...] = ()
     recommended_action: str = "review"
     review_priority: ReviewPriority = ReviewPriority.MEDIUM
+    recommended_target: str | None = None
+    probe_summary: str | None = None
 
 
 @dataclass(frozen=True)
@@ -169,3 +171,4 @@ class AuditOptions(JsonableDataclass):
     include_generated: bool = False
     show_noise: bool = False
     min_priority: ReviewPriority = ReviewPriority.LOW
+    semantic_probes: bool = True

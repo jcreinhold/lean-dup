@@ -22,7 +22,8 @@ from lean_dup.models import (
     DuplicateMember,
 )
 from lean_dup.ranking import rank_group
-from lean_dup.workspace import resolve_workspace
+from lean_dup.semantic_probes import probe_candidate_groups
+from lean_dup.workspace import Workspace, resolve_workspace
 
 SUBSUMPTION_MIN_CONSTANTS = 0.50
 SUBSUMPTION_MIN_NAME_TOKENS = 0.30
@@ -53,6 +54,7 @@ def run_audit(
             include_generated=options.include_generated,
             show_noise=options.show_noise,
             min_priority=options.min_priority,
+            semantic_probes=options.semantic_probes,
         )
     if resolved_options.progress:
         _log(f"lean-dup: resolving audit workspace {resolved_options.workspace}")
@@ -80,8 +82,10 @@ def run_audit(
     )
     declarations = _filter_declarations(extracted.declarations, resolved_options)
     classified = _classify(
-        declarations,
+        workspace=resolved,
+        declarations=declarations,
         external_indexes=external_indexes,
+        semantic_probes=resolved_options.semantic_probes,
         threshold=resolved_options.threshold,
         progress=resolved_options.progress,
     )
@@ -125,9 +129,11 @@ def _filter_declarations(
 
 
 def _classify(
+    workspace: Workspace,
     declarations: tuple[Declaration, ...],
     *,
     external_indexes: tuple[ExternalIndex, ...],
+    semantic_probes: bool,
     threshold: float,
     progress: bool = False,
 ) -> ClassifiedGroups:
@@ -136,6 +142,7 @@ def _classify(
     groups: list[DuplicateGroup] = []
     used_exact_pairs: set[frozenset[str]] = set()
     group_count: Counter[DuplicateKind] = Counter()
+    declaration_by_key = {_declaration_key(declaration): declaration for declaration in declarations}
     workspace_declarations = tuple(declaration for declaration in declarations if _is_workspace(declaration))
     local_statements = tuple(_statement_declarations(declarations))
     workspace_statements = tuple(_statement_declarations(workspace_declarations))
@@ -182,6 +189,7 @@ def _classify(
             reason=reason,
             warnings=warnings,
             group_count=group_count,
+            declaration_by_name=declaration_by_key,
         )
         groups.extend(keyed_groups)
         external_groups = _external_fingerprint_groups(
@@ -193,6 +201,7 @@ def _classify(
             reason=reason,
             warnings=warnings,
             group_count=group_count,
+            declaration_by_name=declaration_by_key,
         )
         groups.extend(external_groups)
         if kind is DuplicateKind.EXACT_STATEMENT:
@@ -207,6 +216,7 @@ def _classify(
         reason="same local declaration source skeleton after comment and whitespace normalization",
         warnings=warnings,
         group_count=group_count,
+        declaration_by_name=declaration_by_key,
     )
     groups.extend(_groups_with_workspace_member(source_groups))
     if progress:
@@ -219,6 +229,7 @@ def _classify(
         warnings=warnings,
         group_count=group_count,
         progress=progress,
+        declaration_by_name=declaration_by_key,
     )
     groups.extend(near_groups)
     near_external_groups = _near_statement_groups_against_external(
@@ -229,16 +240,28 @@ def _classify(
         warnings=warnings,
         group_count=group_count,
         progress=progress,
+        declaration_by_name=declaration_by_key,
     )
     groups.extend(near_external_groups)
     if progress:
         _log(f"lean-dup: suppressing redundant groups from {len(groups)} candidate group(s)")
     groups = _suppress_redundant_groups(groups)
-    declaration_by_name = {declaration.name: declaration for declaration in declarations}
+    probe_results = probe_candidate_groups(
+        workspace=workspace,
+        groups=groups,
+        declarations_by_name=declaration_by_key,
+        enabled=semantic_probes,
+        progress=progress,
+    )
     groups = [
         rank_group(
             group,
-            tuple(declaration_by_name[member.name] for member in group.members if member.name in declaration_by_name),
+            tuple(
+                declaration_by_key[_member_key(member)]
+                for member in group.members
+                if _member_key(member) in declaration_by_key
+            ),
+            probe_results=probe_results,
         )
         for group in groups
     ]
@@ -261,6 +284,7 @@ def _fingerprint_groups(
     reason: str,
     warnings: list[str],
     group_count: Counter[DuplicateKind],
+    declaration_by_name: dict[str, Declaration],
 ) -> list[DuplicateGroup]:
     buckets: dict[str, list[Declaration]] = defaultdict(list)
     for declaration in declarations:
@@ -292,6 +316,7 @@ def _fingerprint_groups(
                 reason=group_reason,
                 evidence=(f"{key_name}={key}",),
                 declarations=members,
+                declaration_by_name=declaration_by_name,
             )
         )
     return groups
@@ -307,6 +332,7 @@ def _external_fingerprint_groups(
     reason: str,
     warnings: list[str],
     group_count: Counter[DuplicateKind],
+    declaration_by_name: dict[str, Declaration],
 ) -> list[DuplicateGroup]:
     workspace_buckets: dict[str, list[Declaration]] = defaultdict(list)
     for declaration in workspace_declarations:
@@ -345,6 +371,7 @@ def _external_fingerprint_groups(
                     reason=group_reason,
                     evidence=(f"{key_name}={key}",),
                     declarations=members,
+                    declaration_by_name=declaration_by_name,
                 )
             )
     return groups
@@ -358,6 +385,7 @@ def _near_statement_groups(
     warnings: list[str],
     group_count: Counter[DuplicateKind],
     progress: bool,
+    declaration_by_name: dict[str, Declaration],
 ) -> list[DuplicateGroup]:
     candidates = local_near_candidates(declarations, warnings=warnings, progress=progress)
     if progress:
@@ -370,7 +398,11 @@ def _near_statement_groups(
         score, evidence = pair_signal_score(first, second)
         if score >= threshold:
             scored.append((score, first, second, evidence))
-    return _cluster_scored_pairs(scored, group_count=group_count)
+    return _cluster_scored_pairs(
+        scored,
+        group_count=group_count,
+        declaration_by_name=declaration_by_name,
+    )
 
 
 def _near_statement_groups_against_external(
@@ -382,6 +414,7 @@ def _near_statement_groups_against_external(
     warnings: list[str],
     group_count: Counter[DuplicateKind],
     progress: bool,
+    declaration_by_name: dict[str, Declaration],
 ) -> list[DuplicateGroup]:
     candidates = external_near_candidates(
         workspace_declarations=workspace_declarations,
@@ -399,13 +432,18 @@ def _near_statement_groups_against_external(
         score, evidence = pair_signal_score(first, second)
         if score >= threshold:
             scored.append((score, first, second, evidence))
-    return _cluster_scored_pairs(scored, group_count=group_count)
+    return _cluster_scored_pairs(
+        scored,
+        group_count=group_count,
+        declaration_by_name=declaration_by_name,
+    )
 
 
 def _cluster_scored_pairs(
     scored: list[tuple[float, Declaration, Declaration, tuple[str, ...]]],
     *,
     group_count: Counter[DuplicateKind],
+    declaration_by_name: dict[str, Declaration],
 ) -> list[DuplicateGroup]:
     if not scored:
         return []
@@ -459,6 +497,7 @@ def _cluster_scored_pairs(
                 reason="high overlap in statement constants, head symbols, names, or conclusions",
                 evidence=tuple(sorted(set(evidence_parts)))[:8],
                 declarations=members,
+                declaration_by_name=declaration_by_name,
             )
         )
     return groups
@@ -544,6 +583,21 @@ def _is_workspace(declaration: Declaration) -> bool:
     return declaration.origin == "workspace"
 
 
+def _declaration_key(declaration: Declaration) -> str:
+    return "\0".join(
+        (
+            declaration.origin,
+            declaration.name,
+            str(declaration.file),
+            str(declaration.span.start.line),
+        )
+    )
+
+
+def _member_key(member: DuplicateMember) -> str:
+    return "\0".join((member.origin, member.name, str(member.file), str(member.line)))
+
+
 def _namespace_tail(name: str) -> str:
     return namespace_family(name, depth=2)
 
@@ -560,7 +614,10 @@ def _group(
     reason: str,
     evidence: tuple[str, ...],
     declarations: list[Declaration],
+    declaration_by_name: dict[str, Declaration],
 ) -> DuplicateGroup:
+    for declaration in declarations:
+        declaration_by_name[_declaration_key(declaration)] = declaration
     members = tuple(
         DuplicateMember(
             name=declaration.name,

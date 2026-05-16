@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from itertools import combinations
+from typing import Mapping
 
 from lean_dup.features import broad_conclusion, pair_features, pair_signal_score
 from lean_dup.models import Declaration, DuplicateGroup, DuplicateKind, DuplicateMember, ReviewPriority
-from lean_dup.probes import probe_pair
+from lean_dup.probes import ProbeResult, declaration_probe_key, heuristic_probe_pair
 
 PRIORITY_ORDER = {
     ReviewPriority.HIGH: 0,
@@ -16,15 +17,24 @@ PRIORITY_ORDER = {
 }
 
 
-def rank_group(group: DuplicateGroup, declarations: tuple[Declaration, ...]) -> DuplicateGroup:
+def rank_group(
+    group: DuplicateGroup,
+    declarations: tuple[Declaration, ...],
+    *,
+    probe_results: Mapping[frozenset[str], ProbeResult] | None = None,
+) -> DuplicateGroup:
     """Attach triage evidence and recommended cleanup action to a group."""
 
     signals = set(group.evidence)
     blockers: set[str] = set()
     generated_count = sum(1 for member in group.members if _member_is_generated(member))
     workspace = [member for member in group.members if member.origin == "workspace"]
+    external_members = [member for member in group.members if member.origin != "workspace"]
     has_mathlib = any(member.origin == "mathlib" for member in group.members)
     has_backport = any(_member_is_backport(member) for member in workspace)
+    summaries: list[str] = []
+    confirmed_specialization = False
+    confirmed_same = False
 
     if generated_count:
         blockers.add(f"generated-declarations={generated_count}")
@@ -37,7 +47,15 @@ def rank_group(group: DuplicateGroup, declarations: tuple[Declaration, ...]) -> 
         features = pair_features(first, second)
         score, evidence = pair_signal_score(first, second)
         signals.update(evidence)
-        signals.update(probe_pair(first, second).signals)
+        probe = _probe_result(first, second, probe_results)
+        signals.update(probe.signals)
+        blockers.update(probe.blockers)
+        if probe.summary:
+            summaries.append(probe.summary)
+        confirmed_same = confirmed_same or probe.same_statement or probe.same_reducible_def
+        confirmed_specialization = confirmed_specialization or (
+            probe.specializes or probe.specializes_left_to_right or probe.specializes_right_to_left
+        )
         if features.same_namespace_family:
             signals.add("same-namespace-family")
         if score < 0.25 and group.kind is DuplicateKind.NEAR_STATEMENT:
@@ -58,7 +76,7 @@ def rank_group(group: DuplicateGroup, declarations: tuple[Declaration, ...]) -> 
     elif group.kind is DuplicateKind.SOURCE_CLONE:
         action = "probable-source-clone"
         priority = ReviewPriority.LOW
-    elif "probe:specializes" in signals:
+    elif confirmed_specialization:
         action = "specialization-of"
         priority = ReviewPriority.MEDIUM
     elif group.kind is DuplicateKind.SUBSUMPTION_CANDIDATE:
@@ -70,6 +88,9 @@ def rank_group(group: DuplicateGroup, declarations: tuple[Declaration, ...]) -> 
 
     if has_backport and has_mathlib:
         signals.add("backport-now-in-mathlib")
+        priority = ReviewPriority.HIGH
+    if has_mathlib and (confirmed_same or group.kind is DuplicateKind.EXACT_STATEMENT):
+        action = "already-in-mathlib"
         priority = ReviewPriority.HIGH
     if generated_count and group.kind is DuplicateKind.SOURCE_CLONE:
         priority = ReviewPriority.NOISE
@@ -91,6 +112,8 @@ def rank_group(group: DuplicateGroup, declarations: tuple[Declaration, ...]) -> 
         blockers=tuple(sorted(blockers)),
         recommended_action=action,
         review_priority=priority,
+        recommended_target=_recommended_target(external_members),
+        probe_summary=_probe_summary(summaries),
     )
 
 
@@ -129,3 +152,46 @@ def _member_is_generated(member: DuplicateMember) -> bool:
 
 def _member_is_backport(member: DuplicateMember) -> bool:
     return ".Mathlib4Backports." in member.module or member.module.endswith("Mathlib4Backports")
+
+
+def _probe_result(
+    first: Declaration,
+    second: Declaration,
+    probe_results: Mapping[frozenset[str], ProbeResult] | None,
+) -> ProbeResult:
+    key = frozenset({declaration_probe_key(first), declaration_probe_key(second)})
+    if probe_results is not None and key in probe_results:
+        result = probe_results[key]
+        if not result.unavailable:
+            return result
+        fallback = heuristic_probe_pair(first, second)
+        return ProbeResult(
+            same_statement=fallback.same_statement,
+            same_up_to_reordering=fallback.same_up_to_reordering,
+            connective_equivalent=fallback.connective_equivalent,
+            specializes=fallback.specializes,
+            specializes_left_to_right=fallback.specializes_left_to_right,
+            specializes_right_to_left=fallback.specializes_right_to_left,
+            mutual_implication_shape=fallback.mutual_implication_shape,
+            same_reducible_def=fallback.same_reducible_def,
+            unavailable=True,
+            source="lean+heuristic",
+            message=result.message,
+        )
+    return heuristic_probe_pair(first, second)
+
+
+def _recommended_target(external_members: list[DuplicateMember]) -> str | None:
+    if not external_members:
+        return None
+    preferred = sorted(
+        external_members,
+        key=lambda member: (0 if member.origin == "mathlib" else 1, member.name),
+    )[0]
+    return preferred.name
+
+
+def _probe_summary(summaries: list[str]) -> str | None:
+    if not summaries:
+        return None
+    return "; ".join(dict.fromkeys(summaries[:4]))

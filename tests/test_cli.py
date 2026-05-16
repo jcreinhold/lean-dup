@@ -36,6 +36,7 @@ def test_cli_audit_json() -> None:
     assert payload["declaration_count"] >= 10
     assert "groups" in payload
     assert "warnings" in payload
+    assert {"recommended_target", "probe_summary"} <= set(payload["groups"][0])
 
 
 def test_cli_external_index(tmp_path, monkeypatch) -> None:

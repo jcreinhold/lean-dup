@@ -6,7 +6,8 @@ from pathlib import Path
 
 from lean_dup.audit import run_audit
 from lean_dup.external_index import build_external_index
-from lean_dup.models import AuditOptions, DuplicateKind, ReviewPriority
+from lean_dup.models import AuditOptions, Declaration, DuplicateKind, ReviewPriority, SourcePoint, SourceSpan
+from lean_dup.semantic_probes import ProbePair, _ProbeCache
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tiny"
@@ -96,6 +97,7 @@ def test_external_index_reports_workspace_matches(monkeypatch, tmp_path) -> None
         and any(member.display_name == "same_as_tiny" for member in group.members)
         and group.recommended_action == "local-alias"
         and group.review_priority is ReviewPriority.HIGH
+        and group.recommended_target == "External.same_as_tiny"
         and "probe:same-statement" in group.signals
         for group in report.groups
     )
@@ -143,6 +145,7 @@ def test_mathlib_labeled_external_match_gets_action(monkeypatch, tmp_path) -> No
         group.kind is DuplicateKind.EXACT_STATEMENT
         and group.recommended_action == "already-in-mathlib"
         and group.review_priority is ReviewPriority.HIGH
+        and group.recommended_target == "External.same_as_tiny"
         and "same-imported-mathlib-declaration" in group.signals
         and any(member.origin == "mathlib" for member in group.members)
         for group in report.groups
@@ -164,4 +167,74 @@ def test_source_clones_ignore_external_indexes(monkeypatch, tmp_path) -> None:
         group.kind is DuplicateKind.SOURCE_CLONE
         and any(member.origin != "workspace" for member in group.members)
         for group in report.groups
+    )
+
+
+def test_semantic_probe_cache_reuses_and_invalidates(monkeypatch, tmp_path) -> None:
+    first = _declaration("Example.left", "aaa")
+    second = _declaration("Example.right", "bbb")
+    cache = _ProbeCache(tmp_path)
+    pair = ProbePair(first=first, second=second)
+
+    assert cache.get(pair) is None
+    result_report = run_audit(
+        workspace=FIXTURE,
+        options=AuditOptions(workspace=FIXTURE, module_root="Tiny", semantic_probes=False),
+    )
+    cached_result = next(
+        group for group in result_report.groups if group.kind is DuplicateKind.EXACT_STATEMENT
+    )
+    assert cached_result.probe_summary is not None
+
+    from lean_dup.probes import ProbeResult
+
+    cache.put(pair, ProbeResult(same_statement=True, source="lean"))
+    assert cache.get(pair) is not None
+    changed = ProbePair(first=_declaration("Example.left", "changed"), second=second)
+    assert cache.get(changed) is None
+
+    monkeypatch.setattr("lean_dup.semantic_probes.PROBE_SCHEMA_VERSION", "semantic-probes.test-change")
+    assert cache.get(pair) is None
+
+
+def test_include_imports_gets_lean_confirmed_probe() -> None:
+    report = run_audit(
+        workspace=FIXTURE,
+        options=AuditOptions(workspace=FIXTURE, module_root="Tiny", include_imports=True),
+    )
+    assert any(
+        group.kind is DuplicateKind.EXACT_STATEMENT
+        and any(member.name == "Other.imported_dup" for member in group.members)
+        and "probe:same-statement" in group.signals
+        and group.probe_summary is not None
+        and "lean:" in group.probe_summary
+        and "lean-probe-unavailable" not in group.blockers
+        for group in report.groups
+    )
+
+
+def _declaration(name: str, fingerprint: str) -> Declaration:
+    short_name = name.rsplit(".", 1)[-1]
+    return Declaration(
+        workspace=Path("/tmp/workspace"),
+        module="Example",
+        name=name,
+        display_name=short_name,
+        short_name=short_name,
+        kind="theorem",
+        visibility="public",
+        origin="workspace",
+        modifiers=(),
+        file=Path("/tmp/workspace/Example.lean"),
+        span=SourceSpan(start=SourcePoint(line=1, column=1), end=SourcePoint(line=1, column=1)),
+        type_text="True",
+        normalized_type="True",
+        type_fingerprint=fingerprint,
+        permutation_fingerprint=fingerprint,
+        connective_fingerprint=fingerprint,
+        conclusion_fingerprint=fingerprint,
+        constants=(),
+        type_heads=("True",),
+        binder_count=0,
+        source_fingerprint=None,
     )
