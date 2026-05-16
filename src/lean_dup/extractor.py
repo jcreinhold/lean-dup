@@ -18,7 +18,9 @@ from lean_dup.text import normalize_source, stable_hash
 from lean_dup.workspace import Workspace, module_to_file
 
 EXTRACTOR_VERSION = "extractor.v2"
-PRIVATE_DECL_RE = re.compile(r"^\s*private\s+(?P<kind>theorem|lemma)\s+(?P<name>[A-Za-z_][\w.']*)\b")
+PRIVATE_DECL_RE = re.compile(
+    r"^\s*private\s+(?P<kind>theorem|lemma)\s+(?P<name>[A-Za-z_][\w.']*)\b"
+)
 
 
 @dataclass(frozen=True)
@@ -81,7 +83,9 @@ def run_extractor(workspace: Workspace, *, build: bool, progress: bool = False) 
     if build:
         build_targets = ["lake", "build", *workspace.workspace_modules]
         if progress:
-            _log(f"lean-dup: building {len(workspace.workspace_modules)} module(s) in {workspace.root}")
+            _log(
+                f"lean-dup: building {len(workspace.workspace_modules)} module(s) in {workspace.root}"
+            )
         completed_build = subprocess.run(
             build_targets,
             cwd=workspace.root,
@@ -92,11 +96,15 @@ def run_extractor(workspace: Workspace, *, build: bool, progress: bool = False) 
         )
         if completed_build.returncode != 0:
             details = "\n".join(
-                part for part in (completed_build.stdout.strip(), completed_build.stderr.strip()) if part
+                part
+                for part in (completed_build.stdout.strip(), completed_build.stderr.strip())
+                if part
             )
             msg = details or "`lake build` failed"
             raise RuntimeError(msg)
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as manifest:
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", suffix=".json", delete=False
+    ) as manifest:
         json.dump(
             [
                 {
@@ -122,7 +130,9 @@ def run_extractor(workspace: Workspace, *, build: bool, progress: bool = False) 
         str(output_path),
     ]
     if progress:
-        _log(f"lean-dup: starting Lean extraction for {len(workspace.extraction_modules)} module(s)")
+        _log(
+            f"lean-dup: starting Lean extraction for {len(workspace.extraction_modules)} module(s)"
+        )
     try:
         if progress:
             completed = subprocess.run(
@@ -227,7 +237,9 @@ def _declaration_from_row(row: dict[str, Any]) -> Declaration:
     )
 
 
-def _private_source_declarations(*, workspace_root: Path, module: str, file_path: Path) -> list[Declaration]:
+def _private_source_declarations(
+    *, workspace_root: Path, module: str, file_path: Path
+) -> list[Declaration]:
     if not file_path.exists():
         return []
     lines = file_path.read_text(encoding="utf-8").splitlines()
@@ -268,7 +280,9 @@ def _private_source_declarations(*, workspace_root: Path, module: str, file_path
                 constants=tuple(sorted(set(re.findall(r"\b[A-Z][A-Za-z0-9_.']*", snippet)))),
                 type_heads=tuple(sorted(set(re.findall(r"[→∧∨=↔]", snippet)))),
                 binder_count=snippet.count("(") + snippet.count("{") + snippet.count("["),
-                source_fingerprint=stable_hash(normalize_source(snippet).replace(display_name, "_decl", 1)),
+                source_fingerprint=stable_hash(
+                    normalize_source(snippet).replace(display_name, "_decl", 1)
+                ),
             )
         )
     return declarations

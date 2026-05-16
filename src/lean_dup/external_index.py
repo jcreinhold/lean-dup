@@ -39,7 +39,9 @@ class ExternalIndex:
     index_path: Path
     warnings: tuple[str, ...] = ()
 
-    def fingerprint_matches(self, *, key_name: str, keys: Iterable[str]) -> dict[str, tuple[Declaration, ...]]:
+    def fingerprint_matches(
+        self, *, key_name: str, keys: Iterable[str]
+    ) -> dict[str, tuple[Declaration, ...]]:
         """Return external declarations bucketed by requested fingerprint key."""
 
         if key_name not in FINGERPRINT_COLUMNS:
@@ -73,7 +75,9 @@ class ExternalIndex:
                     result[key] = (*result[key], _declaration_from_sqlite_row(row[1:]))
         return result
 
-    def near_matches(self, *, keys: Iterable[str]) -> tuple[dict[str, tuple[Declaration, ...]], tuple[str, ...]]:
+    def near_matches(
+        self, *, keys: Iterable[str]
+    ) -> tuple[dict[str, tuple[Declaration, ...]], tuple[str, ...]]:
         """Return external declarations bucketed by requested near keys."""
 
         key_values = tuple(sorted(set(key for key in keys if key)))
@@ -149,11 +153,17 @@ def build_external_index(
         _log(f"lean-dup: discovered {len(project.workspace_modules)} module(s) under {module_root}")
     if require_oleans:
         _require_oleans(project, progress=show_progress)
-    cache_key = _external_cache_key(project=project, label=label, module_root=module_root, progress=show_progress)
+    cache_key = _external_cache_key(
+        project=project, label=label, module_root=module_root, progress=show_progress
+    )
     cache_id = sha256(json.dumps(cache_key, sort_keys=True).encode("utf-8")).hexdigest()
     index_dir = _label_dir(label) / cache_id
     index_path = index_dir / "index.sqlite"
-    if index_path.exists() and not force and _sqlite_cache_is_current(index_path=index_path, cache_key=cache_key):
+    if (
+        index_path.exists()
+        and not force
+        and _sqlite_cache_is_current(index_path=index_path, cache_key=cache_key)
+    ):
         metadata = _metadata_from_sqlite(index_path=index_path, cache_hit=True)
         _write_label_pointer(label=label, index_dir=index_dir)
         if profile:
@@ -538,11 +548,15 @@ def _with_origin(project: Workspace, label: str) -> Workspace:
     return Workspace(
         root=project.root,
         workspace_modules=project.workspace_modules,
-        extraction_modules=tuple(ModuleEntry(name=module, origin=origin) for module in project.workspace_modules),
+        extraction_modules=tuple(
+            ModuleEntry(name=module, origin=origin) for module in project.workspace_modules
+        ),
     )
 
 
-def _external_cache_key(*, project: Workspace, label: str, module_root: str, progress: bool = False) -> dict[str, Any]:
+def _external_cache_key(
+    *, project: Workspace, label: str, module_root: str, progress: bool = False
+) -> dict[str, Any]:
     module_stamps = []
     total = len(project.workspace_modules)
     for index, module in enumerate(project.workspace_modules, start=1):

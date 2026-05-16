@@ -5,12 +5,13 @@ from __future__ import annotations
 import sys
 import time
 from collections import Counter, defaultdict
+from collections.abc import Mapping, Sequence
 from itertools import combinations
 from pathlib import Path
 
 from lean_dup.candidates import external_near_candidates, local_near_candidates
-from lean_dup.extractor import load_or_build_index
 from lean_dup.external_index import ExternalIndex, load_external_indexes
+from lean_dup.extractor import load_or_build_index
 from lean_dup.features import namespace_family, pair_signal_score, useful_name_tokens
 from lean_dup.matching import MAX_BUCKET_SIZE, jaccard
 from lean_dup.models import (
@@ -73,7 +74,9 @@ def run_audit(
     extracted = load_or_build_index(resolved, resolved_options)
     if resolved_options.progress:
         cache = "hit" if extracted.cache_hit else "miss"
-        _log(f"lean-dup: workspace index {cache}; loaded {len(extracted.declarations)} declaration row(s)")
+        _log(
+            f"lean-dup: workspace index {cache}; loaded {len(extracted.declarations)} declaration row(s)"
+        )
     external_indexes, external_metadata, external_warnings = load_external_indexes(
         references=resolved_options.compare_indexes,
         compare_mathlib=resolved_options.compare_mathlib,
@@ -92,11 +95,14 @@ def run_audit(
     warnings = (*external_warnings, *classified.warnings)
     if resolved_options.profile:
         warnings += tuple(f"profile.{key}={value:.3f}s" for key, value in extracted.timings.items())
-        warnings += tuple(f"profile.{key}={value:.3f}s" for key, value in classified.timings.items())
+        warnings += tuple(
+            f"profile.{key}={value:.3f}s" for key, value in classified.timings.items()
+        )
     return AuditReport(
         workspace=resolved.root,
         module_root=resolved_options.module_root,
-        declaration_count=len(declarations) + sum(metadata.declaration_count for metadata in external_metadata),
+        declaration_count=len(declarations)
+        + sum(metadata.declaration_count for metadata in external_metadata),
         cache_hit=extracted.cache_hit,
         external_indexes=external_metadata,
         warnings=warnings,
@@ -110,9 +116,9 @@ class ClassifiedGroups:
     def __init__(
         self,
         *,
-        groups: list[DuplicateGroup],
-        warnings: list[str],
-        timings: dict[str, float],
+        groups: Sequence[DuplicateGroup],
+        warnings: Sequence[str],
+        timings: Mapping[str, float],
     ) -> None:
         self.groups = groups
         self.warnings = warnings
@@ -120,11 +126,11 @@ class ClassifiedGroups:
 
 
 def _filter_declarations(
-    declarations: tuple[Declaration, ...],
+    declarations: Sequence[Declaration],
     options: AuditOptions,
 ) -> tuple[Declaration, ...]:
     if options.include_private:
-        return declarations
+        return tuple(declarations)
     return tuple(declaration for declaration in declarations if declaration.visibility != "private")
 
 
@@ -142,8 +148,12 @@ def _classify(
     groups: list[DuplicateGroup] = []
     used_exact_pairs: set[frozenset[str]] = set()
     group_count: Counter[DuplicateKind] = Counter()
-    declaration_by_key = {_declaration_key(declaration): declaration for declaration in declarations}
-    workspace_declarations = tuple(declaration for declaration in declarations if _is_workspace(declaration))
+    declaration_by_key = {
+        _declaration_key(declaration): declaration for declaration in declarations
+    }
+    workspace_declarations = tuple(
+        declaration for declaration in declarations if _is_workspace(declaration)
+    )
     local_statements = tuple(_statement_declarations(declarations))
     workspace_statements = tuple(_statement_declarations(workspace_declarations))
     if progress:
@@ -307,7 +317,9 @@ def _fingerprint_groups(
         if kind is DuplicateKind.EXACT_STATEMENT and any(
             not _is_workspace(declaration) for declaration in members
         ):
-            group_reason = "workspace declaration matches an external elaborated statement fingerprint"
+            group_reason = (
+                "workspace declaration matches an external elaborated statement fingerprint"
+            )
         groups.append(
             _group(
                 group_id=f"{kind}-{group_count[kind]}",
@@ -362,7 +374,9 @@ def _external_fingerprint_groups(
             group_count[kind] += 1
             group_reason = reason
             if kind is DuplicateKind.EXACT_STATEMENT:
-                group_reason = "workspace declaration matches an external elaborated statement fingerprint"
+                group_reason = (
+                    "workspace declaration matches an external elaborated statement fingerprint"
+                )
             groups.append(
                 _group(
                     group_id=f"{kind}-{group_count[kind]}",
@@ -537,9 +551,16 @@ def _suppress_redundant_groups(groups: list[DuplicateGroup]) -> list[DuplicateGr
     kept: list[DuplicateGroup] = []
     for group in sorted(
         groups,
-        key=lambda item: (_kind_priority(item.kind), _external_rank(item), -item.confidence, item.id),
+        key=lambda item: (
+            _kind_priority(item.kind),
+            _external_rank(item),
+            -item.confidence,
+            item.id,
+        ),
     ):
-        workspace_names = frozenset(member.name for member in group.members if member.origin == "workspace")
+        workspace_names = frozenset(
+            member.name for member in group.members if member.origin == "workspace"
+        )
         if (
             group.kind is not DuplicateKind.SOURCE_CLONE
             and workspace_names
@@ -572,11 +593,15 @@ def _dedupe_warnings(warnings: list[str]) -> tuple[str, ...]:
 
 
 def _statement_declarations(declarations: tuple[Declaration, ...]) -> tuple[Declaration, ...]:
-    return tuple(declaration for declaration in declarations if declaration.kind in {"theorem", "axiom"})
+    return tuple(
+        declaration for declaration in declarations if declaration.kind in {"theorem", "axiom"}
+    )
 
 
 def _groups_with_workspace_member(groups: list[DuplicateGroup]) -> list[DuplicateGroup]:
-    return [group for group in groups if any(member.origin == "workspace" for member in group.members)]
+    return [
+        group for group in groups if any(member.origin == "workspace" for member in group.members)
+    ]
 
 
 def _is_workspace(declaration: Declaration) -> bool:
@@ -630,7 +655,9 @@ def _group(
             origin=declaration.origin,
             type_text=declaration.type_text,
         )
-        for declaration in sorted(declarations, key=lambda item: (str(item.file), item.span.start.line, item.name))
+        for declaration in sorted(
+            declarations, key=lambda item: (str(item.file), item.span.start.line, item.name)
+        )
     )
     return DuplicateGroup(
         id=group_id,

@@ -78,7 +78,9 @@ def is_generated(declaration: Declaration) -> bool:
 def is_backport(declaration: Declaration) -> bool:
     """Return whether a declaration is in a local mathlib backport namespace."""
 
-    return ".Mathlib4Backports." in declaration.module or declaration.module.endswith("Mathlib4Backports")
+    return ".Mathlib4Backports." in declaration.module or declaration.module.endswith(
+        "Mathlib4Backports"
+    )
 
 
 def namespace_family(name: str, *, depth: int = 3) -> str:
@@ -124,7 +126,9 @@ def pair_features(first: Declaration, second: Declaration) -> PairFeatures:
         same_namespace=first_namespace == second_namespace,
         same_namespace_family=namespace_family(first.name) == namespace_family(second.name),
         same_conclusion=first.conclusion_fingerprint == second.conclusion_fingerprint,
-        same_source_skeleton=bool(first.source_fingerprint and first.source_fingerprint == second.source_fingerprint),
+        same_source_skeleton=bool(
+            first.source_fingerprint and first.source_fingerprint == second.source_fingerprint
+        ),
         exact_statement=first.type_fingerprint == second.type_fingerprint,
         same_permutation=first.permutation_fingerprint == second.permutation_fingerprint,
         same_connective=first.connective_fingerprint == second.connective_fingerprint,

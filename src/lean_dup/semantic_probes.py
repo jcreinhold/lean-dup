@@ -156,7 +156,9 @@ def _run_lean_probe(
 ) -> dict[frozenset[str], ProbeResult]:
     if progress:
         _log(f"lean-dup: running Lean semantic probes for {len(pairs)} pair(s)")
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as manifest:
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", suffix=".json", delete=False
+    ) as manifest:
         json.dump(
             {
                 "modules": list(workspace.workspace_modules),

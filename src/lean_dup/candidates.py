@@ -22,8 +22,12 @@ def local_near_candidates(
 ) -> set[tuple[Declaration, Declaration]]:
     """Return high-value local near candidates without global pair caps."""
 
-    constants_by_decl = {declaration.name: set(declaration.constants) for declaration in declarations}
-    frequency = Counter(constant for constants in constants_by_decl.values() for constant in constants)
+    constants_by_decl = {
+        declaration.name: set(declaration.constants) for declaration in declarations
+    }
+    frequency = Counter(
+        constant for constants in constants_by_decl.values() for constant in constants
+    )
     index: dict[str, list[Declaration]] = defaultdict(list)
     for declaration in declarations:
         for key in near_index_keys(declaration, constants_frequency=frequency):
@@ -37,7 +41,9 @@ def local_near_candidates(
         if not any(_is_workspace(declaration) for declaration in unique):
             continue
         if len(unique) > MAX_BUCKET_SIZE:
-            warnings.append(f"pruned near bucket {key}: {len(unique)} declarations exceeds {MAX_BUCKET_SIZE}")
+            warnings.append(
+                f"pruned near bucket {key}: {len(unique)} declarations exceeds {MAX_BUCKET_SIZE}"
+            )
             continue
         for first, second in combinations(sorted(unique, key=lambda item: item.name), 2):
             if not (_is_workspace(first) or _is_workspace(second)):
@@ -57,7 +63,9 @@ def external_near_candidates(
 
     if not workspace_declarations or not external_indexes:
         return set()
-    constants_frequency = Counter(constant for declaration in workspace_declarations for constant in declaration.constants)
+    constants_frequency = Counter(
+        constant for declaration in workspace_declarations for constant in declaration.constants
+    )
     workspace_keys_by_decl = {
         declaration.name: near_index_keys(declaration, constants_frequency=constants_frequency)
         for declaration in workspace_declarations
@@ -87,7 +95,9 @@ def external_near_candidates(
         for key in workspace_keys_by_decl[declaration.name]:
             members = tuple(dict.fromkeys(external_buckets.get(key, ())))
             if len(members) > MAX_BUCKET_SIZE:
-                warnings.append(f"pruned external near bucket {key}: {len(members)} declarations exceeds {MAX_BUCKET_SIZE}")
+                warnings.append(
+                    f"pruned external near bucket {key}: {len(members)} declarations exceeds {MAX_BUCKET_SIZE}"
+                )
                 continue
             for external in members:
                 if external.name in seen_external:
@@ -114,7 +124,9 @@ def _add_candidate(
             heapq.heapreplace(heap, entry)
 
 
-def _heap_pairs(heaps: dict[str, list[tuple[float, str, int, Declaration, Declaration]]]) -> set[tuple[Declaration, Declaration]]:
+def _heap_pairs(
+    heaps: dict[str, list[tuple[float, str, int, Declaration, Declaration]]],
+) -> set[tuple[Declaration, Declaration]]:
     pairs: dict[frozenset[str], tuple[Declaration, Declaration]] = {}
     for heap in heaps.values():
         for _score, _key, _tie, first, second in heap:

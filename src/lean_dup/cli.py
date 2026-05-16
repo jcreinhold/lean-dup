@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from lean_dup.audit import run_audit
-from lean_dup.external_index import MATHLIB_DEFAULT_WORKSPACE, build_external_index, build_mathlib_index
+from lean_dup.external_index import (
+    MATHLIB_DEFAULT_WORKSPACE,
+    build_external_index,
+    build_mathlib_index,
+)
 from lean_dup.extractor import extractor_path
 from lean_dup.models import AuditOptions, AuditReport, ReviewPriority
 from lean_dup.ranking import actionable
@@ -34,7 +38,9 @@ def main(argv: list[str] | None = None) -> int:
     index.add_argument("--profile", action="store_true")
     index.add_argument("--progress", action="store_true")
 
-    index_mathlib = subparsers.add_parser("index-mathlib", help="build or reuse the mathlib comparison index")
+    index_mathlib = subparsers.add_parser(
+        "index-mathlib", help="build or reuse the mathlib comparison index"
+    )
     index_mathlib.add_argument("--workspace", type=Path, default=MATHLIB_DEFAULT_WORKSPACE)
     index_mathlib.add_argument("--force", action="store_true")
     index_mathlib.add_argument("--profile", action="store_true")
@@ -45,7 +51,9 @@ def main(argv: list[str] | None = None) -> int:
     audit.add_argument("--module", dest="module_root")
     audit.add_argument("--format", choices=("text", "json"), default="text")
     audit.add_argument("--public-only", action="store_true")
-    audit.add_argument("--include-private", dest="include_private", action="store_true", default=True)
+    audit.add_argument(
+        "--include-private", dest="include_private", action="store_true", default=True
+    )
     audit.add_argument("--no-include-private", dest="include_private", action="store_false")
     audit.add_argument("--include-imports", action="store_true")
     audit.add_argument("--import-root", action="append", default=[])
@@ -198,7 +206,9 @@ def _render_report(report: AuditReport, *, options: AuditOptions) -> str:
         for member in group.members:
             visibility = "" if member.visibility == "public" else f" {member.visibility}"
             origin = "" if member.origin == "workspace" else f" {member.origin}"
-            lines.append(f"  - {member.display_name} ({member.file}:{member.line}){visibility}{origin}")
+            lines.append(
+                f"  - {member.display_name} ({member.file}:{member.line}){visibility}{origin}"
+            )
     return "\n".join(lines)
 
 

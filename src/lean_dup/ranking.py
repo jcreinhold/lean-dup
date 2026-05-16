@@ -6,7 +6,13 @@ from itertools import combinations
 from typing import Mapping
 
 from lean_dup.features import broad_conclusion, pair_features, pair_signal_score
-from lean_dup.models import Declaration, DuplicateGroup, DuplicateKind, DuplicateMember, ReviewPriority
+from lean_dup.models import (
+    Declaration,
+    DuplicateGroup,
+    DuplicateKind,
+    DuplicateMember,
+    ReviewPriority,
+)
 from lean_dup.probes import ProbeResult, declaration_probe_key, heuristic_probe_pair
 
 PRIORITY_ORDER = {
@@ -40,7 +46,10 @@ def rank_group(
         blockers.add(f"generated-declarations={generated_count}")
     if all(broad_conclusion(declaration) for declaration in declarations):
         blockers.add("broad-conclusion-only")
-    if any(member.kind == "instance" or member.display_name.startswith("inst") for member in group.members):
+    if any(
+        member.kind == "instance" or member.display_name.startswith("inst")
+        for member in group.members
+    ):
         blockers.add("typeclass-instance-noise")
 
     for first, second in combinations(declarations, 2):
@@ -72,7 +81,11 @@ def rank_group(
         priority = ReviewPriority.HIGH
     elif group.kind in {DuplicateKind.PERMUTED_STATEMENT, DuplicateKind.CONNECTIVE_EQUIVALENT}:
         action = "local-alias"
-        priority = ReviewPriority.HIGH if "probe:same-up-to-reordering" in signals else ReviewPriority.MEDIUM
+        priority = (
+            ReviewPriority.HIGH
+            if "probe:same-up-to-reordering" in signals
+            else ReviewPriority.MEDIUM
+        )
     elif group.kind is DuplicateKind.SOURCE_CLONE:
         action = "probable-source-clone"
         priority = ReviewPriority.LOW
@@ -94,7 +107,9 @@ def rank_group(
         priority = ReviewPriority.HIGH
     if generated_count and group.kind is DuplicateKind.SOURCE_CLONE:
         priority = ReviewPriority.NOISE
-    elif blockers == {"broad-conclusion-only"} and group.kind is DuplicateKind.SUBSUMPTION_CANDIDATE:
+    elif (
+        blockers == {"broad-conclusion-only"} and group.kind is DuplicateKind.SUBSUMPTION_CANDIDATE
+    ):
         priority = ReviewPriority.LOW
     elif generated_count and priority is ReviewPriority.HIGH:
         priority = ReviewPriority.MEDIUM
@@ -117,12 +132,20 @@ def rank_group(
     )
 
 
-def actionable(group: DuplicateGroup, *, include_generated: bool, show_noise: bool, min_priority: ReviewPriority) -> bool:
+def actionable(
+    group: DuplicateGroup,
+    *,
+    include_generated: bool,
+    show_noise: bool,
+    min_priority: ReviewPriority,
+) -> bool:
     """Return whether a group should appear in default human-facing output."""
 
     if group.review_priority is ReviewPriority.NOISE and not show_noise:
         return False
-    if not include_generated and any(blocker.startswith("generated-declarations=") for blocker in group.blockers):
+    if not include_generated and any(
+        blocker.startswith("generated-declarations=") for blocker in group.blockers
+    ):
         return False
     return PRIORITY_ORDER[group.review_priority] <= PRIORITY_ORDER[min_priority]
 
@@ -139,15 +162,21 @@ def _adjust_confidence(confidence: float, priority: ReviewPriority, blockers: se
 
 def _member_is_generated(member: DuplicateMember) -> bool:
     short_name = member.name.rsplit(".", 1)[-1]
-    return short_name in {
-        "rec",
-        "recOn",
-        "casesOn",
-        "noConfusion",
-        "noConfusionType",
-        "ctorElim",
-        "elim",
-    } or member.name.startswith("_aux_") or "._aux_" in member.name or short_name.startswith("term_")
+    return (
+        short_name
+        in {
+            "rec",
+            "recOn",
+            "casesOn",
+            "noConfusion",
+            "noConfusionType",
+            "ctorElim",
+            "elim",
+        }
+        or member.name.startswith("_aux_")
+        or "._aux_" in member.name
+        or short_name.startswith("term_")
+    )
 
 
 def _member_is_backport(member: DuplicateMember) -> bool:

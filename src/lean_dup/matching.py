@@ -32,7 +32,9 @@ class FrequencyLookup(Protocol):
     def __getitem__(self, key: str) -> int: ...
 
 
-def near_index_keys(declaration: Declaration, *, constants_frequency: FrequencyLookup) -> tuple[str, ...]:
+def near_index_keys(
+    declaration: Declaration, *, constants_frequency: FrequencyLookup
+) -> tuple[str, ...]:
     """Return deterministic near-bucket keys for one declaration."""
 
     keys: list[str] = []
@@ -40,7 +42,11 @@ def near_index_keys(declaration: Declaration, *, constants_frequency: FrequencyL
         if 1 < constants_frequency[constant] <= MAX_BUCKET_SIZE:
             keys.append(f"const:{constant}")
     keys.extend(f"head:{head}" for head in declaration.type_heads)
-    keys.extend(f"name:{token}" for token in name_tokens(declaration.short_name) if token not in LOW_SIGNAL_NAME_TOKENS)
+    keys.extend(
+        f"name:{token}"
+        for token in name_tokens(declaration.short_name)
+        if token not in LOW_SIGNAL_NAME_TOKENS
+    )
     keys.append(f"conclusion:{declaration.conclusion_fingerprint}")
     return tuple(keys)
 

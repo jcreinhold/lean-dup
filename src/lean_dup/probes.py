@@ -114,7 +114,9 @@ def heuristic_probe_pair(first: Declaration, second: Declaration) -> ProbeResult
         features.same_conclusion
         and constants >= 0.45
         and binder_delta <= 3
-        and (features.same_namespace_family or features.names >= 0.25 or bool(features.shared_heads))
+        and (
+            features.same_namespace_family or features.names >= 0.25 or bool(features.shared_heads)
+        )
     )
     mutual_shape = (
         features.same_conclusion

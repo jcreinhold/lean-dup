@@ -6,7 +6,14 @@ from pathlib import Path
 
 from lean_dup.audit import run_audit
 from lean_dup.external_index import build_external_index
-from lean_dup.models import AuditOptions, Declaration, DuplicateKind, ReviewPriority, SourcePoint, SourceSpan
+from lean_dup.models import (
+    AuditOptions,
+    Declaration,
+    DuplicateKind,
+    ReviewPriority,
+    SourcePoint,
+    SourceSpan,
+)
 from lean_dup.semantic_probes import ProbePair, _ProbeCache
 
 
@@ -26,7 +33,8 @@ def test_tiny_workspace_reports_expected_groups() -> None:
     assert report.declaration_count >= 10
     assert not any(
         group.kind is DuplicateKind.PERMUTED_STATEMENT
-        and {"dependent_left", "dependent_right"} <= {member.display_name for member in group.members}
+        and {"dependent_left", "dependent_right"}
+        <= {member.display_name for member in group.members}
         for group in report.groups
     )
 
@@ -39,22 +47,36 @@ def test_full_workspace_audit_without_module() -> None:
 
 def test_private_theorems_included_by_default_and_excluded_by_public_only() -> None:
     default_report = run_audit(workspace=FIXTURE, module_root="Tiny")
-    assert any(member.visibility == "private" for group in default_report.groups for member in group.members)
+    assert any(
+        member.visibility == "private"
+        for group in default_report.groups
+        for member in group.members
+    )
     public_report = run_audit(
         workspace=FIXTURE,
         options=AuditOptions(workspace=FIXTURE, module_root="Tiny", include_private=False),
     )
-    assert not any(member.visibility == "private" for group in public_report.groups for member in group.members)
+    assert not any(
+        member.visibility == "private" for group in public_report.groups for member in group.members
+    )
 
 
 def test_direct_imports_are_optional() -> None:
     default_report = run_audit(workspace=FIXTURE, module_root="Tiny")
-    assert not any(member.origin == "direct-import" for group in default_report.groups for member in group.members)
+    assert not any(
+        member.origin == "direct-import"
+        for group in default_report.groups
+        for member in group.members
+    )
     import_report = run_audit(
         workspace=FIXTURE,
         options=AuditOptions(workspace=FIXTURE, module_root="Tiny", include_imports=True),
     )
-    assert any(member.origin == "direct-import" for group in import_report.groups for member in group.members)
+    assert any(
+        member.origin == "direct-import"
+        for group in import_report.groups
+        for member in group.members
+    )
 
 
 def test_cache_is_reused_on_second_run() -> None:
@@ -77,7 +99,9 @@ def test_external_index_reports_workspace_matches(monkeypatch, tmp_path) -> None
     with sqlite3.connect(first.path) as connection:
         metadata = dict(connection.execute("SELECT key, value FROM metadata").fetchall())
     assert metadata["schema_version"] == "external-index.sqlite.v1"
-    latest = json.loads((tmp_path / "indexes" / "fixture" / "latest.json").read_text(encoding="utf-8"))
+    latest = json.loads(
+        (tmp_path / "indexes" / "fixture" / "latest.json").read_text(encoding="utf-8")
+    )
     assert Path(latest["index_dir"]) == first.path.parent
 
     report = run_audit(
@@ -91,7 +115,9 @@ def test_external_index_reports_workspace_matches(monkeypatch, tmp_path) -> None
 
     assert report.external_indexes
     assert report.external_indexes[0].label == "fixture"
-    assert any(member.origin == "external:fixture" for group in report.groups for member in group.members)
+    assert any(
+        member.origin == "external:fixture" for group in report.groups for member in group.members
+    )
     assert any(
         group.kind is DuplicateKind.EXACT_STATEMENT
         and any(member.display_name == "same_as_tiny" for member in group.members)
@@ -103,7 +129,10 @@ def test_external_index_reports_workspace_matches(monkeypatch, tmp_path) -> None
     )
     assert not any(
         group.kind in {DuplicateKind.PERMUTED_STATEMENT, DuplicateKind.CONNECTIVE_EQUIVALENT}
-        and any(member.display_name == "same_as_tiny" and member.origin != "workspace" for member in group.members)
+        and any(
+            member.display_name == "same_as_tiny" and member.origin != "workspace"
+            for member in group.members
+        )
         for group in report.groups
     )
     assert not any(
@@ -113,8 +142,7 @@ def test_external_index_reports_workspace_matches(monkeypatch, tmp_path) -> None
         for group in report.groups
     )
     assert not any(
-        group.members
-        and all(member.origin != "workspace" for member in group.members)
+        group.members and all(member.origin != "workspace" for member in group.members)
         for group in report.groups
     )
 
@@ -193,7 +221,9 @@ def test_semantic_probe_cache_reuses_and_invalidates(monkeypatch, tmp_path) -> N
     changed = ProbePair(first=_declaration("Example.left", "changed"), second=second)
     assert cache.get(changed) is None
 
-    monkeypatch.setattr("lean_dup.semantic_probes.PROBE_SCHEMA_VERSION", "semantic-probes.test-change")
+    monkeypatch.setattr(
+        "lean_dup.semantic_probes.PROBE_SCHEMA_VERSION", "semantic-probes.test-change"
+    )
     assert cache.get(pair) is None
 
 

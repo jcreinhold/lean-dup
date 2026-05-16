@@ -47,7 +47,9 @@ def resolve_workspace(
         msg = f"not a Lake workspace: {root}"
         raise RuntimeError(msg)
     roots = (module_root,) if module_root else _infer_roots(root)
-    modules = sorted({module for root_module in roots for module in _modules_under(root, root_module)})
+    modules = sorted(
+        {module for root_module in roots for module in _modules_under(root, root_module)}
+    )
     if not modules:
         msg = f"no Lean modules found under {root}"
         raise RuntimeError(msg)
@@ -62,7 +64,9 @@ def resolve_workspace(
                 if imported not in workspace_set
             }
         )
-        entries.extend(ModuleEntry(name=module, origin="direct-import") for module in direct_imports)
+        entries.extend(
+            ModuleEntry(name=module, origin="direct-import") for module in direct_imports
+        )
     entries.extend(ModuleEntry(name=module, origin="named-import") for module in import_roots)
     deduped = tuple(dict.fromkeys(entries))
     return Workspace(root=root, workspace_modules=tuple(modules), extraction_modules=deduped)
