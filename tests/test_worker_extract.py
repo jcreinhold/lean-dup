@@ -75,6 +75,7 @@ def test_extract_emits_declaration_rows_and_complete(worker_bin: Path) -> None:
         "conclusion_fingerprint",
         "constants",
         "binder_count",
+        "low_signal_markers",
         "source_fingerprint",
     }
     assert all(forbidden.isdisjoint(payload) for payload in payloads)

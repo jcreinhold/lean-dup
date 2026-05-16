@@ -52,6 +52,16 @@ axiom universe_structure_left (α : Type u) : α = α
 
 axiom universe_structure_right (α : Type (u + 1)) : α = α
 
+def RoleMarker (n : Nat) : Prop := n = n
+
+axiom role_marker_conclusion (n : Nat) : RoleMarker n
+
+axiom role_marker_hypothesis (n : Nat) : RoleMarker n → True
+
+axiom broad_eq_only (n m : Nat) : n = m
+
+axiom broad_iff_only (P Q : Prop) : P ↔ Q
+
 inductive GeneratedProbe where
   | leaf : GeneratedProbe
   | node : GeneratedProbe → GeneratedProbe

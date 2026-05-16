@@ -15,7 +15,7 @@ open Lean
 open Lean.Meta
 
 /-- Semantic algorithm marker for Lean-owned feature rows. -/
-def version : String := "features.canonical.v1"
+def version : String := "features.roles.v1"
 
 /-- Feature errors are mapped by the worker into protocol error envelopes. -/
 inductive ErrorKind where
@@ -50,6 +50,149 @@ private def optionalJsonField (json : Json) (key : String) : Option Json :=
 
 private def stringArrayJson (values : Array String) : Json :=
   Json.arr (values.map Json.str)
+
+private def hashMod : Nat := 18446744073709551557
+
+private def hashSeed : Nat := 1469598103934665603
+
+private def roleKeyVersion : String := "features.role_key.v1"
+
+private def stableHash (text : String) : String :=
+  toString <|
+    text.foldl
+      (fun acc char => (acc * 131 + char.toNat + 17) % hashMod)
+      hashSeed
+
+private inductive Role where
+  | conclusionConst
+  | conclusionHead
+  | hypothesisConst
+  | hypothesisHead
+  | binderDomainHead
+  deriving BEq
+
+namespace Role
+
+private def asString : Role → String
+  | .conclusionConst => "conclusion_const"
+  | .conclusionHead => "conclusion_head"
+  | .hypothesisConst => "hypothesis_const"
+  | .hypothesisHead => "hypothesis_head"
+  | .binderDomainHead => "binder_domain_head"
+
+end Role
+
+private structure RoleFeature where
+  role : Role
+  name : Name
+
+private def RoleFeature.sortKey (feature : RoleFeature) : String :=
+  s!"{feature.role.asString}:{feature.name}"
+
+private def roleKey (feature : RoleFeature) : String :=
+  let text := feature.sortKey
+  s!"{roleKeyVersion}:{stableHash text}"
+
+private def RoleFeature.toJson (feature : RoleFeature) : Json :=
+  Json.mkObj
+    [ ("role", Json.str feature.role.asString)
+    , ("key", Json.str (roleKey feature))
+    , ("display", Json.str feature.name.toString)
+    ]
+
+private def containsFeature (features : Array RoleFeature) (feature : RoleFeature) : Bool :=
+  features.any fun existing =>
+    existing.role == feature.role && existing.name == feature.name
+
+private def pushFeature (features : Array RoleFeature) (feature : RoleFeature) :
+    Array RoleFeature :=
+  if containsFeature features feature then features else features.push feature
+
+private def sortedFeatures (features : Array RoleFeature) : Array RoleFeature :=
+  features.qsort fun left right => left.sortKey < right.sortKey
+
+private def featuresJson (features : Array RoleFeature) : Json :=
+  Json.arr (sortedFeatures features |>.map RoleFeature.toJson)
+
+private def broadHeadNames : Std.HashSet String :=
+  [ "Eq"
+  , "Iff"
+  , "Exists"
+  , "Nonempty"
+  , "False"
+  , "True"
+  , "Ne"
+  , "Not"
+  , "And"
+  , "Or"
+  , "LE.le"
+  , "LT.lt"
+  , "Membership.mem"
+  , "HasSubset.Subset"
+  ].foldl (fun set name => set.insert name) {}
+
+private def isBroadHead (name : Name) : Bool :=
+  broadHeadNames.contains name.toString
+
+private partial def appHead (expr : Expr) : Expr :=
+  match expr with
+  | .app fn _ => appHead fn
+  | .mdata _ body => appHead body
+  | other => other
+
+private def headName? (expr : Expr) : Option Name :=
+  match appHead expr with
+  | .const name _ => some name
+  | _ => none
+
+private def sortedNamesFromSet (names : NameSet) : Array Name :=
+  names.toArray.qsort fun left right => left.toString < right.toString
+
+private def addConstants
+    (role : Role)
+    (expr : Expr)
+    (features : Array RoleFeature) : Array RoleFeature := Id.run do
+  let mut result := features
+  for name in sortedNamesFromSet expr.getUsedConstantsAsSet do
+    result := pushFeature result { role := role, name := name }
+  pure result
+
+private def addHead
+    (role : Role)
+    (expr : Expr)
+    (features : Array RoleFeature) : Array RoleFeature :=
+  match headName? expr with
+  | some name => pushFeature features { role := role, name := name }
+  | none => features
+
+private def lowSignalMarkers (features : Array RoleFeature) : Array String := Id.run do
+  let mut markers := #[]
+  for feature in features do
+    match feature.role with
+    | .conclusionHead | .hypothesisHead | .binderDomainHead =>
+        if isBroadHead feature.name then
+          let marker := s!"broad_head:{feature.name}"
+          if !markers.contains marker then
+            markers := markers.push marker
+    | .conclusionConst | .hypothesisConst => pure ()
+  pure <| markers.qsort (· < ·)
+
+private def markersJson (markers : Array String) : Json :=
+  Json.arr (markers.map Json.str)
+
+private def roleFacts (constInfo : ConstantInfo) : MetaM (Array RoleFeature × Array String) := do
+  forallTelescope constInfo.type fun fvars conclusion => do
+    let mut features := #[]
+    features := addConstants .conclusionConst conclusion features
+    features := addHead .conclusionHead conclusion features
+    for fvar in fvars do
+      let localDecl ← fvar.fvarId!.getDecl
+      if ← Meta.isProp localDecl.type then
+        features := addConstants .hypothesisConst localDecl.type features
+        features := addHead .hypothesisHead localDecl.type features
+      else
+        features := addHead .binderDomainHead localDecl.type features
+    pure (sortedFeatures features, lowSignalMarkers features)
 
 private def parseDeclarationIds (payload : Json) : Except Error (Option (Array String)) := do
   match optionalJsonField payload "declaration_ids" with
@@ -97,14 +240,16 @@ private def fingerprintsJson (fingerprints : LeanDup.Canonical.Fingerprints) : J
 
 private def rowPayload
     (declaration : LeanDup.Extract.AcceptedDeclaration)
-    (fingerprints : LeanDup.Canonical.Fingerprints) : Json :=
+    (fingerprints : LeanDup.Canonical.Fingerprints)
+    (roleFeatures : Array RoleFeature)
+    (markers : Array String) : Json :=
   Json.mkObj
     [ ("declaration_id", Json.str declaration.declarationId)
     , ("feature_version", Json.str version)
     , ("fingerprints", fingerprintsJson fingerprints)
-    , ("role_features", Json.arr (#[] : Array Json))
+    , ("role_features", featuresJson roleFeatures)
     , ("binder_count", Json.num fingerprints.binderCount)
-    , ("low_signal_markers", Json.arr (#[] : Array Json))
+    , ("low_signal_markers", markersJson markers)
     ]
 
 private def featureRows
@@ -112,15 +257,17 @@ private def featureRows
   let mut rows := #[]
   for declaration in declarations do
     let fingerprints ← LeanDup.Canonical.compute declaration.constInfo
-    rows := rows.push (rowPayload declaration fingerprints)
+    let (roleFeatures, markers) ← roleFacts declaration.constInfo
+    rows := rows.push (rowPayload declaration fingerprints roleFeatures markers)
   pure rows
 
 /--
 Import requested modules once and emit feature-row payloads for declarations
 accepted by the request filters.
 
-The emitted fingerprints are Lean-owned opaque keys. This command does not emit
-role-aware retrieval features yet; prompt 06 owns those.
+The emitted fingerprints and role features are Lean-owned opaque keys. Rust may
+compare and weight them, but it must not reconstruct them from display or source
+facts.
 -/
 unsafe def run (payload : Json) (modules : Array LeanDup.Extract.ModuleSpec) :
     IO (Except Error (Array Json)) := do

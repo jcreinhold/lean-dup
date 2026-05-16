@@ -48,12 +48,12 @@ def test_features_emit_non_placeholder_fingerprints(worker_bin: Path) -> None:
     assert envelopes[-1]["payload"]["row_counts"]["feature_row"] == len(envelopes) - 1
 
     payloads = [envelope["payload"] for envelope in envelopes[:-1]]
-    same_left = _row(payloads, "Tiny.same_left")
-    assert same_left["feature_version"] == "features.canonical.v1"
-    assert same_left["binder_count"] > 0
-    assert same_left["role_features"] == []
-    assert same_left["low_signal_markers"] == []
-    assert set(same_left["fingerprints"]) == {
+    row = _row(payloads, "Tiny.role_marker_conclusion")
+    assert row["feature_version"] == "features.roles.v1"
+    assert row["binder_count"] > 0
+    assert row["role_features"]
+    assert row["low_signal_markers"] == []
+    assert set(row["fingerprints"]) == {
         "statement",
         "safe_binder_permutation",
         "connective_shape",
@@ -61,17 +61,89 @@ def test_features_emit_non_placeholder_fingerprints(worker_bin: Path) -> None:
     }
     assert all(
         isinstance(value, str) and value and "placeholder" not in value
-        for value in same_left["fingerprints"].values()
+        for value in row["fingerprints"].values()
     )
 
 
 def test_extract_remains_display_only(worker_bin: Path) -> None:
     envelopes = _extract(worker_bin)
     payloads = [envelope["payload"] for envelope in envelopes[:-1]]
-    forbidden = {"fingerprints", "role_features", "binder_count"}
+    forbidden = {"fingerprints", "role_features", "binder_count", "low_signal_markers"}
 
     assert payloads
     assert all(forbidden.isdisjoint(payload) for payload in payloads)
+
+
+def test_role_features_follow_protocol_shape(worker_bin: Path) -> None:
+    payloads = _feature_payloads(worker_bin)
+    row = _row(payloads, "Tiny.role_marker_conclusion")
+    allowed_payload_fields = {
+        "declaration_id",
+        "feature_version",
+        "fingerprints",
+        "role_features",
+        "binder_count",
+        "low_signal_markers",
+    }
+    allowed_role_fields = {"role", "key", "display"}
+
+    assert set(row) == allowed_payload_fields
+    assert row["role_features"]
+    for feature in row["role_features"]:
+        assert set(feature).issubset(allowed_role_fields)
+        assert feature["role"] in {
+            "conclusion_const",
+            "conclusion_head",
+            "hypothesis_const",
+            "hypothesis_head",
+            "binder_domain_head",
+        }
+        assert isinstance(feature["key"], str) and feature["key"]
+
+
+def test_same_constant_role_separation(worker_bin: Path) -> None:
+    payloads = _feature_payloads(worker_bin)
+    conclusion = _row(payloads, "Tiny.role_marker_conclusion")
+    hypothesis = _row(payloads, "Tiny.role_marker_hypothesis")
+
+    conclusion_key = _role_key(conclusion, "conclusion_const", "Tiny.RoleMarker")
+    hypothesis_key = _role_key(hypothesis, "hypothesis_const", "Tiny.RoleMarker")
+
+    assert conclusion_key is not None
+    assert hypothesis_key is not None
+    assert conclusion_key != hypothesis_key
+
+
+def test_broad_heads_are_marked_low_signal(worker_bin: Path) -> None:
+    payloads = _feature_payloads(worker_bin)
+
+    eq_row = _row(payloads, "Tiny.broad_eq_only")
+    iff_row = _row(payloads, "Tiny.broad_iff_only")
+
+    assert "broad_head:Eq" in eq_row["low_signal_markers"]
+    assert "broad_head:Iff" in iff_row["low_signal_markers"]
+
+
+def test_generated_feature_rows_stay_protocol_only(worker_bin: Path) -> None:
+    payloads = [envelope["payload"] for envelope in _features(worker_bin, include_generated=True)[:-1]]
+    generated_rows = [
+        payload
+        for payload in payloads
+        if ":Tiny.GeneratedProbe.rec" in payload["declaration_id"]
+        or ":Tiny.GeneratedProbe.casesOn" in payload["declaration_id"]
+    ]
+    forbidden = {
+        "name_tokens",
+        "namespace_path",
+        "source_fingerprint",
+        "source_skeleton",
+        "proof_skeleton",
+    }
+
+    assert generated_rows
+    for row in generated_rows:
+        assert forbidden.isdisjoint(row)
+        assert all(forbidden.isdisjoint(feature) for feature in row["role_features"])
 
 
 def test_exact_statement_fingerprint_is_alpha_stable(worker_bin: Path) -> None:
@@ -175,8 +247,8 @@ def _feature_payloads(worker_bin: Path) -> list[dict[str, Any]]:
     return [envelope["payload"] for envelope in _features(worker_bin)[:-1]]
 
 
-def _features(worker_bin: Path) -> list[dict[str, Any]]:
-    completed = _run_worker(worker_bin, _request("features"))
+def _features(worker_bin: Path, *, include_generated: bool = False) -> list[dict[str, Any]]:
+    completed = _run_worker(worker_bin, _request("features", include_generated=include_generated))
     assert completed.returncode == 0, completed.stderr + completed.stdout
     return [json.loads(line) for line in completed.stdout.splitlines() if line.strip()]
 
@@ -187,7 +259,7 @@ def _extract(worker_bin: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in completed.stdout.splitlines() if line.strip()]
 
 
-def _request(command: str) -> dict[str, Any]:
+def _request(command: str, *, include_generated: bool = False) -> dict[str, Any]:
     return {
         "schema_version": "lean-dup.worker.v1",
         "request_id": f"{command}-fixture",
@@ -196,7 +268,7 @@ def _request(command: str) -> dict[str, Any]:
             "workspace_root": str(FIXTURE),
             "modules": [{"module": "Tiny.Basic", "origin": "workspace"}],
             "include_private": True,
-            "include_generated": False,
+            "include_generated": include_generated,
         },
     }
 
@@ -218,3 +290,13 @@ def _row(payloads: list[dict[str, Any]], qualified_name: str) -> dict[str, Any]:
     matches = [payload for payload in payloads if payload["declaration_id"].endswith(suffix)]
     assert len(matches) == 1, qualified_name
     return matches[0]
+
+
+def _role_key(row: dict[str, Any], role: str, display: str) -> str | None:
+    matches = [
+        feature["key"]
+        for feature in row["role_features"]
+        if feature["role"] == role and feature.get("display") == display
+    ]
+    assert len(matches) <= 1
+    return matches[0] if matches else None
