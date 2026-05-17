@@ -4,6 +4,9 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 
+# Rust build outputs.
+target/
+
 # Python build outputs.
 build/
 dist/
