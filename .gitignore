@@ -12,13 +12,11 @@ build/
 dist/
 
 # lean-dup audit caches and Lake build outputs, including fixture workspaces.
-.lean-dup/
-.lake/
-lake-manifest.json
 **/.lean-dup/
+
+# Lean build outputs.
 **/.lake/
 **/lake-manifest.json
 
 # macOS metadata.
-.DS_Store
 **/.DS_Store
