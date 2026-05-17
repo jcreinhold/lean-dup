@@ -36,6 +36,19 @@ The harness defaults to `/Users/jcreinhold/Code/kan-proofs`, `/Users/jcreinhold/
 `target/lean-dup-perf/cache`. Normal commands still default to the common cache root `~/.cache/lean-dup` unless
 `LEAN_DUP_CACHE_DIR` is set.
 
+After the first baseline pass, `lake update` was run in all three relevant Lake workspaces:
+
+```sh
+cd /Users/jcreinhold/Code/lean-dup/lean && lake update
+cd /Users/jcreinhold/Code/kan-proofs && lake update
+cd /Users/jcreinhold/Code/mathlib4 && lake update
+```
+
+The lean-dup worker workspace was already up to date. KanProofs updated its mathlib dependency and downloaded the
+matching cache. The concrete KanProofs backport modules then built successfully. A full `lake build Mathlib` in
+`/Users/jcreinhold/Code/mathlib4` was intentionally stopped at 1254/8435 targets because it was broader than this pass
+and not required to validate the lean-dup worker.
+
 ## Accepted Optimization
 
 Measured bottleneck: repeated `lake build lean_dup_worker` calls inside one Rust process. This was wasted work, not a
@@ -68,6 +81,16 @@ The full KanProofs audit with mathlib was skipped after the targeted mathlib wor
 comparison-index failure at 371755 ms and the cold mathlib index failed at 285231 ms. Running the larger workload would
 spend another multi-minute pass on the same failing prerequisite before reaching audit retrieval, ranking, probes, or
 rendering.
+
+After `lake update`, the targeted KanProofs mathlib workload was rerun against the common home cache:
+
+| Workload                                      | Cache root           | Exit | Wall ms |  Peak RSS | Lean import ms | Lean semantic ms | JSON/JSONL ms | Stdout bytes/lines | SQLite ms | Hydrated |
+| --------------------------------------------- | -------------------- | ---: | ------: | --------: | -------------: | ---------------: | ------------: | -----------------: | --------: | -------: |
+| KanProofs targeted with mathlib after update  | `~/.cache/lean-dup`  |    1 |  395278 | 675807232 |          34213 |           262923 |          5122 | 285608723 / 312653 |         6 |       17 |
+
+This did not hit a reusable current mathlib SQLite index. The home cache contains previous mathlib index directories,
+but they were stale for the current workspace fingerprint or semantic version, so the command rebuilt the mathlib
+comparison side and failed at the same worker boundary.
 
 ## Cost Classification
 

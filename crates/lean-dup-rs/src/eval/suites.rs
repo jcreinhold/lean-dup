@@ -49,6 +49,16 @@ struct ExternalSuiteIndex {
     require_oleans: bool,
 }
 
+struct SuiteIndexRequest<'a> {
+    workspace_root: &'a Path,
+    module_root: &'a str,
+    label: &'a str,
+    origin: &'a str,
+    require_oleans: bool,
+    build_before_index: bool,
+    kind: IndexBuildKind,
+}
+
 pub(crate) fn run(request: EvalRequest, reporter: &mut Reporter) -> Result<EvaluationReport> {
     let total_started = Instant::now();
     let labels = load_builtin(request.suite)?;
@@ -57,14 +67,17 @@ pub(crate) fn run(request: EvalRequest, reporter: &mut Reporter) -> Result<Evalu
     let cache_root = cache_root_for(&definition, reporter)?;
 
     let index_started = Instant::now();
+    let local_label = format!("eval-{}-workspace", definition.suite.as_str());
     let local = build_or_load_index(
-        &definition.workspace,
-        &definition.module_root,
-        &format!("eval-{}-workspace", definition.suite.as_str()),
-        &definition.origin,
-        definition.require_oleans,
-        definition.build_before_index,
-        IndexBuildKind::Local,
+        SuiteIndexRequest {
+            workspace_root: &definition.workspace,
+            module_root: &definition.module_root,
+            label: &local_label,
+            origin: &definition.origin,
+            require_oleans: definition.require_oleans,
+            build_before_index: definition.build_before_index,
+            kind: IndexBuildKind::Local,
+        },
         &cache_root,
         reporter,
     )?;
@@ -72,13 +85,15 @@ pub(crate) fn run(request: EvalRequest, reporter: &mut Reporter) -> Result<Evalu
     let workspace_rows = local.hydrate(&handles)?;
     let external = match &definition.external {
         Some(external) => Some(build_or_load_index(
-            &external.workspace,
-            &external.module_root,
-            &external.label,
-            &external.origin,
-            external.require_oleans,
-            definition.build_before_index && !external.require_oleans,
-            IndexBuildKind::External,
+            SuiteIndexRequest {
+                workspace_root: &external.workspace,
+                module_root: &external.module_root,
+                label: &external.label,
+                origin: &external.origin,
+                require_oleans: external.require_oleans,
+                build_before_index: definition.build_before_index && !external.require_oleans,
+                kind: IndexBuildKind::External,
+            },
             &cache_root,
             reporter,
         )?),
@@ -191,23 +206,17 @@ fn cache_root_for(definition: &SuiteDefinition, reporter: &mut Reporter) -> Resu
 }
 
 fn build_or_load_index(
-    workspace_root: &Path,
-    module_root: &str,
-    label: &str,
-    origin: &str,
-    require_oleans: bool,
-    build_before_index: bool,
-    kind: IndexBuildKind,
+    request: SuiteIndexRequest<'_>,
     cache_root: &Path,
     reporter: &mut Reporter,
 ) -> Result<OpenedIndex> {
-    if build_before_index {
-        lake_build(workspace_root)?;
+    if request.build_before_index {
+        lake_build(request.workspace_root)?;
     }
     let workspace = resolve(
         WorkspaceRequest {
-            requested_root: workspace_root.to_path_buf(),
-            module_root: Some(module_root.to_owned()),
+            requested_root: request.workspace_root.to_path_buf(),
+            module_root: Some(request.module_root.to_owned()),
         },
         reporter,
     )?;
@@ -215,19 +224,19 @@ fn build_or_load_index(
     store.build_or_reuse(
         IndexBuildRequest {
             workspace,
-            label: label.to_owned(),
-            module_root: module_root.to_owned(),
-            origin: origin.to_owned(),
+            label: request.label.to_owned(),
+            module_root: request.module_root.to_owned(),
+            origin: request.origin.to_owned(),
             include_private: true,
             include_generated: false,
-            require_oleans,
+            require_oleans: request.require_oleans,
             force: false,
-            kind,
+            kind: request.kind,
         },
         &WorkerClient::new(),
         reporter,
     )?;
-    store.resolve(IndexReference::Label(label.to_owned()))
+    store.resolve(IndexReference::Label(request.label.to_owned()))
 }
 
 fn lake_build(workspace_root: &Path) -> Result<()> {

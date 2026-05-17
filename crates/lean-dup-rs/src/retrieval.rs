@@ -168,10 +168,12 @@ fn retrieve_candidates_inner(workspace: &[HydratedDeclaration], indexes: &[Opene
                 workspace,
                 anchor_index,
                 plan,
-                indexes,
-                &index_facts,
-                &external_counts,
-                &external_postings,
+                ExternalMatchContext {
+                    indexes,
+                    index_facts: &index_facts,
+                    counts: &external_counts,
+                    postings: &external_postings,
+                },
                 &mut accumulators,
                 &mut diagnostics,
             );
@@ -511,26 +513,30 @@ fn add_local_matches(
     }
 }
 
+struct ExternalMatchContext<'a> {
+    indexes: &'a [OpenedIndex],
+    index_facts: &'a [crate::index::OpenedIndexFacts],
+    counts: &'a HashMap<(usize, PostingKey), usize>,
+    postings: &'a HashMap<(usize, PostingKey), Vec<DeclarationHandle>>,
+}
+
 fn add_external_matches(
     workspace: &[HydratedDeclaration],
     anchor_index: usize,
     plan: &PlannedKey,
-    indexes: &[OpenedIndex],
-    index_facts: &[crate::index::OpenedIndexFacts],
-    external_counts: &HashMap<(usize, PostingKey), usize>,
-    external_postings: &HashMap<(usize, PostingKey), Vec<DeclarationHandle>>,
+    context: ExternalMatchContext<'_>,
     accumulators: &mut HashMap<CandidateId, CandidateAccumulator>,
     diagnostics: &mut RetrievalDiagnostics,
 ) {
-    for index in 0..indexes.len() {
-        let count = external_counts.get(&(index, plan.key.clone())).copied().unwrap_or(0);
+    for (index, facts) in context.index_facts.iter().enumerate().take(context.indexes.len()) {
+        let count = context.counts.get(&(index, plan.key.clone())).copied().unwrap_or(0);
         if count == 0 {
             continue;
         }
         if count > posting_limit(plan) {
             diagnostics.pruned_postings.push(PrunedPosting {
                 anchor_declaration_id: workspace[anchor_index].declaration_id.clone(),
-                source: index_facts[index].origin.clone(),
+                source: facts.origin.clone(),
                 reason: prune_reason_for_plan(plan).to_owned(),
                 kind: plan.contribution.kind.clone(),
                 role: plan.contribution.role.clone(),
@@ -539,11 +545,11 @@ fn add_external_matches(
             });
             continue;
         }
-        let Some(handles) = external_postings.get(&(index, plan.key.clone())) else {
+        let Some(handles) = context.postings.get(&(index, plan.key.clone())) else {
             continue;
         };
         for handle in handles {
-            let score = plan.base_weight * rarity_weight(index_facts[index].declaration_count, count);
+            let score = plan.base_weight * rarity_weight(facts.declaration_count, count);
             add_contribution(
                 CandidateId::External {
                     index,
