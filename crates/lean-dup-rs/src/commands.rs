@@ -5,10 +5,11 @@ use serde::Serialize;
 
 use crate::cache::{self, CacheFacts};
 use crate::cli::{
-    AuditArgs, Cli, Command, DiffArgs, DoctorArgs, IndexArgs, IndexMathlibArgs, OutputFormat,
-    ShowArgs,
+    AuditArgs, Cli, Command, DiffArgs, DoctorArgs, EvalArgs, EvalFormat, IndexArgs,
+    IndexMathlibArgs, OutputFormat, ShowArgs,
 };
 use crate::error::Result;
+use crate::eval::{EvalRequest, EvaluationReport};
 use crate::index::{CacheStatus, IndexBuildKind, IndexBuildRequest, IndexStore, IndexSummary};
 use crate::progress::Reporter;
 use crate::worker::WorkerClient;
@@ -28,6 +29,7 @@ pub(crate) enum Report {
     Index(IndexReport),
     IndexMathlib(IndexReport),
     Audit(AuditReport),
+    Eval(EvaluationReport),
     Show(SkeletonReport),
     Diff(SkeletonReport),
 }
@@ -127,6 +129,14 @@ pub(crate) fn run(cli: Cli) -> Result<Outcome> {
         Command::Audit(args) => {
             let format = args.format;
             (Report::Audit(audit(args, &mut reporter)?), format)
+        }
+        Command::Eval(args) => {
+            let format = if args.format == EvalFormat::Json {
+                OutputFormat::Json
+            } else {
+                OutputFormat::Text
+            };
+            (Report::Eval(eval(args, &mut reporter)?), format)
         }
         Command::Show(args) => (Report::Show(show(args, &mut reporter)?), OutputFormat::Text),
         Command::Diff(args) => (Report::Diff(diff(args, &mut reporter)?), OutputFormat::Text),
@@ -250,6 +260,18 @@ fn audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditReport> {
         show_noise: args.show_noise,
         message: "audit orchestration is stubbed until worker protocol, indexes, retrieval, and ranking are implemented",
     })
+}
+
+fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<EvaluationReport> {
+    crate::eval::run(
+        EvalRequest {
+            suite: args.suite,
+            workspace: args.workspace,
+            mathlib_workspace: args.mathlib_workspace,
+            k_values: args.k_values,
+        },
+        reporter,
+    )
 }
 
 fn show(args: ShowArgs, reporter: &mut Reporter) -> Result<SkeletonReport> {

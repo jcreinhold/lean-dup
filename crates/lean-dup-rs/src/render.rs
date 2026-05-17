@@ -55,6 +55,7 @@ fn render_text(report: &Report) -> String {
         Report::IndexMathlib(report) => render_index("index-mathlib", report),
         Report::Show(report) | Report::Diff(report) => render_skeleton(report),
         Report::Audit(report) => render_audit(report),
+        Report::Eval(report) => crate::eval::table::render_metrics(&report.metrics),
     }
 }
 

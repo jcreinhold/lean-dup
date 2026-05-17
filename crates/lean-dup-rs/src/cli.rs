@@ -24,6 +24,7 @@ pub(crate) enum Command {
     #[command(name = "index-mathlib")]
     IndexMathlib(IndexMathlibArgs),
     Audit(AuditArgs),
+    Eval(EvalArgs),
     Show(ShowArgs),
     Diff(DiffArgs),
 }
@@ -122,6 +123,24 @@ pub(crate) struct AuditArgs {
 }
 
 #[derive(Debug, Clone, clap::Args)]
+pub(crate) struct EvalArgs {
+    #[arg(long, value_enum, default_value_t = EvalSuite::Default)]
+    pub(crate) suite: EvalSuite,
+
+    #[arg(long, value_enum, default_value_t = EvalFormat::Table)]
+    pub(crate) format: EvalFormat,
+
+    #[arg(long)]
+    pub(crate) workspace: Option<PathBuf>,
+
+    #[arg(long)]
+    pub(crate) mathlib_workspace: Option<PathBuf>,
+
+    #[arg(long = "k", value_delimiter = ',', default_value = "1,5,10")]
+    pub(crate) k_values: Vec<usize>,
+}
+
+#[derive(Debug, Clone, clap::Args)]
 pub(crate) struct ShowArgs {
     #[arg(long)]
     pub(crate) workspace: PathBuf,
@@ -153,6 +172,31 @@ pub(crate) enum ReviewPriority {
     Medium,
     Low,
     Noise,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum EvalSuite {
+    Default,
+    KanproofsInternal,
+    KanproofsMathlib,
+}
+
+impl EvalSuite {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::KanproofsInternal => "kanproofs-internal",
+            Self::KanproofsMathlib => "kanproofs-mathlib",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum EvalFormat {
+    Table,
+    Json,
 }
 
 impl AuditArgs {

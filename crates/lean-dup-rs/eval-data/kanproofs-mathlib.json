@@ -1,0 +1,62 @@
+{
+  "suite": "kanproofs-mathlib",
+  "positive_clusters": [
+    {
+      "id": "quasicategory-inner-fibration",
+      "members": [
+        "quasicategory_iff_from_innerFibration",
+        "quasicategory_of_innerFibration_quasicategory",
+        "innerFibration_iff"
+      ]
+    },
+    {
+      "id": "inner-anodyne-backports",
+      "members": [
+        "innerAnodyneExtensions_eq_llp_rlp",
+        "innerAnodyneExtensions_le",
+        "innerAnodyneExtensions_eq_retracts_transfiniteCompositions"
+      ]
+    },
+    {
+      "id": "monoidal-pullback-backports",
+      "members": [
+        "whiskerLeft_isoOfNatIso_ι_hom",
+        "whiskerLeft_isoOfNatIso_ι_hom_assoc",
+        "isoOfNatIso_ι_hom_whiskerRight"
+      ]
+    },
+    {
+      "id": "anodyne-pairing-api",
+      "members": [
+        "SSet.Subcomplex.Pairing.toAnodynePresentation",
+        "SSet.Subcomplex.Pairing.anodyneExtensions"
+      ]
+    },
+    {
+      "id": "residue-field-unit-api",
+      "members": [
+        "IsLocalRing.isUnit_of_residue_isUnit",
+        "IsLocalRing.residue_ne_zero_iff_isUnit"
+      ]
+    }
+  ],
+  "hard_negative_clusters": [
+    {
+      "id": "field-name-collisions",
+      "members": [
+        "IsSaturated.toIsStableUnderComposition",
+        "MorphismProperty.IsMultiplicative.toIsStableUnderComposition",
+        "IsTateStep2NF.toIsMinimal"
+      ]
+    },
+    {
+      "id": "broad-ext-uniqueness",
+      "members": [
+        "subsumption-candidate-129",
+        "subsumption-candidate-140",
+        "subsumption-candidate-149"
+      ]
+    }
+  ]
+}
+

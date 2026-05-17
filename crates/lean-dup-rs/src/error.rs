@@ -37,6 +37,9 @@ pub(crate) enum Error {
     #[error("index error: {message}")]
     Index { message: String },
 
+    #[error("evaluation error: {message}")]
+    Eval { message: String },
+
     #[error("sqlite error")]
     Sqlite(#[from] rusqlite::Error),
 

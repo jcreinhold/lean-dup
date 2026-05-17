@@ -2,6 +2,7 @@ mod cache;
 mod cli;
 mod commands;
 mod error;
+mod eval;
 mod index;
 mod progress;
 mod render;

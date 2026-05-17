@@ -22,12 +22,65 @@ fn help_lists_foundation_commands() {
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
 
-    for command in ["doctor", "index", "index-mathlib", "audit", "show", "diff"] {
+    for command in [
+        "doctor",
+        "index",
+        "index-mathlib",
+        "audit",
+        "eval",
+        "show",
+        "diff",
+    ] {
         assert!(
             stdout.contains(command),
             "missing {command} in help:\n{stdout}"
         );
     }
+}
+
+#[test]
+fn eval_default_prints_compact_metrics_table() {
+    let cache = tempfile::TempDir::new().unwrap();
+    let assert = Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["eval", "--suite", "default", "--format", "table"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "suite\trecall@1\trecall@5\trecall@10\tqueue_precision",
+        ))
+        .stdout(predicate::str::contains("default\t"));
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(stdout.contains("\thard_negatives\t"));
+    assert!(stdout.contains("\t0/"));
+}
+
+#[test]
+fn eval_default_json_contains_raw_metric_counts() {
+    let cache = tempfile::TempDir::new().unwrap();
+    let assert = Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["eval", "--suite", "default", "--format", "json"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["command"], "eval");
+    assert_eq!(payload["status"], "ok");
+    assert_eq!(payload["metrics"]["suite"], "default");
+    assert!(
+        payload["metrics"]["recall"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|recall| recall["k"] == 10
+                && recall["found"].as_u64() == recall["total"].as_u64())
+    );
+    assert_eq!(payload["metrics"]["hard_negative_hits"]["found"], 0);
 }
 
 #[test]
