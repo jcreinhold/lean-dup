@@ -174,28 +174,17 @@ private def optionalNatField (json : Json) (key : String) (default : Nat) : Exce
           message := s!"`{key}` must be a natural number"
           details := none }
 
-private def validateShard
-    (request : Request)
-    (shardIndex shardCount : Nat) : Except ProtocolError Unit := do
-  if shardCount == 0 then
-    throw
-      { requestId? := some request.requestId
-        command? := some request.command
-        code := .invalidRequest
-        fatal := true
-        message := "`declaration_shard_count` must be greater than zero"
-        details := none }
-  if shardIndex >= shardCount then
-    throw
-      { requestId? := some request.requestId
-        command? := some request.command
-        code := .invalidRequest
-        fatal := true
-        message := "`declaration_shard_index` must be less than `declaration_shard_count`"
-        details := none }
-
 private def heartbeatLike (message : String) : Bool :=
   message.contains "maximum number of heartbeats" || message.contains "timeout at"
+
+private structure IndexChunkResult where
+  start : Nat
+  stop : Nat
+  declarationRows : Array Json
+  featureRows : Array Json
+
+private abbrev IndexChunkTask :=
+  Task (Except IO.Error (Nat × Nat × Nat × Nat × Except LeanDup.Extract.Error IndexChunkResult))
 
 private def errorDetailsForDeclaration
     (declaration : LeanDup.Extract.AcceptedDeclaration)
@@ -237,78 +226,158 @@ private unsafe def computeIndexChunk
           message := s!"index chunk processing failed: {error}"
           details := none }
 
-private unsafe def emitIndexRange
+private unsafe def computeIndexRange
+    (options : LeanDup.Extract.Options)
+    (env : Environment)
+    (declarations : Array LeanDup.Extract.AcceptedDeclaration)
+    (start stop : Nat) :
+    IO (Except LeanDup.Extract.Error IndexChunkResult) := do
+  let chunk := declarations.extract start stop
+  match ← computeIndexChunk options env chunk with
+  | .ok (declarationRows, featureRows) =>
+      pure <| .ok { start, stop, declarationRows, featureRows }
+  | .error err => pure <| .error err
+
+private unsafe def spawnIndexRange
     (request : Request)
     (options : LeanDup.Extract.Options)
     (env : Environment)
     (declarations : Array LeanDup.Extract.AcceptedDeclaration)
+    (serial : Nat)
     (start stop : Nat)
+    (emitted : IO.Ref (Array ResponseKind)) : IO IndexChunkTask := do
+  let starting :=
+    progressEnvelope
+      request
+      "lean.index.chunk.start"
+      (some start)
+      (some declarations.size)
+      none
+      s!"starting declarations {start}-{stop} of {declarations.size}"
+  writeJsonLine starting.toJson
+  emitted.modify (·.push ResponseKind.progress)
+  IO.asTask do
+    let chunkStarted ← IO.monoMsNow
+    let result ← computeIndexRange options env declarations start stop
+    let chunkFinished ← IO.monoMsNow
+    pure (serial, start, stop, chunkFinished - chunkStarted, result)
+
+private def chunkError
+    (request : Request)
+    (declarations : Array LeanDup.Extract.AcceptedDeclaration)
+    (start : Nat)
+    (err : LeanDup.Extract.Error) : ProtocolError :=
+  let details :=
+    match declarations[start]? with
+    | some declaration => errorDetailsForDeclaration declaration err.message
+    | none => Json.mkObj [("lean_error", Json.str err.message)]
+  { requestId? := some request.requestId
+    command? := some request.command
+    code := .internalError
+    fatal := true
+    message := "mathlib index chunk failed"
+    details := some details }
+
+private unsafe def emitIndexChunkResult
+    (request : Request)
+    (declarations : Array LeanDup.Extract.AcceptedDeclaration)
+    (result : IndexChunkResult)
+    (elapsedMs : Nat)
+    (emitted : IO.Ref (Array ResponseKind)) : IO Unit := do
+  for payload in result.declarationRows do
+    writeJsonLine (envelope request .declarationRow payload).toJson
+    emitted.modify (·.push .declarationRow)
+  for payload in result.featureRows do
+    writeJsonLine (envelope request .featureRow payload).toJson
+    emitted.modify (·.push .featureRow)
+  let progress :=
+    progressEnvelope
+      request
+      "lean.index.chunk"
+      (some result.stop)
+      (some declarations.size)
+      (some elapsedMs)
+      s!"indexed declarations {result.start}-{result.stop} of {declarations.size}"
+  writeJsonLine progress.toJson
+  emitted.modify (·.push ResponseKind.progress)
+
+private unsafe def emitIndexRanges
+    (request : Request)
+    (options : LeanDup.Extract.Options)
+    (env : Environment)
+    (declarations : Array LeanDup.Extract.AcceptedDeclaration)
+    (chunkSize parallelism : Nat)
     (emitted : IO.Ref (Array ResponseKind)) :
     IO (Except ProtocolError Unit) := do
-  let chunk := declarations.extract start stop
-  if chunk.isEmpty then
-    pure <| .ok ()
-  else
-    let starting :=
-      progressEnvelope
-        request
-        "lean.index.chunk.start"
-        (some start)
-        (some declarations.size)
-        none
-        s!"starting declarations {start}-{stop} of {declarations.size}"
-    writeJsonLine starting.toJson
-    emitted.modify (·.push ResponseKind.progress)
-    let chunkStart ← IO.monoMsNow
-    match ← computeIndexChunk options env chunk with
-    | .ok (declarationRows, featureRows) =>
-        for payload in declarationRows do
-          writeJsonLine (envelope request .declarationRow payload).toJson
-          emitted.modify (·.push .declarationRow)
-        for payload in featureRows do
-          writeJsonLine (envelope request .featureRow payload).toJson
-          emitted.modify (·.push .featureRow)
-        let chunkFinished ← IO.monoMsNow
-        let progress :=
-          progressEnvelope
-            request
-            "lean.index.chunk"
-            (some stop)
-            (some declarations.size)
-            (some (chunkFinished - chunkStart))
-            s!"indexed declarations {start}-{stop} of {declarations.size}"
-        writeJsonLine progress.toJson
-        emitted.modify (·.push ResponseKind.progress)
-        pure <| .ok ()
-    | .error err =>
-        if heartbeatLike err.message && chunk.size > 1 then
-          let split :=
-            progressEnvelope
-              request
-              "lean.index.chunk.split"
-              (some start)
-              (some declarations.size)
-              none
-              s!"splitting heartbeat-limited declarations {start}-{stop}"
-          writeJsonLine split.toJson
-          emitted.modify (·.push ResponseKind.progress)
-          let mid := start + chunk.size / 2
-          match ← emitIndexRange request options env declarations start mid emitted with
-          | .error err => pure <| .error err
-          | .ok _ => emitIndexRange request options env declarations mid stop emitted
-        else
-          let details :=
-            match chunk[0]? with
-            | some declaration => errorDetailsForDeclaration declaration err.message
-            | none => Json.mkObj [("lean_error", Json.str err.message)]
-          pure <|
-            .error
-              { requestId? := some request.requestId
-                command? := some request.command
-                code := .internalError
-                fatal := true
-                message := "mathlib index chunk failed"
-                details := some details }
+  let mut pending : List (Nat × Nat) := []
+  let mut start := 0
+  while start < declarations.size do
+    let stop := Nat.min declarations.size (start + chunkSize)
+    pending := pending.concat (start, stop)
+    start := stop
+
+  let maxActive := Nat.max 1 parallelism
+  let mut active : List IndexChunkTask := []
+  let mut serial := 0
+  let mut failed : Option ProtocolError := none
+
+  while failed.isNone && active.length < maxActive && !pending.isEmpty do
+    match pending with
+    | [] => pure ()
+    | (rangeStart, rangeStop) :: rest =>
+        pending := rest
+        let task ← spawnIndexRange request options env declarations serial rangeStart rangeStop emitted
+        active := active.concat task
+        serial := serial + 1
+  while failed.isNone && !active.isEmpty do
+    match active with
+    | [] => pure ()
+    | task :: rest =>
+        let (taskResult, remainingTasks) ← IO.waitAny' (task :: rest)
+        active := remainingTasks
+        match taskResult with
+        | .error ioErr =>
+            failed :=
+              some
+                { requestId? := some request.requestId
+                  command? := some request.command
+                  code := .internalError
+                  fatal := true
+                  message := s!"mathlib index task failed: {ioErr}"
+                  details := none }
+        | .ok (_serial, rangeStart, rangeStop, elapsedMs, .ok result) =>
+            emitIndexChunkResult request declarations result elapsedMs emitted
+        | .ok (_serial, rangeStart, rangeStop, _elapsedMs, .error err) =>
+            if heartbeatLike err.message && rangeStop - rangeStart > 1 then
+              let split :=
+                progressEnvelope
+                  request
+                  "lean.index.chunk.split"
+                  (some rangeStart)
+                  (some declarations.size)
+                  none
+                  s!"splitting heartbeat-limited declarations {rangeStart}-{rangeStop}"
+              writeJsonLine split.toJson
+              emitted.modify (·.push ResponseKind.progress)
+              let mid := rangeStart + (rangeStop - rangeStart) / 2
+              pending := (rangeStart, mid) :: (mid, rangeStop) :: pending
+            else
+              failed := some (chunkError request declarations rangeStart err)
+        while failed.isNone && active.length < maxActive && !pending.isEmpty do
+          match pending with
+          | [] => pure ()
+          | (rangeStart, rangeStop) :: rest =>
+              pending := rest
+              let task ← spawnIndexRange request options env declarations serial rangeStart rangeStop emitted
+              active := active.concat task
+              serial := serial + 1
+
+  match failed with
+  | some err =>
+      for task in active do
+        IO.cancel task
+      pure <| .error err
+  | none => pure <| .ok ()
 
 private unsafe def handleIndexStreaming (request : Request) : IO UInt32 := do
   match request.modules with
@@ -336,24 +405,16 @@ private unsafe def handleIndexStreaming (request : Request) : IO UInt32 := do
                 writeJsonLine err.toJson
                 pure 1
             | .ok requestedChunkSize =>
-                match optionalNatField request.payload "declaration_shard_index" 0,
-                    optionalNatField request.payload "declaration_shard_count" 1 with
-                | .error err, _ =>
+                match optionalNatField request.payload "declaration_parallelism" 1 with
+                | .error err =>
                     writeJsonLine err.toJson
                     pure 1
-                | _, .error err =>
-                    writeJsonLine err.toJson
-                    pure 1
-                | .ok shardIndex, .ok shardCount =>
-                    match validateShard request shardIndex shardCount with
-                    | .error err =>
-                        writeJsonLine err.toJson
-                        pure 1
-                    | .ok _ =>
-                        let chunkSize := Nat.max 1 requestedChunkSize
-                        let emitted ← IO.mkRef #[]
-                        let importStarted ← IO.monoMsNow
-                        match ← LeanDup.Extract.importRequestedModules (toExtractModules modules) with
+                | .ok requestedParallelism =>
+                    let chunkSize := Nat.max 1 requestedChunkSize
+                    let parallelism := Nat.max 1 requestedParallelism
+                    let emitted ← IO.mkRef #[]
+                    let importStarted ← IO.monoMsNow
+                    match ← LeanDup.Extract.importRequestedModules (toExtractModules modules) with
                         | .error err =>
                             writeJsonLine (extractError request err).toJson
                             pure 1
@@ -395,31 +456,31 @@ private unsafe def handleIndexStreaming (request : Request) : IO UInt32 := do
                                   s!"enumerated {declarations.size} accepted declarations"
                               writeJsonLine progress.toJson
                               emitted.modify (·.push ResponseKind.progress)
-                              let shardStart := declarations.size * shardIndex / shardCount
-                              let shardStop := declarations.size * (shardIndex + 1) / shardCount
                               let progress :=
                                 progressEnvelope
                                   request
-                                  "lean.index.shard"
-                                  (some shardStart)
+                                  "lean.index.scheduler"
+                                  (some 0)
                                   (some declarations.size)
                                   none
-                                  s!"worker shard {shardIndex + 1}/{shardCount} owns declarations {shardStart}-{shardStop}"
+                                  s!"indexing {declarations.size} declarations with {parallelism} worker task(s)"
                               writeJsonLine progress.toJson
                               emitted.modify (·.push ResponseKind.progress)
-                              let rec loop (start : Nat) : IO UInt32 := do
-                                if start < shardStop then
-                                  let stop := Nat.min shardStop (start + chunkSize)
-                                  match ← emitIndexRange request options env declarations start stop emitted with
-                                  | .error err =>
-                                      writeJsonLine err.toJson
-                                      pure 1
-                                  | .ok _ =>
-                                      loop stop
-                                else
+                              match ←
+                                  emitIndexRanges
+                                    request
+                                    options
+                                    env
+                                    declarations
+                                    chunkSize
+                                    parallelism
+                                    emitted with
+                              | .error err =>
+                                  writeJsonLine err.toJson
+                                  pure 1
+                              | .ok _ =>
                                   writeJsonLine (completeEnvelope request (← emitted.get)).toJson
                                   pure 0
-                              loop shardStart
                             catch error =>
                               writeJsonLine
                                 ({ requestId? := some request.requestId

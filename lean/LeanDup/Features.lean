@@ -15,7 +15,7 @@ open Lean
 open Lean.Meta
 
 /-- Semantic algorithm marker for Lean-owned feature rows. -/
-def version : String := "features.roles.v2"
+def version : String := "features.roles.v3"
 
 /-- Feature errors are mapped by the worker into protocol error envelopes. -/
 inductive ErrorKind where
@@ -51,16 +51,16 @@ private def optionalJsonField (json : Json) (key : String) : Option Json :=
 private def stringArrayJson (values : Array String) : Json :=
   Json.arr (values.map Json.str)
 
-private def hashMod : Nat := 18446744073709551557
+private def hashSeed : UInt64 := 14695981039346656037
 
-private def hashSeed : Nat := 1469598103934665603
+private def hashPrime : UInt64 := 1099511628211
 
 private def roleKeyVersion : String := "features.role_key.v1"
 
 private def stableHash (text : String) : String :=
   toString <|
     text.foldl
-      (fun acc char => (acc * 131 + char.toNat + 17) % hashMod)
+      (fun acc char => (acc ^^^ char.toNat.toUInt64) * hashPrime)
       hashSeed
 
 private inductive Role where
@@ -180,19 +180,29 @@ private def lowSignalMarkers (features : Array RoleFeature) : Array String := Id
 private def markersJson (markers : Array String) : Json :=
   Json.arr (markers.map Json.str)
 
-private def roleFacts (constInfo : ConstantInfo) : MetaM (Array RoleFeature × Array String) := do
-  forallTelescope constInfo.type fun fvars conclusion => do
-    let mut features := #[]
-    features := addConstants .conclusionConst conclusion features
-    features := addHead .conclusionHead conclusion features
-    for fvar in fvars do
-      let localDecl ← fvar.fvarId!.getDecl
-      if ← Meta.isProp localDecl.type then
-        features := addConstants .hypothesisConst localDecl.type features
-        features := addHead .hypothesisHead localDecl.type features
-      else
-        features := addHead .binderDomainHead localDecl.type features
-    pure (sortedFeatures features, lowSignalMarkers features)
+private def roleFactsFromTelescope
+    (fvars : Array Expr)
+    (conclusion : Expr) : MetaM (Array RoleFeature × Array String) := do
+  let mut features := #[]
+  features := addConstants .conclusionConst conclusion features
+  features := addHead .conclusionHead conclusion features
+  for fvar in fvars do
+    let localDecl ← fvar.fvarId!.getDecl
+    if ← Meta.isProp localDecl.type then
+      features := addConstants .hypothesisConst localDecl.type features
+      features := addHead .hypothesisHead localDecl.type features
+    else
+      features := addHead .binderDomainHead localDecl.type features
+  pure (sortedFeatures features, lowSignalMarkers features)
+
+private def semanticFacts
+    (declaration : LeanDup.Extract.AcceptedDeclaration) :
+    MetaM (LeanDup.Canonical.Fingerprints × Array RoleFeature × Array String) := do
+  forallTelescope declaration.constInfo.type fun fvars conclusion => do
+    let fingerprints ←
+      LeanDup.Canonical.computeFromTelescope declaration.constInfo fvars conclusion
+    let (roleFeatures, markers) ← roleFactsFromTelescope fvars conclusion
+    pure (fingerprints, roleFeatures, markers)
 
 private def parseDeclarationIds (payload : Json) : Except Error (Option (Array String)) := do
   match optionalJsonField payload "declaration_ids" with
@@ -268,8 +278,7 @@ def featureRows
     (declarations : Array LeanDup.Extract.AcceptedDeclaration) : MetaM (Array Json) := do
   let mut rows := #[]
   for declaration in declarations do
-    let fingerprints ← LeanDup.Canonical.compute declaration.constInfo
-    let (roleFeatures, markers) ← roleFacts declaration.constInfo
+    let (fingerprints, roleFeatures, markers) ← semanticFacts declaration
     rows := rows.push (rowPayload declaration fingerprints roleFeatures markers)
   pure rows
 

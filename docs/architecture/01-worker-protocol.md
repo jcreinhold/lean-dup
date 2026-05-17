@@ -11,7 +11,7 @@ JSONL are subprocess encodings used to move those facts between processes.
 
 Rust callers may rely on:
 
-- the five public commands: `extract`, `features`, `probe`, `doctor`, and `version`;
+- the six worker commands: `extract`, `features`, `index`, `probe`, `doctor`, and `version`;
 - the eight response kinds: `version_result`, `doctor_result`, `declaration_row`, `feature_row`, `probe_result`,
     `progress`, `complete`, and `error`;
 - stable schema-version and compatibility rules;
@@ -38,7 +38,7 @@ The smallest public interface is:
 
 - one JSON request object per worker subprocess invocation;
 - JSONL response envelopes on stdout;
-- the five commands and eight response kinds listed above.
+- the six commands and eight response kinds listed above.
 
 These design decisions must not leak upward or sideways:
 
@@ -86,7 +86,7 @@ Each worker run receives exactly one UTF-8 JSON request object on stdin. The req
 
 - `schema_version`: required string. For this document, `lean-dup.worker.v1`.
 - `request_id`: required nonempty string chosen by Rust for correlation.
-- `command`: required string, one of `extract`, `features`, `probe`, `doctor`, or `version`.
+- `command`: required string, one of `extract`, `features`, `index`, `probe`, `doctor`, or `version`.
 - `capabilities`: optional array of required capability names. The worker must reject a request if it cannot satisfy any
     required capability.
 - `extensions`: optional object for optional, non-required v1 data.
@@ -236,6 +236,43 @@ Response:
 - zero or more `feature_row` envelopes;
 - one `complete` on success.
 
+### `index`
+
+`index` is an internal streaming command for import-once index construction. It answers "stream declaration and feature
+rows for this module set without forcing Rust to choose Lean import, chunking, heartbeat recovery, or task scheduling
+policy."
+
+Request payload fields:
+
+- `workspace_root`: display path for source spans and diagnostics.
+- `modules`: nonempty array of module descriptors with `module`, `origin`, and optional source-root attribution.
+- `include_private`: boolean.
+- `include_generated`: boolean.
+- `declaration_chunk_size`: optional natural number. This is a private worker hint, not CLI policy.
+- `declaration_parallelism`: optional natural number. This is derived by Rust from the effective `LEAN_NUM_THREADS`
+    setting and remains private to worker runtime code.
+
+Callers may rely on:
+
+- streamed `declaration_row` and `feature_row` envelopes using the same row schemas as `extract` and `features`;
+- progress events before import, after import, after declaration enumeration, at chunk start/finish, and during
+    heartbeat-driven chunk splitting;
+- a final `complete` envelope only after all emitted rows are valid for the request.
+
+Hidden decisions:
+
+- whether chunks execute serially or through Lean tasks;
+- how many Lean runtime threads are made available to the worker subprocess;
+- declaration chunk boundaries, split policy, task priority, and task completion order;
+- SQLite write, cache finalization, and row pairing policy in Rust.
+
+Response:
+
+- zero or more `progress` events;
+- zero or more `declaration_row` envelopes;
+- zero or more `feature_row` envelopes;
+- one `complete` on success.
+
 ### `probe`
 
 `probe` runs bounded Lean semantic checks for candidate declaration pairs. It answers "which candidate relations are
@@ -279,7 +316,7 @@ Payload fields:
 - `worker_version`: string.
 - `lean_version`: string or null.
 - `semantic_versions`: object with `extract`, `features`, and `probe` string versions.
-- `supported_commands`: array containing `extract`, `features`, `probe`, `doctor`, and `version`.
+- `supported_commands`: array containing `extract`, `features`, `index`, `probe`, `doctor`, and `version`.
 - `supported_capabilities`: array of optional capability names.
 
 ### `doctor_result`
@@ -489,7 +526,7 @@ that the worker supports every command and required capability before using it f
     policy outside the worker schema.
 - **Conjoined methods:** avoided because each command has a standalone request/response contract and does not require a
     caller to understand another command's implementation.
-- **Hard-to-describe public API:** mitigated by one request shape, one envelope shape, five commands, and eight response
+- **Hard-to-describe public API:** mitigated by one request shape, one envelope shape, six commands, and eight response
     kinds.
 - **Implementation details contaminating interface comments:** avoided by documenting caller guarantees and hidden
     decisions rather than Lean traversal algorithms, storage layout, or migration internals.

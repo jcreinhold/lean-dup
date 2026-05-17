@@ -75,11 +75,6 @@ impl WorkerClient {
         self.cancelled.store(true, Ordering::Relaxed);
     }
 
-    /// Return the per-call timeout used for worker subprocesses.
-    pub(crate) fn timeout(&self) -> Duration {
-        self.timeout
-    }
-
     /// Return the worker and semantic algorithm versions for a Lake workspace.
     pub fn version(&self, workspace_root: PathBuf) -> Result<WorkerCall<WorkerVersion>, WorkerError> {
         let payload = serde_json::json!({ "workspace_root": workspace_root });
@@ -119,8 +114,7 @@ impl WorkerClient {
         payload["include_private"] = Value::Bool(batch.include_private);
         payload["include_generated"] = Value::Bool(batch.include_generated);
         payload["declaration_chunk_size"] = serde_json::json!(batch.declaration_chunk_size);
-        payload["declaration_shard_index"] = serde_json::json!(batch.declaration_shard_index);
-        payload["declaration_shard_count"] = serde_json::json!(batch.declaration_shard_count);
+        payload["declaration_parallelism"] = serde_json::json!(batch.declaration_parallelism);
         let request = Request::new(request_id(), Command::Index, payload);
         let mut adapter = |item: ProtocolItem| match item {
             ProtocolItem::Row(Row::Declaration(row)) => sink(IndexStreamItem::Declaration(row)),
@@ -205,8 +199,7 @@ pub struct IndexBatch {
     pub include_private: bool,
     pub include_generated: bool,
     pub declaration_chunk_size: usize,
-    pub declaration_shard_index: usize,
-    pub declaration_shard_count: usize,
+    pub declaration_parallelism: usize,
 }
 
 impl IndexBatch {
@@ -618,7 +611,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(call.rows.len(), 1);
-        assert_eq!(call.rows[0].feature_version, "features.roles.v1");
+        assert_eq!(call.rows[0].feature_version, "features.roles.v3");
     }
 
     #[test]

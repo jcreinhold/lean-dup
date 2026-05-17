@@ -35,6 +35,14 @@ struct ProcessOutput {
     timed_out: bool,
 }
 
+struct ProcessSpec<'a> {
+    cwd: &'a Path,
+    program: &'a str,
+    args: &'a [String],
+    stdin: &'a str,
+    envs: &'a [(&'a str, String)],
+}
+
 #[derive(Debug)]
 struct StreamProcessOutput {
     status: i32,
@@ -78,10 +86,13 @@ impl SubprocessTransport {
         }
         let output = perf::measure_result(CostClass::WorkerStartup, "worker.build_process", || {
             run_process(
-                &self.worker_root,
-                "lake",
-                &["build".to_owned(), "lean_dup_worker".to_owned()],
-                "",
+                ProcessSpec {
+                    cwd: &self.worker_root,
+                    program: "lake",
+                    args: &["build".to_owned(), "lean_dup_worker".to_owned()],
+                    stdin: "",
+                    envs: &[],
+                },
                 control,
             )
         })?;
@@ -110,16 +121,30 @@ impl SubprocessTransport {
         })?;
         perf::record_count(CostClass::Transport, "worker.stdin_bytes", input.len() as u64);
         if let Some(command) = &self.command_override {
-            return run_process(&command.cwd, &command.program, &command.args, &input, control);
+            let envs = worker_env(request);
+            return run_process(
+                ProcessSpec {
+                    cwd: &command.cwd,
+                    program: &command.program,
+                    args: &command.args,
+                    stdin: &input,
+                    envs: &envs,
+                },
+                control,
+            );
         }
         let worker_path = self.build_worker(control)?;
         let worker = worker_path.to_string_lossy().into_owned();
+        let envs = worker_env(request);
         perf::measure_result(CostClass::WorkerStartup, "worker.subprocess_call", || {
             run_process(
-                &request_workspace(request)?,
-                "lake",
-                &["env".to_owned(), worker],
-                &input,
+                ProcessSpec {
+                    cwd: &request_workspace(request)?,
+                    program: "lake",
+                    args: &["env".to_owned(), worker],
+                    stdin: &input,
+                    envs: &envs,
+                },
                 control,
             )
         })
@@ -168,11 +193,15 @@ impl WorkerTransport for SubprocessTransport {
         })?;
         perf::record_count(CostClass::Transport, "worker.stdin_bytes", input.len() as u64);
         let output = if let Some(command) = &self.command_override {
+            let envs = worker_env(&request);
             run_process_streaming(
-                &command.cwd,
-                &command.program,
-                &command.args,
-                &input,
+                ProcessSpec {
+                    cwd: &command.cwd,
+                    program: &command.program,
+                    args: &command.args,
+                    stdin: &input,
+                    envs: &envs,
+                },
                 &control,
                 &request,
                 sink,
@@ -180,12 +209,16 @@ impl WorkerTransport for SubprocessTransport {
         } else {
             let worker_path = self.build_worker(&control)?;
             let worker = worker_path.to_string_lossy().into_owned();
+            let envs = worker_env(&request);
             perf::measure_result(CostClass::WorkerStartup, "worker.subprocess_call", || {
                 run_process_streaming(
-                    &request_workspace(&request)?,
-                    "lake",
-                    &["env".to_owned(), worker],
-                    &input,
+                    ProcessSpec {
+                        cwd: &request_workspace(&request)?,
+                        program: "lake",
+                        args: &["env".to_owned(), worker],
+                        stdin: &input,
+                        envs: &envs,
+                    },
                     &control,
                     &request,
                     sink,
@@ -198,6 +231,11 @@ impl WorkerTransport for SubprocessTransport {
             });
         }
         if output.status != 0 {
+            if !output.diagnostics.is_empty() {
+                return Err(WorkerError::WorkerDiagnostic {
+                    diagnostics: output.diagnostics,
+                });
+            }
             return Err(WorkerError::NonZeroExit {
                 status: output.status,
                 stderr: output.stderr,
@@ -232,27 +270,37 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn run_process(
-    cwd: &Path,
-    program: &str,
-    args: &[String],
-    stdin: &str,
-    control: &CallControl,
-) -> Result<ProcessOutput, WorkerError> {
+fn worker_env(request: &Request) -> Vec<(&'static str, String)> {
+    if request.command != protocol::Command::Index {
+        return Vec::new();
+    }
+    let jobs = request
+        .to_json()
+        .get("declaration_parallelism")
+        .and_then(|value| value.as_u64())
+        .filter(|jobs| *jobs > 0)
+        .unwrap_or(1);
+    vec![("LEAN_NUM_THREADS", jobs.to_string())]
+}
+
+fn run_process(spec: ProcessSpec<'_>, control: &CallControl) -> Result<ProcessOutput, WorkerError> {
     if control.cancelled.load(Ordering::Relaxed) {
         return Err(WorkerError::Cancelled);
     }
-    let mut child = ProcessCommand::new(program)
-        .args(args)
-        .current_dir(cwd)
+    let mut command = ProcessCommand::new(spec.program);
+    command
+        .args(spec.args)
+        .current_dir(spec.cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|source| WorkerError::Io {
-            message: format!("could not start `{program}`"),
-            source,
-        })?;
+        .stderr(Stdio::piped());
+    for (key, value) in spec.envs {
+        command.env(key, value);
+    }
+    let mut child = command.spawn().map_err(|source| WorkerError::Io {
+        message: format!("could not start `{}`", spec.program),
+        source,
+    })?;
 
     let mut child_stdin = child.stdin.take();
     let stdout = child.stdout.take().expect("stdout was piped");
@@ -262,7 +310,7 @@ fn run_process(
 
     if let Some(mut child_stdin) = child_stdin.take() {
         child_stdin
-            .write_all(stdin.as_bytes())
+            .write_all(spec.stdin.as_bytes())
             .map_err(|source| WorkerError::Io {
                 message: "could not write worker request".to_owned(),
                 source,
@@ -318,10 +366,7 @@ fn run_process(
 }
 
 fn run_process_streaming(
-    cwd: &Path,
-    program: &str,
-    args: &[String],
-    stdin: &str,
+    spec: ProcessSpec<'_>,
     control: &CallControl,
     request: &Request,
     sink: &mut dyn FnMut(ProtocolItem) -> Result<(), WorkerError>,
@@ -329,21 +374,24 @@ fn run_process_streaming(
     if control.cancelled.load(Ordering::Relaxed) {
         return Err(WorkerError::Cancelled);
     }
-    let mut child = ProcessCommand::new(program)
-        .args(args)
-        .current_dir(cwd)
+    let mut command = ProcessCommand::new(spec.program);
+    command
+        .args(spec.args)
+        .current_dir(spec.cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|source| WorkerError::Io {
-            message: format!("could not start `{program}`"),
-            source,
-        })?;
+        .stderr(Stdio::piped());
+    for (key, value) in spec.envs {
+        command.env(key, value);
+    }
+    let mut child = command.spawn().map_err(|source| WorkerError::Io {
+        message: format!("could not start `{}`", spec.program),
+        source,
+    })?;
 
     if let Some(mut child_stdin) = child.stdin.take() {
         child_stdin
-            .write_all(stdin.as_bytes())
+            .write_all(spec.stdin.as_bytes())
             .map_err(|source| WorkerError::Io {
                 message: "could not write worker request".to_owned(),
                 source,

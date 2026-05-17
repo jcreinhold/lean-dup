@@ -1,8 +1,9 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
+use rustc_hash::FxHashMap as HashMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
@@ -19,7 +20,7 @@ use crate::workspace::{self, ResolvedWorkspace};
 
 const INDEX_SCHEMA_VERSION: &str = "lean-dup.index.sqlite.v1";
 const MATHLIB_DECLARATION_CHUNK_SIZE: usize = 32;
-const MAX_MATHLIB_INDEX_JOBS: usize = 2;
+const MAX_MATHLIB_INDEX_THREADS: usize = 2;
 
 /// Builds, resolves, and opens persisted declaration indexes.
 ///
@@ -714,16 +715,8 @@ fn index_cache_key(request: &IndexBuildRequest, version: &WorkerVersion) -> Resu
         } else {
             file_digest(request.workspace.manifest_path())?
         },
-        git_head: if shared_mathlib {
-            git_output(&request.workspace.root, &["rev-parse", "HEAD"])
-        } else {
-            git_output(&request.workspace.root, &["rev-parse", "HEAD"])
-        },
-        git_dirty: if shared_mathlib {
-            git_output(&request.workspace.root, &["status", "--porcelain"])
-        } else {
-            git_output(&request.workspace.root, &["status", "--porcelain"])
-        },
+        git_head: git_output(&request.workspace.root, &["rev-parse", "HEAD"]),
+        git_dirty: git_output(&request.workspace.root, &["status", "--porcelain"]),
         sources: request
             .workspace
             .source_files
@@ -827,72 +820,70 @@ fn write_batched_sqlite_index(
 
     let modules = modules_for(request);
     let total_modules = modules.len();
+    let index_threads = mathlib_index_threads();
     let mut writer = StreamingIndexWriter {
-        pending_declarations: HashMap::new(),
-        pending_features: HashMap::new(),
+        pending_declarations: HashMap::default(),
+        pending_features: HashMap::default(),
         written: 0,
     };
     reporter.event(
         "index.mathlib",
         Some(0),
         Some(total_modules as u64),
-        format!("streaming mathlib index from one worker over {total_modules} modules"),
+        format!("streaming mathlib index with {index_threads} Lean task(s) over {total_modules} modules"),
     );
     connection.execute_batch("BEGIN IMMEDIATE")?;
     let mut diagnostics = Vec::new();
     let mut insertion_error = None;
-    let call = reporter.measure("worker.index", |measure_reporter| {
-        worker.index_stream(
-            IndexBatch {
-                workspace_root: request.execution_root(),
-                modules,
-                include_private: request.include_private,
-                include_generated: request.include_generated,
-                declaration_chunk_size: MATHLIB_DECLARATION_CHUNK_SIZE,
-            },
-            &mut |item| {
-                match item {
-                    IndexStreamItem::Declaration(row) => {
-                        if let Err(error) = writer.accept_declaration(&connection, row) {
-                            insertion_error = Some(error);
-                            return Err(WorkerError::Protocol {
-                                message: "could not insert streamed declaration row".to_owned(),
-                            });
+    let worker_result = reporter.measure("worker.index", |measure_reporter| {
+        worker
+            .index_stream(
+                IndexBatch {
+                    workspace_root: request.execution_root(),
+                    modules,
+                    include_private: request.include_private,
+                    include_generated: request.include_generated,
+                    declaration_chunk_size: MATHLIB_DECLARATION_CHUNK_SIZE,
+                    declaration_parallelism: index_threads,
+                },
+                &mut |item| {
+                    match item {
+                        IndexStreamItem::Declaration(row) => {
+                            if let Err(error) = writer.accept_declaration(&connection, row) {
+                                insertion_error = Some(error);
+                                return Err(WorkerError::Protocol {
+                                    message: "could not insert streamed declaration row".to_owned(),
+                                });
+                            }
+                        }
+                        IndexStreamItem::Feature(row) => {
+                            if let Err(error) = writer.accept_feature(&connection, row) {
+                                insertion_error = Some(error);
+                                return Err(WorkerError::Protocol {
+                                    message: "could not insert streamed feature row".to_owned(),
+                                });
+                            }
+                        }
+                        IndexStreamItem::Event(event) => {
+                            measure_reporter.event(
+                                format!("worker.{}", event.phase),
+                                event.current,
+                                event.total,
+                                event.message,
+                            );
+                        }
+                        IndexStreamItem::Diagnostic(diagnostic) => {
+                            diagnostics.push(format!("{}: {}", diagnostic.code, diagnostic.message));
                         }
                     }
-                    IndexStreamItem::Feature(row) => {
-                        if let Err(error) = writer.accept_feature(&connection, row) {
-                            insertion_error = Some(error);
-                            return Err(WorkerError::Protocol {
-                                message: "could not insert streamed feature row".to_owned(),
-                            });
-                        }
-                    }
-                    IndexStreamItem::Event(event) => {
-                        measure_reporter.event(
-                            format!("worker.{}", event.phase),
-                            event.current,
-                            event.total,
-                            event.message,
-                        );
-                    }
-                    IndexStreamItem::Diagnostic(diagnostic) => {
-                        diagnostics.push(format!("{}: {}", diagnostic.code, diagnostic.message));
-                    }
-                }
-                Ok(())
-            },
-        )
+                    Ok(())
+                },
+            )
+            .map(|call| call.diagnostics)
     });
-    match call {
-        Ok(call) => {
-            diagnostics.extend(diagnostics_to_strings(call.diagnostics));
-            if let Some(error) = insertion_error {
-                let _ = connection.execute_batch("ROLLBACK");
-                return Err(error);
-            }
-            writer.finish()?;
-            connection.execute_batch("COMMIT")?;
+    match worker_result {
+        Ok(worker_diagnostics) => {
+            diagnostics.extend(diagnostics_to_strings(worker_diagnostics));
         }
         Err(error) => {
             let _ = connection.execute_batch("ROLLBACK");
@@ -902,8 +893,23 @@ fn write_batched_sqlite_index(
             return Err(error.into());
         }
     }
+    if let Some(error) = insertion_error {
+        let _ = connection.execute_batch("ROLLBACK");
+        return Err(error);
+    }
+    writer.finish()?;
+    connection.execute_batch("COMMIT")?;
     replace_file(&temp_path, index_path)?;
     Ok(BatchedIndexBuild { diagnostics })
+}
+
+fn mathlib_index_threads() -> usize {
+    std::env::var("LEAN_NUM_THREADS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|jobs| *jobs > 0)
+        .map(|jobs| jobs.min(MAX_MATHLIB_INDEX_THREADS))
+        .unwrap_or(1)
 }
 
 impl StreamingIndexWriter {

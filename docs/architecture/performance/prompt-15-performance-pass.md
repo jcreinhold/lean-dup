@@ -80,6 +80,52 @@ Result: 744 ms wall-time reduction on the fixture audit, with the same 260 candi
 follows the POSD intervention order by removing repeated work and pulling the build-cache policy down into the owning
 transport module instead of exposing a build/cache knob to callers.
 
+## Mathlib Throughput Refactor
+
+The next measured bottleneck was the mathlib feature path itself. The first project-centered implementation split
+mathlib into small Rust-side module batches; that repeatedly paid Lean import/environment setup and hit heartbeat
+recovery around `Mathlib.Algebra.Category.*`. The stopped run reached only about 202/8060 modules after about 22
+minutes.
+
+The first import-once implementation fixed repeated imports but still spent almost all sampled CPU in two avoidable
+places: repeated `forallTelescope` opening in feature/canonical row construction, and string/Nat-heavy stable hashing
+inside the canonical serializer. A sample of the long run showed about 842.7 MB physical footprint, 870.2 MB peak, and
+the main thread dominated by `LeanDup.Features.featureRows`, `forallTelescope`, and `LeanDup.Canonical.stableHash`.
+That run reached about 79000/312711 declarations after about 19.6 minutes.
+
+Accepted changes:
+
+- Pull telescope ownership into Lean feature extraction: `featureRows` now opens each declaration telescope once and
+    passes the opened context to canonical fingerprinting.
+- Replace string/Nat hash folding in hot semantic keys with a bounded `UInt64` FNV-style non-cryptographic hash. These
+    keys are opaque semantic-index keys, not security boundaries.
+- Move parallelism into the Lean worker instead of Rust process sharding. Rust sends one private `index` request; the
+    worker imports the project-pinned mathlib environment once, enumerates accepted declarations once, and schedules
+    declaration chunks with `IO.asTask`/`IO.waitAny'` inside that shared environment.
+- Use `LEAN_NUM_THREADS` as the single operator-facing concurrency knob. Rust clamps it to the current safe maximum of
+    2, sends the effective value as private `declaration_parallelism`, and sets the worker subprocess's
+    `LEAN_NUM_THREADS` to the same effective value.
+- Keep one SQLite writer path in Rust. Parallel tasks stream rows back through one worker stdout stream; SQLite locking
+    and row finalization policy do not leak upward.
+
+Rejected after measurement: Rust-side multi-worker sharding. A 180 s exploratory run with two worker subprocesses
+processed about 213440/312711 declarations, but it duplicated the imported mathlib environment and made memory pressure
+a Rust orchestration policy. It was useful as a probe, not a design to keep.
+
+Current prefix measurements:
+
+| Workload prefix                                  | Concurrency     | Import ms | Enumerate ms | Progress at cutoff     | Cutoff wall |
+| ------------------------------------------------ | --------------- | --------: | -----------: | ----------------------: | ----------: |
+| import-once before hot-path fixes                | serial          |     22900 |        26400 | 79000/312711            |   ~1175 s   |
+| after telescope/hash fixes                       | serial          |     25644 |        29110 | 106368/312711           | 179.697 s   |
+| Rust two-worker sharding probe                   | 2 subprocesses  |     21966 |        25366 | ~213440/312711 combined |  ~180 s     |
+| single worker, Lean internal tasks               | `LEAN_NUM_THREADS=2` | 18069 |        21647 | 77024/312711            | 74.698 s    |
+
+The single-worker internal-task path is the chosen design even where the short prefix is not always faster than the
+two-process probe, because it preserves the deep boundary: one imported environment, one worker protocol request, one
+writer, and no caller-visible shard/cache/source-root policy. It also leaves the next measured improvement in the right
+place: Lean-owned scheduling can become adaptive by declaration cost without changing Rust or the CLI.
+
 ## Realistic Workload Baselines
 
 The elapsed class totals are instrumentation events, not an additive critical path. `worker.subprocess_call` is
@@ -143,7 +189,8 @@ FFI. After build caching, worker build/startup is not dominant on completed fixt
 
 Prompt 19 remains skipped. The next useful optimization is not a `lean-rs` backend; it is diagnosing why the feature
 worker exits nonzero after emitting large mathlib/full-KanProofs extract output, then measuring again once the realistic
-workloads complete.
+workloads complete. The new streaming path already keeps structured diagnostics when a subprocess exits nonzero after
+emitting JSONL error envelopes.
 
 ## POSD Review
 
@@ -152,16 +199,17 @@ calls during a single process. It pulls complexity down into the subprocess tran
 policy. It optimizes the abstraction boundary before micro-tuning by keeping JSONL, SQLite, and cache internals private
 and exposing only stable cost classes through the hidden harness.
 
-Rejected optimizations: no retrieval cache knobs, SQLite invalidation changes, parallelism, or FFI transport were added.
-The measured workloads either show tiny retrieval/SQLite costs or fail before those phases, so those changes would leak
-internals or add policy without evidence.
+Rejected optimizations: no retrieval cache knobs, SQLite invalidation changes, Rust-side process sharding, or FFI
+transport were added. The measured workloads either show tiny retrieval/SQLite costs, or show the bottleneck inside
+Lean semantic traversal. Parallelism was added only behind the Lean-owned indexing boundary after measuring the serial
+critical path.
 
 ## Residual Risk
 
-The report currently captures top-level stderr and output tails, but a nonzero worker exit still compresses the root
-cause to `worker exited with status 1` at the Rust CLI boundary. That is a diagnostics limitation, not an optimization
-target. It should be fixed before the next performance pass so failed worker envelopes preserve their structured Lean
-error payloads.
+The report still contains prefix measurements for the new parallel path rather than a completed cold mathlib index.
+That is enough to validate the architecture change and live progress, but a full cold/warm pass should be rerun after
+the next semantic hot-path improvement. The worker transport now prefers structured worker diagnostics over generic
+nonzero-exit errors when a failing subprocess emitted JSONL diagnostics.
 
 ## Red Flag Review
 

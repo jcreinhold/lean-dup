@@ -1,6 +1,7 @@
 use std::cmp::{Ordering, Reverse};
-use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
+use std::collections::{BTreeMap, BinaryHeap};
 
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use serde::Serialize;
 
 use crate::error::Result;
@@ -152,7 +153,7 @@ fn retrieve_candidates_inner(workspace: &[HydratedDeclaration], indexes: &[Opene
     let mut external_needed: BTreeMap<usize, Vec<DeclarationHandle>> = BTreeMap::new();
 
     for anchor_index in 0..workspace.len() {
-        let mut accumulators: HashMap<CandidateId, CandidateAccumulator> = HashMap::new();
+        let mut accumulators: HashMap<CandidateId, CandidateAccumulator> = HashMap::default();
         let plans = sorted_plans(&workspace_plans[anchor_index]);
         for plan in plans {
             add_local_matches(
@@ -409,9 +410,9 @@ fn sorted_plans(plans: &[PlannedKey]) -> Vec<&PlannedKey> {
 }
 
 fn local_postings(plans_by_decl: &[Vec<PlannedKey>]) -> HashMap<PostingKey, Vec<usize>> {
-    let mut postings: HashMap<PostingKey, Vec<usize>> = HashMap::new();
+    let mut postings: HashMap<PostingKey, Vec<usize>> = HashMap::default();
     for (index, plans) in plans_by_decl.iter().enumerate() {
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         for plan in plans {
             if seen.insert(plan.key.clone()) {
                 postings.entry(plan.key.clone()).or_default().push(index);
@@ -433,7 +434,7 @@ fn external_counts(
     workspace_plans: &[Vec<PlannedKey>],
 ) -> Result<HashMap<(usize, PostingKey), usize>> {
     let keys = unique_keys(workspace_plans);
-    let mut counts = HashMap::new();
+    let mut counts = HashMap::default();
     for (index, opened) in indexes.iter().enumerate() {
         for count in opened.posting_counts(&keys)? {
             counts.insert((index, count.key), count.count);
@@ -448,7 +449,7 @@ fn external_postings(
     external_counts: &HashMap<(usize, PostingKey), usize>,
 ) -> Result<HashMap<(usize, PostingKey), Vec<DeclarationHandle>>> {
     let keys = unique_keys(workspace_plans);
-    let mut postings = HashMap::new();
+    let mut postings = HashMap::default();
     for (index, opened) in indexes.iter().enumerate() {
         let selected = keys
             .iter()
@@ -647,7 +648,7 @@ fn hydrate_external(
     external_needed: BTreeMap<usize, Vec<DeclarationHandle>>,
     diagnostics: &mut RetrievalDiagnostics,
 ) -> Result<HashMap<(usize, DeclarationHandle), HydratedDeclaration>> {
-    let mut hydrated = HashMap::new();
+    let mut hydrated = HashMap::default();
     for (index, mut handles) in external_needed {
         handles.sort();
         handles.dedup();

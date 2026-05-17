@@ -13,7 +13,7 @@ open Lean
 open Lean.Meta
 
 /-- Semantic algorithm marker for canonical declaration fingerprints. -/
-def version : String := "canonical.expr.v2"
+def version : String := "canonical.expr.v3"
 
 /--
 Opaque semantic keys for one declaration statement.
@@ -28,14 +28,14 @@ structure Fingerprints where
   conclusionShape : String
   binderCount : Nat
 
-private def hashMod : Nat := 18446744073709551557
+private def hashSeed : UInt64 := 14695981039346656037
 
-private def hashSeed : Nat := 1469598103934665603
+private def hashPrime : UInt64 := 1099511628211
 
 private def stableHash (text : String) : String :=
   toString <|
     text.foldl
-      (fun acc char => (acc * 131 + char.toNat + 17) % hashMod)
+      (fun acc char => (acc ^^^ char.toNat.toUInt64) * hashPrime)
       hashSeed
 
 private def fingerprintKey (kind body : String) : String :=
@@ -275,29 +275,42 @@ private def statementBody
   pure s!"(forall [{String.intercalate "," binderKeys.toList}] {exprKey ctx mode conclusion})"
 
 /--
-Compute all canonical statement fingerprints for one Lean declaration.
+Compute canonical statement fingerprints from an already-opened declaration
+telescope.
 
 The returned keys are opaque. Callers may store and compare them, but all
 statement traversal, binder dependency, universe, and connective policy remains
 owned by this module.
 -/
-def compute (constInfo : ConstantInfo) : MetaM Fingerprints := do
+def computeFromTelescope
+    (constInfo : ConstantInfo)
+    (fvars : Array Expr)
+    (conclusion : Expr) : MetaM Fingerprints := do
   let baseCtx : SerializerContext :=
     { levels := levelContext constInfo.levelParams
       fvars := {} }
+  let binders ← collectBinders fvars
+  let scheduled := scheduleBinders baseCtx binders
+  let conclusionCtx := bindersContext baseCtx binders
+  let statement := statementBody baseCtx binders conclusion .exact
+  let safeBinderPermutation := statementBody baseCtx scheduled conclusion .exact
+  let connectiveShape := statementBody baseCtx binders conclusion .connective
+  let conclusionShape := exprKey conclusionCtx .connective conclusion
+  pure
+    { statement := fingerprintKey "statement" statement
+      safeBinderPermutation := fingerprintKey "safe_binder_permutation" safeBinderPermutation
+      connectiveShape := fingerprintKey "connective_shape" connectiveShape
+      conclusionShape := fingerprintKey "conclusion_shape" conclusionShape
+      binderCount := binders.size }
+
+/--
+Compute all canonical statement fingerprints for one Lean declaration.
+
+This convenience entry point owns telescope creation for callers that do not
+already have one open.
+-/
+def compute (constInfo : ConstantInfo) : MetaM Fingerprints := do
   forallTelescope constInfo.type fun fvars conclusion => do
-    let binders ← collectBinders fvars
-    let scheduled := scheduleBinders baseCtx binders
-    let conclusionCtx := bindersContext baseCtx binders
-    let statement := statementBody baseCtx binders conclusion .exact
-    let safeBinderPermutation := statementBody baseCtx scheduled conclusion .exact
-    let connectiveShape := statementBody baseCtx binders conclusion .connective
-    let conclusionShape := exprKey conclusionCtx .connective conclusion
-    pure
-      { statement := fingerprintKey "statement" statement
-        safeBinderPermutation := fingerprintKey "safe_binder_permutation" safeBinderPermutation
-        connectiveShape := fingerprintKey "connective_shape" connectiveShape
-        conclusionShape := fingerprintKey "conclusion_shape" conclusionShape
-        binderCount := binders.size }
+    computeFromTelescope constInfo fvars conclusion
 
 end LeanDup.Canonical
