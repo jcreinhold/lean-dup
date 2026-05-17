@@ -102,12 +102,31 @@ pub(crate) struct OpenedIndex {
     path: PathBuf,
 }
 
+/// Stable facts about an opened index needed by orchestration layers.
+///
+/// These facts identify the index for diagnostics and origin-aware pairing.
+/// They do not describe how declarations or postings are stored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[allow(dead_code)]
+pub(crate) struct OpenedIndexFacts {
+    pub(crate) origin: String,
+    pub(crate) label: Option<String>,
+    pub(crate) declaration_count: usize,
+    pub(crate) path: PathBuf,
+}
+
 /// Opaque declaration identity returned by index queries.
 ///
 /// Handles are stable within one index cache context and are the only
 /// declaration identities accepted by hydration.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub(crate) struct DeclarationHandle(String);
+
+impl DeclarationHandle {
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 /// Query over Lean-owned opaque semantic keys.
 ///
@@ -121,7 +140,7 @@ pub(crate) struct IndexQuery {
 }
 
 /// One requested opaque fingerprint key.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[allow(dead_code)]
 pub(crate) struct FingerprintQuery {
     pub(crate) kind: FingerprintKind,
@@ -129,7 +148,7 @@ pub(crate) struct FingerprintQuery {
 }
 
 /// Supported Lean-owned fingerprint classes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[allow(dead_code)]
 pub(crate) enum FingerprintKind {
     Statement,
@@ -139,11 +158,44 @@ pub(crate) enum FingerprintKind {
 }
 
 /// One requested opaque role-feature key.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[allow(dead_code)]
 pub(crate) struct RoleFeatureQuery {
     pub(crate) role: String,
     pub(crate) key: String,
+}
+
+/// One opaque semantic key that can contribute retrieval evidence.
+///
+/// Callers may pass keys emitted by Lean and compare matching handles. The key
+/// value remains opaque and display text must not be used as a replacement key.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[allow(dead_code)]
+pub(crate) enum PostingKey {
+    Fingerprint(FingerprintQuery),
+    RoleFeature(RoleFeatureQuery),
+}
+
+/// The number of declarations matched by one requested semantic key.
+///
+/// Retrieval uses this to distinguish selective evidence from broad evidence
+/// without hydrating declarations first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) struct PostingCount {
+    pub(crate) key: PostingKey,
+    pub(crate) count: usize,
+}
+
+/// One declaration handle matched by one requested semantic key.
+///
+/// The matched key is included so retrieval can explain why a candidate was
+/// returned without reopening the declaration or inspecting storage.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) struct MatchedPosting {
+    pub(crate) key: PostingKey,
+    pub(crate) handle: DeclarationHandle,
 }
 
 /// A declaration hydrated from an index by handle.
@@ -385,6 +437,79 @@ impl IndexStore {
 
 #[allow(dead_code)]
 impl OpenedIndex {
+    /// Return stable index facts needed for diagnostics and origin-aware pairing.
+    pub(crate) fn facts(&self) -> Result<OpenedIndexFacts> {
+        let connection = open_readonly(&self.path)?;
+        let origin = metadata_value(&connection, "origin")?.ok_or_else(|| Error::Index {
+            message: "index metadata is missing origin".to_owned(),
+        })?;
+        let label = metadata_value(&connection, "label")?;
+        Ok(OpenedIndexFacts {
+            origin,
+            label,
+            declaration_count: declaration_count(&self.path)?,
+            path: self.path.clone(),
+        })
+    }
+
+    /// Count matches for each requested semantic key without hydrating rows.
+    pub(crate) fn posting_counts(&self, keys: &[PostingKey]) -> Result<Vec<PostingCount>> {
+        if keys.is_empty() {
+            return Ok(Vec::new());
+        }
+        let connection = open_readonly(&self.path)?;
+        let mut counts = Vec::with_capacity(keys.len());
+        for key in keys {
+            if key.is_empty() {
+                continue;
+            }
+            counts.push(PostingCount {
+                key: key.clone(),
+                count: posting_count(&connection, key)?,
+            });
+        }
+        Ok(counts)
+    }
+
+    /// Return handles matched by each requested semantic key.
+    ///
+    /// The returned handles remain opaque; callers hydrate only the handles
+    /// they decide to keep.
+    pub(crate) fn matched_postings(&self, keys: &[PostingKey]) -> Result<Vec<MatchedPosting>> {
+        if keys.is_empty() {
+            return Ok(Vec::new());
+        }
+        let connection = open_readonly(&self.path)?;
+        let mut postings = Vec::new();
+        for key in keys {
+            if key.is_empty() {
+                continue;
+            }
+            postings.extend(
+                posting_handles(&connection, key)?
+                    .into_iter()
+                    .map(|handle| MatchedPosting {
+                        key: key.clone(),
+                        handle,
+                    }),
+            );
+        }
+        Ok(postings)
+    }
+
+    /// Return every declaration handle in deterministic order.
+    pub(crate) fn all_handles(&self) -> Result<Vec<DeclarationHandle>> {
+        let connection = open_readonly(&self.path)?;
+        let mut statement = connection
+            .prepare("SELECT handle FROM declarations ORDER BY qualified_name, declaration_id")?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        let mut handles = Vec::new();
+        for row in rows {
+            handles.push(DeclarationHandle(row?));
+        }
+        Ok(handles)
+    }
+
     pub(crate) fn matching_handles(&self, query: IndexQuery) -> Result<Vec<DeclarationHandle>> {
         let connection = open_readonly(&self.path)?;
         let mut handles = BTreeSet::new();
@@ -468,6 +593,15 @@ impl OpenedIndex {
         payload
             .map(|payload| serde_json::from_str(&payload).map_err(Error::from))
             .transpose()
+    }
+}
+
+impl PostingKey {
+    pub(crate) fn is_empty(&self) -> bool {
+        match self {
+            Self::Fingerprint(query) => query.key.is_empty(),
+            Self::RoleFeature(query) => query.key.is_empty(),
+        }
     }
 }
 
@@ -819,6 +953,51 @@ fn metadata_value(connection: &Connection, key: &str) -> Result<Option<String>> 
             |row| row.get(0),
         )
         .optional()?)
+}
+
+fn posting_count(connection: &Connection, key: &PostingKey) -> Result<usize> {
+    let count = match key {
+        PostingKey::Fingerprint(query) => connection.query_row(
+            "SELECT COUNT(*) FROM fingerprint_postings WHERE kind = ?1 AND key = ?2",
+            params![query.kind.as_str(), query.key],
+            |row| row.get::<_, i64>(0),
+        )?,
+        PostingKey::RoleFeature(query) => connection.query_row(
+            "SELECT COUNT(*) FROM role_feature_postings WHERE role = ?1 AND key = ?2",
+            params![query.role, query.key],
+            |row| row.get::<_, i64>(0),
+        )?,
+    };
+    Ok(count as usize)
+}
+
+fn posting_handles(connection: &Connection, key: &PostingKey) -> Result<Vec<DeclarationHandle>> {
+    let mut handles = Vec::new();
+    match key {
+        PostingKey::Fingerprint(query) => {
+            let mut statement = connection.prepare(
+                "SELECT declaration_handle FROM fingerprint_postings WHERE kind = ?1 AND key = ?2",
+            )?;
+            let rows = statement.query_map(params![query.kind.as_str(), query.key], |row| {
+                row.get::<_, String>(0)
+            })?;
+            for row in rows {
+                handles.push(DeclarationHandle(row?));
+            }
+        }
+        PostingKey::RoleFeature(query) => {
+            let mut statement = connection.prepare(
+                "SELECT declaration_handle FROM role_feature_postings WHERE role = ?1 AND key = ?2",
+            )?;
+            let rows = statement.query_map(params![query.role, query.key], |row| {
+                row.get::<_, String>(0)
+            })?;
+            for row in rows {
+                handles.push(DeclarationHandle(row?));
+            }
+        }
+    }
+    Ok(handles)
 }
 
 fn declaration_count(index_path: &Path) -> Result<usize> {

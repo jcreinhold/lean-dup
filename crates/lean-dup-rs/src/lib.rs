@@ -5,6 +5,7 @@ mod error;
 mod index;
 mod progress;
 mod render;
+mod retrieval;
 pub mod worker;
 mod workspace;
 
