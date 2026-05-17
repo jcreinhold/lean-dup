@@ -234,38 +234,61 @@ Accepted changes:
 - Cached probe results with declaration fingerprints and a probe-policy version rather than only the pair id.
 - Preserved pair-local Lean failures as `status = "unavailable"` where possible, and used Rust chunk bisection to isolate
   recoverable worker failures.
+- Follow-up proof-grade pass: ranking now consumes typed semantic evidence instead of raw worker probe booleans. Static
+  fingerprints can plan probe obligations, but default mathlib output requires verified evidence before showing
+  actionable findings.
 
 Rejected design: exposing cache, chunk, or Lean reduction controls directly in normal audit workflows. That would make
 callers know which failures are heartbeat failures, which candidates are mathlib-source candidates, and which SQLite
 cache identity is safe. The chosen design is deeper because audit asks for verified evidence under a review policy; the
 semantic-verification module owns the policy mechanics.
 
+Second rejected design: keep the bounded pair verifier as the ranking interface. It recovered from heartbeat failures,
+but it still leaked worker result fields into ranking and allowed callers to conflate "same static fingerprint" with
+"Lean verified this obligation." The deeper design introduces private proof obligations and typed semantic evidence:
+worker rows are cacheable transport facts; ranking sees only verified, rejected, or unavailable review evidence. The
+proof-grade requirement is applied to project-pinned `--compare-mathlib`; explicit `--compare-index` inputs retain the
+older static-index behavior because the external index source may not be importable for Lean probes.
+
 Measured follow-up workloads:
 
-| Workload | Cache state | Result | Wall observation | Retrieval ms | Raw candidates | Review groups | Visible groups | Planned probes | Cached probes | Worker probes | Unavailable |
-| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| full KanProofs with mathlib, old broad probes | warm mathlib | failed | n/a | n/a | n/a | n/a | n/a | broad batch | 0 | broad batch | fatal heartbeat |
-| full KanProofs with mathlib, old no-probe path | warm mathlib | manually stopped | >180 s | n/a | n/a | n/a | n/a | 0 | 0 | 0 | n/a |
-| full KanProofs with mathlib, bounded probes after fix | warm mathlib | ok | ~48 s | 22955 | 464707 | 3403 | 0 | 177 | 143 | 34 | 70 |
-| full KanProofs with mathlib, no probes after shaping | warm mathlib | ok | ~15 s | 16647 | 464707 | 3403 | 0 | 0 | 0 | 0 | 0 |
-| targeted `KanProofs.Mathlib4Backports` with mathlib | warm mathlib | ok | ~5 s | 2567 | 1360 | 0 | 0 | 0 | 0 | 0 | 0 |
+| Workload | Cache state | Result | Wall observation | Retrieval ms | Raw candidates | Review groups | Visible groups | Planned probes | Cached probes | Worker probes | Unavailable | Verified |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| full KanProofs with mathlib, old broad probes | warm mathlib | failed | n/a | n/a | n/a | n/a | n/a | broad batch | 0 | broad batch | fatal heartbeat | n/a |
+| full KanProofs with mathlib, old no-probe path | warm mathlib | manually stopped | >180 s | n/a | n/a | n/a | n/a | 0 | 0 | 0 | n/a | n/a |
+| full KanProofs with mathlib, bounded probes after fix | warm mathlib | ok | ~48 s | 22955 | 464707 | 3403 | 0 | 177 | 143 | 34 | 70 | n/a |
+| full KanProofs with mathlib, no probes after shaping | warm mathlib | ok | ~15 s | 16647 | 464707 | 3403 | 0 | 0 | 0 | 0 | 0 | n/a |
+| targeted `KanProofs.Mathlib4Backports` with mathlib | warm mathlib | ok | ~5 s | 2567 | 1360 | 0 | 0 | 0 | 0 | 0 | 0 | n/a |
+| targeted `KanProofs.Mathlib4Backports`, proof-grade pass | warm mathlib | ok | ~12 s | 3501 | 1360 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| full KanProofs with mathlib, proof-grade pass | warm mathlib, probe cache invalidated by semantic key change | ok | ~94 s | 28007 | 464707 | 0 | 0 | 177 | 0 | 177 | 70 | 0 |
 
 The visible result count of zero is intentional for the default mathlib profile. The raw retrieval layer still found
 feature overlaps, but the actionable queue rejected them because they were not theorem-level or verified replacement
 candidates. A short-lived intermediate run classified unrelated inductive and definition declarations as exact
 statement matches from static fingerprints alone; this was rejected as bullshit and fixed by requiring theorem-like
-declarations for unprobed statement equivalence. Reducible definitions now require probe evidence.
+declarations for unprobed statement equivalence. The proof-grade pass tightens this further: mathlib static fingerprints
+are planning evidence only, and reducible definitions require verified Lean evidence before they can become visible
+review findings.
+
+The full proof-grade pass planned only reducible-definition obligations: 177 planned, 0 verified, 70 unavailable, 61 of
+those unavailable because the declaration was not available in the imported probe environment. That is useful negative
+evidence: the default KanProofs mathlib queue currently contains no proof-grade duplicates, so the report stays empty
+instead of rendering a large weak-candidate queue. The remaining performance cost is mostly retrieval/indexing and the
+177 Lean probe pairs; the next optimization target is not broad parallel probing, but avoiding or explaining unavailable
+reducible-definition obligations earlier.
 
 POSD intervention mapping:
 
 - Define errors out of existence: one heartbeat-limited pair no longer makes the audit command fail; it becomes an
-  unavailable probe result or an isolated recoverable diagnostic.
+  unavailable semantic-evidence result or an isolated recoverable diagnostic.
 - Pull complexity down: probe budgeting, chunk bisection, cache-key construction, and mathlib module import selection
   are internal to semantic verification.
 - Optimize the abstraction boundary before micro-tuning: source-reference scanning now runs over the shaped review
   queue instead of every workspace declaration in the default mathlib workflow.
 - Remove work before tuning: the default profile stops building hints, source facts, and JSON-visible findings for
   feature-only mathlib overlaps.
+- Hide volatile decisions: ranking consumes `SemanticEvidence`; worker status strings, obligation choice, pair chunking,
+  and cache identity no longer leak into review classification.
 
 ## Red Flag Review
 

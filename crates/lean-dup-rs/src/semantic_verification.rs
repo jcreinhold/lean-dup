@@ -63,8 +63,58 @@ impl<'a> VerificationIndex<'a> {
 /// Semantic verification output for ranking and diagnostics.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub(crate) struct ProbeVerification {
-    pub(crate) results: BTreeMap<String, ProbeResult>,
+    pub(crate) evidence: BTreeMap<String, SemanticEvidence>,
     pub(crate) diagnostics: ProbeDiagnostics,
+}
+
+/// Verified or intentionally unavailable semantic evidence for one review pair.
+///
+/// Ranking consumes this type instead of worker probe rows. That keeps worker
+/// status strings, JSONL fields, cache keys, and Lean recovery policy inside
+/// semantic verification.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct SemanticEvidence {
+    pub(crate) pair_id: String,
+    pub(crate) kind: EvidenceKind,
+    pub(crate) status: EvidenceStatus,
+    pub(crate) summary: Option<String>,
+}
+
+impl SemanticEvidence {
+    pub(crate) fn proof_grade(&self) -> bool {
+        self.status == EvidenceStatus::Verified
+    }
+
+    fn rejected(pair_id: String, kind: EvidenceKind, summary: impl Into<String>) -> Self {
+        Self {
+            pair_id,
+            kind,
+            status: EvidenceStatus::Rejected,
+            summary: Some(summary.into()),
+        }
+    }
+}
+
+/// User-meaningful semantic finding kinds. These are not worker protocol fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum EvidenceKind {
+    ExactTheorem,
+    PermutedTheorem,
+    Replacement,
+    ReducibleDefinition,
+    Specialization,
+    LocalDuplicate,
+    Unavailable,
+}
+
+/// Whether a planned proof obligation produced usable evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum EvidenceStatus {
+    Verified,
+    Unavailable,
+    Rejected,
 }
 
 /// Counters that explain semantic-probe cost and pruning.
@@ -79,11 +129,23 @@ pub(crate) struct ProbeDiagnostics {
     pub(crate) planned_pairs: usize,
     pub(crate) skipped_by_policy: usize,
     pub(crate) skipped_by_budget: usize,
+    pub(crate) cheap_summary_rejects: usize,
+    pub(crate) planned_exact_theorem: usize,
+    pub(crate) planned_permuted_theorem: usize,
+    pub(crate) planned_replacement: usize,
+    pub(crate) planned_reducible_definition: usize,
+    pub(crate) planned_specialization: usize,
+    pub(crate) planned_local_duplicate: usize,
     pub(crate) cached_hits: usize,
     pub(crate) worker_pairs: usize,
     pub(crate) worker_batches: usize,
     pub(crate) recovered_failures: usize,
     pub(crate) unavailable_results: usize,
+    pub(crate) unavailable_unsupported: usize,
+    pub(crate) unavailable_missing: usize,
+    pub(crate) unavailable_timeout: usize,
+    pub(crate) unavailable_internal: usize,
+    pub(crate) verified_results: usize,
 }
 
 impl Default for ProbeDiagnostics {
@@ -98,11 +160,23 @@ impl Default for ProbeDiagnostics {
             planned_pairs: 0,
             skipped_by_policy: 0,
             skipped_by_budget: 0,
+            cheap_summary_rejects: 0,
+            planned_exact_theorem: 0,
+            planned_permuted_theorem: 0,
+            planned_replacement: 0,
+            planned_reducible_definition: 0,
+            planned_specialization: 0,
+            planned_local_duplicate: 0,
             cached_hits: 0,
             worker_pairs: 0,
             worker_batches: 0,
             recovered_failures: 0,
             unavailable_results: 0,
+            unavailable_unsupported: 0,
+            unavailable_missing: 0,
+            unavailable_timeout: 0,
+            unavailable_internal: 0,
+            verified_results: 0,
         }
     }
 }
@@ -155,7 +229,7 @@ pub(crate) fn verify_candidate_probes(
     };
     if !input.enabled || input.settings.budget == 0 || input.settings.chunk_size == 0 {
         return Ok(ProbeVerification {
-            results: BTreeMap::new(),
+            evidence: BTreeMap::new(),
             diagnostics,
         });
     }
@@ -168,35 +242,46 @@ pub(crate) fn verify_candidate_probes(
         format!("planned {} semantic probe pairs", planned.len()),
     );
 
-    let mut results = BTreeMap::new();
+    let mut evidence = BTreeMap::new();
     let mut missing = Vec::new();
     for planned_probe in planned {
         if let Some(cached) = input.local_index.index.cached_probe_result(&planned_probe.cache_key)? {
             diagnostics.cached_hits += 1;
-            results.insert(cached.pair_id.clone(), cached);
+            let semantic = semantic_evidence(&planned_probe, &cached);
+            record_evidence_diagnostic(&semantic, &mut diagnostics);
+            evidence.insert(semantic.pair_id.clone(), semantic);
         } else {
             missing.push(planned_probe);
         }
     }
     if missing.is_empty() {
-        diagnostics.unavailable_results = results.values().filter(|result| result.status != "ok").count();
-        return Ok(ProbeVerification { results, diagnostics });
+        return Ok(ProbeVerification { evidence, diagnostics });
     }
 
     let worker = WorkerClient::with_timeout(PROBE_TIMEOUT);
     for chunk in missing.chunks(input.settings.chunk_size) {
-        run_probe_chunk(chunk, &input, &worker, reporter, &mut results, &mut diagnostics)?;
+        run_probe_chunk(chunk, &input, &worker, reporter, &mut evidence, &mut diagnostics)?;
     }
-    diagnostics.unavailable_results = results.values().filter(|result| result.status != "ok").count();
-    Ok(ProbeVerification { results, diagnostics })
+    Ok(ProbeVerification { evidence, diagnostics })
 }
 
 #[derive(Debug, Clone)]
 struct PlannedProbe {
     pair: ProbePair,
     cache_key: String,
+    obligation: ProbeObligation,
     right_module: String,
     right_origin: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ProbeObligation {
+    ExactTheorem,
+    PermutedTheorem,
+    Replacement,
+    ReducibleDefinition,
+    Specialization,
+    LocalDuplicate,
 }
 
 fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDiagnostics) -> Vec<PlannedProbe> {
@@ -226,14 +311,18 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
                 diagnostics.skipped_by_policy += 1;
                 continue;
             }
-            candidates.push((set, candidate, *group));
+            let Some(obligation) = probe_obligation(input.settings.policy, &set.anchor, candidate, group) else {
+                diagnostics.cheap_summary_rejects += 1;
+                continue;
+            };
+            candidates.push((set, candidate, *group, obligation));
         }
     }
 
     candidates.sort_by(|left, right| {
-        left.2
-            .review_priority
-            .cmp(&right.2.review_priority)
+        left.3
+            .cmp(&right.3)
+            .then_with(|| left.2.review_priority.cmp(&right.2.review_priority))
             .then_with(|| left.2.confidence.cmp(&right.2.confidence))
             .then_with(|| {
                 right
@@ -247,7 +336,7 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
 
     let mut planned = Vec::new();
     let mut per_declaration = HashMap::<String, usize>::default();
-    for (set, candidate, _) in candidates {
+    for (set, candidate, _, obligation) in candidates {
         if planned.len() >= input.settings.budget {
             diagnostics.skipped_by_budget += 1;
             continue;
@@ -263,9 +352,17 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
             left_declaration_id: set.anchor.declaration_id.clone(),
             right_declaration_id: candidate.declaration.declaration_id.clone(),
         };
+        record_planned_obligation(obligation, diagnostics);
         planned.push(PlannedProbe {
-            cache_key: probe_cache_key(&pair, &set.anchor, &candidate.declaration, input.settings.policy),
+            cache_key: probe_cache_key(
+                &pair,
+                &set.anchor,
+                &candidate.declaration,
+                input.settings.policy,
+                obligation,
+            ),
             pair,
+            obligation,
             right_module: candidate.declaration.module.clone(),
             right_origin: candidate.declaration.origin.clone(),
         });
@@ -279,7 +376,7 @@ fn run_probe_chunk(
     input: &SemanticVerificationInput<'_>,
     worker: &WorkerClient,
     reporter: &mut Reporter,
-    results: &mut BTreeMap<String, ProbeResult>,
+    evidence: &mut BTreeMap<String, SemanticEvidence>,
     diagnostics: &mut ProbeDiagnostics,
 ) -> Result<()> {
     diagnostics.worker_batches += 1;
@@ -316,15 +413,19 @@ fn run_probe_chunk(
                 .collect::<Vec<_>>();
             input.local_index.index.cache_probe_results(&entries)?;
             for result in call.rows {
-                results.insert(result.pair_id.clone(), result);
+                if let Some(planned) = by_pair.get(result.pair_id.as_str()) {
+                    let semantic = semantic_evidence(planned, &result);
+                    record_evidence_diagnostic(&semantic, diagnostics);
+                    evidence.insert(semantic.pair_id.clone(), semantic);
+                }
             }
             Ok(())
         }
         Err(error) if recoverable_probe_error(&error) && chunk.len() > 1 => {
             diagnostics.recovered_failures += 1;
             let midpoint = chunk.len() / 2;
-            run_probe_chunk(&chunk[..midpoint], input, worker, reporter, results, diagnostics)?;
-            run_probe_chunk(&chunk[midpoint..], input, worker, reporter, results, diagnostics)
+            run_probe_chunk(&chunk[..midpoint], input, worker, reporter, evidence, diagnostics)?;
+            run_probe_chunk(&chunk[midpoint..], input, worker, reporter, evidence, diagnostics)
         }
         Err(error) if recoverable_probe_error(&error) => {
             diagnostics.recovered_failures += 1;
@@ -335,7 +436,9 @@ fn run_probe_chunk(
                 pair: planned.pair.clone(),
                 result: result.clone(),
             }])?;
-            results.insert(result.pair_id.clone(), result);
+            let semantic = semantic_evidence(planned, &result);
+            record_evidence_diagnostic(&semantic, diagnostics);
+            evidence.insert(semantic.pair_id.clone(), semantic);
             Ok(())
         }
         Err(error) => Err(error.into()),
@@ -410,6 +513,34 @@ fn eligible_for_policy(
         && group.review_priority <= ReviewPriority::Medium
 }
 
+fn probe_obligation(
+    policy: ProbePolicy,
+    anchor: &HydratedDeclaration,
+    candidate: &RetrievedCandidate,
+    group: &crate::ranking::RankedGroup,
+) -> Option<ProbeObligation> {
+    if theorem_like(anchor) && theorem_like(&candidate.declaration) {
+        if has_contribution(candidate, "statement-fingerprint") {
+            return Some(ProbeObligation::ExactTheorem);
+        }
+        if has_contribution(candidate, "safe-permutation-fingerprint") {
+            return Some(ProbeObligation::PermutedTheorem);
+        }
+        if matches!(group.relation, ReviewRelation::Specialization)
+            || has_contribution(candidate, "conclusion-fingerprint")
+        {
+            return Some(ProbeObligation::Specialization);
+        }
+        if has_contribution(candidate, "connective-fingerprint") {
+            return Some(ProbeObligation::Replacement);
+        }
+    }
+    if definition_like(anchor) && definition_like(&candidate.declaration) && strong_static_evidence(candidate) {
+        return Some(ProbeObligation::ReducibleDefinition);
+    }
+    (policy == ProbePolicy::Broad).then_some(ProbeObligation::LocalDuplicate)
+}
+
 fn strong_static_evidence(candidate: &RetrievedCandidate) -> bool {
     if !probe_supported_kind(&candidate.declaration) {
         return false;
@@ -428,6 +559,22 @@ fn probe_supported_origin(declaration: &HydratedDeclaration) -> bool {
 
 fn probe_supported_kind(declaration: &HydratedDeclaration) -> bool {
     matches!(declaration.kind.as_str(), "theorem" | "axiom" | "def" | "abbrev")
+}
+
+fn theorem_like(declaration: &HydratedDeclaration) -> bool {
+    matches!(declaration.kind.as_str(), "theorem" | "axiom")
+}
+
+fn definition_like(declaration: &HydratedDeclaration) -> bool {
+    matches!(declaration.kind.as_str(), "def" | "abbrev")
+}
+
+fn has_contribution(candidate: &RetrievedCandidate, kind: &str) -> bool {
+    candidate
+        .explanation
+        .contributions
+        .iter()
+        .any(|contribution| contribution.kind == kind)
 }
 
 fn recoverable_probe_error(error: &WorkerError) -> bool {
@@ -464,6 +611,103 @@ fn unavailable_probe_result(pair: &ProbePair, error: &WorkerError) -> ProbeResul
     }
 }
 
+fn semantic_evidence(planned: &PlannedProbe, result: &ProbeResult) -> SemanticEvidence {
+    if result.status != "ok" {
+        return SemanticEvidence {
+            pair_id: result.pair_id.clone(),
+            kind: EvidenceKind::Unavailable,
+            status: EvidenceStatus::Unavailable,
+            summary: result
+                .message
+                .clone()
+                .or_else(|| Some(format!("probe status {}", result.status))),
+        };
+    }
+    match planned.obligation {
+        ProbeObligation::ExactTheorem if result.same_statement => verified(result, EvidenceKind::ExactTheorem),
+        ProbeObligation::PermutedTheorem if result.same_up_to_safe_reordering || result.same_statement => {
+            verified(result, EvidenceKind::PermutedTheorem)
+        }
+        ProbeObligation::Replacement
+            if result.connective_equivalent || result.mutual_implication_shape || result.same_statement =>
+        {
+            verified(result, EvidenceKind::Replacement)
+        }
+        ProbeObligation::ReducibleDefinition if result.same_reducible_definition => {
+            verified(result, EvidenceKind::ReducibleDefinition)
+        }
+        ProbeObligation::Specialization
+            if result.specializes_left_to_right || result.specializes_right_to_left || result.same_statement =>
+        {
+            verified(result, EvidenceKind::Specialization)
+        }
+        ProbeObligation::LocalDuplicate
+            if result.same_statement
+                || result.same_up_to_safe_reordering
+                || result.same_reducible_definition
+                || result.mutual_implication_shape =>
+        {
+            verified(result, EvidenceKind::LocalDuplicate)
+        }
+        _ => SemanticEvidence::rejected(
+            result.pair_id.clone(),
+            obligation_evidence_kind(planned.obligation),
+            "Lean probe did not verify the planned obligation",
+        ),
+    }
+}
+
+fn verified(result: &ProbeResult, kind: EvidenceKind) -> SemanticEvidence {
+    SemanticEvidence {
+        pair_id: result.pair_id.clone(),
+        kind,
+        status: EvidenceStatus::Verified,
+        summary: result.message.clone(),
+    }
+}
+
+fn obligation_evidence_kind(obligation: ProbeObligation) -> EvidenceKind {
+    match obligation {
+        ProbeObligation::ExactTheorem => EvidenceKind::ExactTheorem,
+        ProbeObligation::PermutedTheorem => EvidenceKind::PermutedTheorem,
+        ProbeObligation::Replacement => EvidenceKind::Replacement,
+        ProbeObligation::ReducibleDefinition => EvidenceKind::ReducibleDefinition,
+        ProbeObligation::Specialization => EvidenceKind::Specialization,
+        ProbeObligation::LocalDuplicate => EvidenceKind::LocalDuplicate,
+    }
+}
+
+fn record_planned_obligation(obligation: ProbeObligation, diagnostics: &mut ProbeDiagnostics) {
+    match obligation {
+        ProbeObligation::ExactTheorem => diagnostics.planned_exact_theorem += 1,
+        ProbeObligation::PermutedTheorem => diagnostics.planned_permuted_theorem += 1,
+        ProbeObligation::Replacement => diagnostics.planned_replacement += 1,
+        ProbeObligation::ReducibleDefinition => diagnostics.planned_reducible_definition += 1,
+        ProbeObligation::Specialization => diagnostics.planned_specialization += 1,
+        ProbeObligation::LocalDuplicate => diagnostics.planned_local_duplicate += 1,
+    }
+}
+
+fn record_evidence_diagnostic(evidence: &SemanticEvidence, diagnostics: &mut ProbeDiagnostics) {
+    match evidence.status {
+        EvidenceStatus::Verified => diagnostics.verified_results += 1,
+        EvidenceStatus::Rejected => {}
+        EvidenceStatus::Unavailable => {
+            diagnostics.unavailable_results += 1;
+            let summary = evidence.summary.as_deref().unwrap_or_default();
+            if summary.contains("not available") || summary.contains("missing") {
+                diagnostics.unavailable_missing += 1;
+            } else if summary.contains("heartbeat") || summary.contains("timeout") {
+                diagnostics.unavailable_timeout += 1;
+            } else if summary.contains("supports") || summary.contains("opaque") || summary.contains("unavailable") {
+                diagnostics.unavailable_unsupported += 1;
+            } else {
+                diagnostics.unavailable_internal += 1;
+            }
+        }
+    }
+}
+
 fn probe_policy_label(policy: ProbePolicy) -> &'static str {
     match policy {
         ProbePolicy::Actionable => "actionable",
@@ -476,11 +720,13 @@ fn probe_cache_key(
     left: &HydratedDeclaration,
     right: &HydratedDeclaration,
     policy: ProbePolicy,
+    obligation: ProbeObligation,
 ) -> String {
     let payload = serde_json::json!({
         "cache_version": PROBE_CACHE_VERSION,
         "policy_version": PROBE_POLICY_VERSION,
         "policy": probe_policy_label(policy),
+        "obligation": obligation_label(obligation),
         "pair": pair,
         "left": declaration_cache_facts(left),
         "right": declaration_cache_facts(right),
@@ -488,6 +734,17 @@ fn probe_cache_key(
     let encoded = serde_json::to_vec(&payload).expect("probe cache key ingredients serialize");
     let digest = Sha256::digest(encoded);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn obligation_label(obligation: ProbeObligation) -> &'static str {
+    match obligation {
+        ProbeObligation::ExactTheorem => "exact-theorem",
+        ProbeObligation::PermutedTheorem => "permuted-theorem",
+        ProbeObligation::Replacement => "replacement",
+        ProbeObligation::ReducibleDefinition => "reducible-definition",
+        ProbeObligation::Specialization => "specialization",
+        ProbeObligation::LocalDuplicate => "local-duplicate",
+    }
 }
 
 fn declaration_cache_facts(declaration: &HydratedDeclaration) -> serde_json::Value {
@@ -550,9 +807,10 @@ mod tests {
         }];
         let review = rank_candidates(RankingInput {
             candidate_sets: &candidate_sets,
-            probe_results: &std::collections::BTreeMap::new(),
+            semantic_evidence: &std::collections::BTreeMap::new(),
             source_facts: &SourceFacts::empty(),
             profile: RankingProfile::default(),
+            require_mathlib_semantic_evidence: true,
         });
         let mut diagnostics = super::ProbeDiagnostics::default();
         let index = empty_index();
@@ -593,9 +851,10 @@ mod tests {
         let candidate_sets = vec![CandidateSet { anchor, candidates }];
         let review = rank_candidates(RankingInput {
             candidate_sets: &candidate_sets,
-            probe_results: &std::collections::BTreeMap::new(),
+            semantic_evidence: &std::collections::BTreeMap::new(),
             source_facts: &SourceFacts::empty(),
             profile: RankingProfile::default(),
+            require_mathlib_semantic_evidence: true,
         });
         let mut diagnostics = super::ProbeDiagnostics::default();
         let index = empty_index();

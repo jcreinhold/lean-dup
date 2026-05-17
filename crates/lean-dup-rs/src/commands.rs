@@ -408,9 +408,10 @@ fn compute_audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditComput
     let cheap_review = perf::measure(CostClass::RetrievalRanking, "ranking.rank_candidates.initial", || {
         rank_candidates(RankingInput {
             candidate_sets: &review_candidate_sets,
-            probe_results: &std::collections::BTreeMap::new(),
+            semantic_evidence: &std::collections::BTreeMap::new(),
             source_facts: &source_facts,
             profile: RankingProfile::default(),
+            require_mathlib_semantic_evidence: args.compare_mathlib,
         })
     });
     let verification = verify_candidate_probes(
@@ -433,9 +434,10 @@ fn compute_audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditComput
     let review = perf::measure(CostClass::RetrievalRanking, "ranking.rank_candidates.final", || {
         rank_candidates(RankingInput {
             candidate_sets: &review_candidate_sets,
-            probe_results: &verification.results,
+            semantic_evidence: &verification.evidence,
             source_facts: &source_facts,
             profile: RankingProfile::default(),
+            require_mathlib_semantic_evidence: args.compare_mathlib,
         })
     });
     let review = perf::measure(CostClass::RetrievalRanking, "ranking.replacement_hints", || {

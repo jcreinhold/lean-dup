@@ -5,8 +5,9 @@ use sha2::{Digest, Sha256};
 
 use crate::index::HydratedDeclaration;
 use crate::retrieval::{CandidateSet, KeyContribution, RetrievedCandidate};
+use crate::semantic_verification::{EvidenceKind, EvidenceStatus, SemanticEvidence};
 use crate::source_refs::{ImportStatus, SourceFacts};
-use crate::worker::{ProbeResult, SourceSpan};
+use crate::worker::SourceSpan;
 
 const DEFAULT_MIN_NEAR_SCORE: f64 = 24.0;
 const DEFAULT_TRANSITIONAL_ALIAS_CALLERS: usize = 8;
@@ -18,9 +19,10 @@ const DEFAULT_TRANSITIONAL_ALIAS_CALLERS: usize = 8;
 #[derive(Debug, Clone)]
 pub(crate) struct RankingInput<'a> {
     pub(crate) candidate_sets: &'a [CandidateSet],
-    pub(crate) probe_results: &'a BTreeMap<String, ProbeResult>,
+    pub(crate) semantic_evidence: &'a BTreeMap<String, SemanticEvidence>,
     pub(crate) source_facts: &'a SourceFacts,
     pub(crate) profile: RankingProfile,
+    pub(crate) require_mathlib_semantic_evidence: bool,
 }
 
 /// Tunable ranking defaults owned by a review profile, not by CLI parsing.
@@ -227,27 +229,45 @@ pub(crate) fn rank_candidates(input: RankingInput<'_>) -> RankedReview {
 }
 
 fn rank_pair(anchor: &HydratedDeclaration, candidate: &RetrievedCandidate, input: &RankingInput<'_>) -> RankedGroup {
-    let probe = input.probe_results.get(&candidate.pair_id);
+    let semantic = input.semantic_evidence.get(&candidate.pair_id);
     let mut signals = contribution_signals(&candidate.explanation.contributions);
     let mut blockers = BTreeSet::new();
     let source_clone = same_source_fingerprint(anchor, &candidate.declaration, input.source_facts);
     let has_mathlib = candidate.declaration.origin == "mathlib" || anchor.origin == "mathlib";
     let theorem_pair = theorem_like(anchor) && theorem_like(&candidate.declaration);
-    let exact = (theorem_pair && has_contribution(candidate, "statement-fingerprint"))
-        || probe.is_some_and(|probe| probe.same_statement || probe.same_reducible_definition);
-    let specialization =
-        theorem_pair && probe.is_some_and(|probe| probe.specializes_left_to_right || probe.specializes_right_to_left);
-    let permuted = (theorem_pair && has_contribution(candidate, "safe-permutation-fingerprint"))
-        || probe.is_some_and(|probe| probe.same_up_to_safe_reordering);
-    let connective = (theorem_pair && has_contribution(candidate, "connective-fingerprint"))
-        || probe.is_some_and(|probe| probe.connective_equivalent);
+    let verified_exact = verified_kind(semantic, EvidenceKind::ExactTheorem)
+        || verified_kind(semantic, EvidenceKind::ReducibleDefinition);
+    let verified_specialization = verified_kind(semantic, EvidenceKind::Specialization);
+    let verified_permuted = verified_kind(semantic, EvidenceKind::PermutedTheorem);
+    let verified_replacement = verified_kind(semantic, EvidenceKind::Replacement);
+    let static_evidence_allowed = !has_mathlib || !input.require_mathlib_semantic_evidence;
+    let exact = verified_exact
+        || (static_evidence_allowed && theorem_pair && has_contribution(candidate, "statement-fingerprint"));
+    let specialization = theorem_pair && verified_specialization;
+    let permuted = verified_permuted
+        || (static_evidence_allowed && theorem_pair && has_contribution(candidate, "safe-permutation-fingerprint"));
+    let connective = verified_replacement
+        || (static_evidence_allowed && theorem_pair && has_contribution(candidate, "connective-fingerprint"));
     let near = candidate.score >= input.profile.min_near_score || has_contribution(candidate, "conclusion-fingerprint");
 
-    if let Some(probe) = probe {
-        signals.extend(probe_signals(probe));
-        if probe.status != "ok" {
-            blockers.insert("lean-probe-unavailable".to_owned());
+    if let Some(semantic) = semantic {
+        signals.extend(semantic_signals(semantic));
+        match semantic.status {
+            EvidenceStatus::Unavailable => {
+                blockers.insert("lean-probe-unavailable".to_owned());
+            }
+            EvidenceStatus::Rejected => {
+                blockers.insert("lean-probe-rejected".to_owned());
+            }
+            EvidenceStatus::Verified => {}
         }
+    }
+    if input.require_mathlib_semantic_evidence
+        && has_mathlib
+        && strong_static_semantic_candidate(candidate)
+        && semantic.is_none_or(|semantic| !semantic.proof_grade())
+    {
+        blockers.insert("unverified-mathlib-semantic-evidence".to_owned());
     }
     if source_clone {
         signals.insert("source-clone".to_owned());
@@ -294,7 +314,10 @@ fn rank_pair(anchor: &HydratedDeclaration, candidate: &RetrievedCandidate, input
         input.profile.min_near_score,
     );
     let mut confidence = confidence_for(relation, priority);
-    if blockers.contains("generated-declaration") || blockers.contains("broad-head-only") {
+    if blockers.contains("generated-declaration")
+        || blockers.contains("broad-head-only")
+        || blockers.contains("unverified-mathlib-semantic-evidence")
+    {
         priority = ReviewPriority::Noise;
         confidence = ConfidenceTier::Noise;
     }
@@ -321,7 +344,7 @@ fn rank_pair(anchor: &HydratedDeclaration, candidate: &RetrievedCandidate, input
         recommended_action,
         target_decl: target.as_ref().map(|declaration| declaration.qualified_name.clone()),
         target_module: target.as_ref().map(|declaration| declaration.module.clone()),
-        probe_summary: probe.and_then(probe_summary),
+        probe_summary: semantic.and_then(semantic_summary),
         local_caller_count,
         replacement_hint: None,
     }
@@ -432,27 +455,48 @@ fn contribution_signals(contributions: &[KeyContribution]) -> BTreeSet<String> {
         .collect()
 }
 
-fn probe_signals(probe: &ProbeResult) -> BTreeSet<String> {
+fn semantic_signals(evidence: &SemanticEvidence) -> BTreeSet<String> {
     let mut signals = BTreeSet::new();
-    if probe.same_statement {
-        signals.insert("probe:same-statement".to_owned());
-    }
-    if probe.same_up_to_safe_reordering {
-        signals.insert("probe:same-up-to-safe-reordering".to_owned());
-    }
-    if probe.connective_equivalent {
-        signals.insert("probe:connective-equivalent".to_owned());
-    }
-    if probe.specializes_left_to_right {
-        signals.insert("probe:specializes-left-to-right".to_owned());
-    }
-    if probe.specializes_right_to_left {
-        signals.insert("probe:specializes-right-to-left".to_owned());
-    }
-    if probe.same_reducible_definition {
-        signals.insert("probe:same-reducible-definition".to_owned());
+    let status = match evidence.status {
+        EvidenceStatus::Verified => "verified",
+        EvidenceStatus::Unavailable => "unavailable",
+        EvidenceStatus::Rejected => "rejected",
+    };
+    let kind = match evidence.kind {
+        EvidenceKind::ExactTheorem => "exact-theorem",
+        EvidenceKind::PermutedTheorem => "permuted-theorem",
+        EvidenceKind::Replacement => "replacement",
+        EvidenceKind::ReducibleDefinition => "reducible-definition",
+        EvidenceKind::Specialization => "specialization",
+        EvidenceKind::LocalDuplicate => "local-duplicate",
+        EvidenceKind::Unavailable => "unavailable",
+    };
+    signals.insert(format!("probe:{status}:{kind}"));
+    if evidence.proof_grade() {
+        match evidence.kind {
+            EvidenceKind::ExactTheorem => {
+                signals.insert("probe:same-statement".to_owned());
+            }
+            EvidenceKind::PermutedTheorem => {
+                signals.insert("probe:same-up-to-safe-reordering".to_owned());
+            }
+            EvidenceKind::Replacement => {
+                signals.insert("probe:replacement".to_owned());
+            }
+            EvidenceKind::ReducibleDefinition => {
+                signals.insert("probe:same-reducible-definition".to_owned());
+            }
+            EvidenceKind::Specialization => {
+                signals.insert("probe:specialization".to_owned());
+            }
+            EvidenceKind::LocalDuplicate | EvidenceKind::Unavailable => {}
+        }
     }
     signals
+}
+
+fn verified_kind(evidence: Option<&SemanticEvidence>, kind: EvidenceKind) -> bool {
+    evidence.is_some_and(|evidence| evidence.kind == kind && evidence.proof_grade())
 }
 
 fn has_contribution(candidate: &RetrievedCandidate, kind: &str) -> bool {
@@ -461,6 +505,15 @@ fn has_contribution(candidate: &RetrievedCandidate, kind: &str) -> bool {
         .contributions
         .iter()
         .any(|contribution| contribution.kind == kind)
+}
+
+fn strong_static_semantic_candidate(candidate: &RetrievedCandidate) -> bool {
+    candidate.explanation.contributions.iter().any(|contribution| {
+        matches!(
+            contribution.kind.as_str(),
+            "statement-fingerprint" | "safe-permutation-fingerprint" | "connective-fingerprint"
+        )
+    })
 }
 
 fn same_source_fingerprint(left: &HydratedDeclaration, right: &HydratedDeclaration, facts: &SourceFacts) -> bool {
@@ -573,13 +626,11 @@ fn member(declaration: &HydratedDeclaration) -> ReviewMember {
     }
 }
 
-fn probe_summary(probe: &ProbeResult) -> Option<String> {
-    probe.message.clone().or_else(|| {
-        if probe.status == "ok" {
-            None
-        } else {
-            Some(format!("probe status {}", probe.status))
-        }
+fn semantic_summary(evidence: &SemanticEvidence) -> Option<String> {
+    evidence.summary.clone().or_else(|| match evidence.status {
+        EvidenceStatus::Verified => Some("Lean verified semantic evidence".to_owned()),
+        EvidenceStatus::Unavailable => Some("Lean probe unavailable".to_owned()),
+        EvidenceStatus::Rejected => Some("Lean probe rejected the planned obligation".to_owned()),
     })
 }
 
@@ -624,22 +675,58 @@ mod tests {
     };
     use crate::index::{DeclarationHandle, HydratedDeclaration};
     use crate::retrieval::{CandidateExplanation, CandidateSet, KeyContribution, RetrievedCandidate};
+    use crate::semantic_verification::{EvidenceKind, EvidenceStatus, SemanticEvidence};
     use crate::source_refs::SourceFacts;
-    use crate::worker::{Fingerprints, ProbeResult};
+    use crate::worker::Fingerprints;
 
     #[test]
-    fn exact_mathlib_match_is_high_priority_already_in_mathlib() {
+    fn unverified_mathlib_static_match_is_not_visible_action() {
         let workspace = declaration("workspace:Tiny:Tiny.same", "workspace", "Tiny.same");
         let mathlib = declaration("mathlib:Mathlib:Mathlib.same", "mathlib", "Mathlib.same");
-        let review = rank_candidates(input(vec![candidate_set(
+        let review = rank_candidates(input_requiring_mathlib_evidence(vec![candidate_set(
             workspace,
             candidate(mathlib, "statement-fingerprint", 100.0),
         )]));
 
         let group = &review.groups[0];
+        assert_eq!(group.review_priority, ReviewPriority::Noise);
+        assert!(
+            group
+                .blockers
+                .contains(&"unverified-mathlib-semantic-evidence".to_owned())
+        );
+        assert_ne!(group.recommended_action, ReviewAction::AlreadyInMathlib);
+    }
+
+    #[test]
+    fn verified_mathlib_match_is_high_priority_already_in_mathlib() {
+        let workspace = declaration("workspace:Tiny:Tiny.same", "workspace", "Tiny.same");
+        let mathlib = declaration("mathlib:Mathlib:Mathlib.same", "mathlib", "Mathlib.same");
+        let pair_id = format!("{}::{}", workspace.declaration_id, mathlib.declaration_id);
+        let mut candidate = candidate(mathlib, "statement-fingerprint", 100.0);
+        candidate.pair_id = pair_id.clone();
+        let mut evidence = BTreeMap::new();
+        evidence.insert(
+            pair_id,
+            SemanticEvidence {
+                pair_id: "workspace:Tiny:Tiny.same::mathlib:Mathlib:Mathlib.same".to_owned(),
+                kind: EvidenceKind::ExactTheorem,
+                status: EvidenceStatus::Verified,
+                summary: None,
+            },
+        );
+        let review = rank_candidates(RankingInput {
+            candidate_sets: &[candidate_set(workspace, candidate)],
+            semantic_evidence: &evidence,
+            source_facts: &SourceFacts::empty(),
+            profile: RankingProfile::default(),
+            require_mathlib_semantic_evidence: true,
+        });
+
+        let group = &review.groups[0];
+        assert_eq!(group.relation, ReviewRelation::ExactStatement);
         assert_eq!(group.review_priority, ReviewPriority::High);
         assert_eq!(group.recommended_action, ReviewAction::AlreadyInMathlib);
-        assert_eq!(group.relation, ReviewRelation::ExactStatement);
     }
 
     #[test]
@@ -663,31 +750,24 @@ mod tests {
         let left = declaration("workspace:Tiny:Tiny.general", "workspace", "Tiny.general");
         let right = declaration("workspace:Tiny:Tiny.specific", "workspace", "Tiny.specific");
         let pair_id = "workspace:Tiny:Tiny.general::workspace:Tiny:Tiny.specific".to_owned();
-        let mut probes = BTreeMap::new();
-        probes.insert(
+        let mut evidence = BTreeMap::new();
+        evidence.insert(
             pair_id.clone(),
-            ProbeResult {
+            SemanticEvidence {
                 pair_id: pair_id.clone(),
-                left_declaration_id: left.declaration_id.clone(),
-                right_declaration_id: right.declaration_id.clone(),
-                status: "ok".to_owned(),
-                same_statement: false,
-                same_up_to_safe_reordering: false,
-                connective_equivalent: false,
-                specializes_left_to_right: true,
-                specializes_right_to_left: false,
-                mutual_implication_shape: false,
-                same_reducible_definition: false,
-                message: None,
+                kind: EvidenceKind::Specialization,
+                status: EvidenceStatus::Verified,
+                summary: None,
             },
         );
         let mut ranked_candidate = candidate(right, "conclusion-fingerprint", 45.0);
         ranked_candidate.pair_id = pair_id;
         let review = rank_candidates(RankingInput {
             candidate_sets: &[candidate_set(left, ranked_candidate)],
-            probe_results: &probes,
+            semantic_evidence: &evidence,
             source_facts: &SourceFacts::empty(),
             profile: RankingProfile::default(),
+            require_mathlib_semantic_evidence: false,
         });
 
         assert_eq!(review.groups[0].recommended_action, ReviewAction::SpecializationOf);
@@ -733,9 +813,20 @@ mod tests {
     fn input(candidate_sets: Vec<CandidateSet>) -> RankingInput<'static> {
         RankingInput {
             candidate_sets: Box::leak(candidate_sets.into_boxed_slice()),
-            probe_results: Box::leak(Box::new(BTreeMap::new())),
+            semantic_evidence: Box::leak(Box::new(BTreeMap::new())),
             source_facts: Box::leak(Box::new(SourceFacts::empty())),
             profile: RankingProfile::default(),
+            require_mathlib_semantic_evidence: false,
+        }
+    }
+
+    fn input_requiring_mathlib_evidence(candidate_sets: Vec<CandidateSet>) -> RankingInput<'static> {
+        RankingInput {
+            candidate_sets: Box::leak(candidate_sets.into_boxed_slice()),
+            semantic_evidence: Box::leak(Box::new(BTreeMap::new())),
+            source_facts: Box::leak(Box::new(SourceFacts::empty())),
+            profile: RankingProfile::default(),
+            require_mathlib_semantic_evidence: true,
         }
     }
 
