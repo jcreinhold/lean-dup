@@ -4,6 +4,7 @@ use crate::cli::OutputFormat;
 use crate::commands::{AuditReport, DoctorReport, IndexReport, Outcome, Report, SkeletonReport};
 use crate::error::Result;
 use crate::progress::Reporter;
+use crate::ranking::{ReviewAction, ReviewFilter, ReviewPriority, ReviewRelation};
 
 pub(crate) fn write_outcome<O: Write, E: Write>(
     outcome: Outcome,
@@ -154,7 +155,7 @@ fn render_index(command: &str, report: &IndexReport) -> String {
 }
 
 fn render_audit(report: &AuditReport) -> String {
-    [
+    let mut lines = vec![
         "command: audit".to_owned(),
         format!("status: {}", report.status),
         format!(
@@ -170,7 +171,73 @@ fn render_audit(report: &AuditReport) -> String {
         format!("include imports: {}", report.include_imports),
         format!("compare mathlib: {}", report.compare_mathlib),
         format!("threshold: {}", report.threshold),
+        format!("candidates: {}", report.retrieval.candidate_count),
+        format!("review groups: {}", report.review.groups.len()),
+        format!("visible groups: {}", report.visible_group_count),
+        format!("suppressed groups: {}", report.review.suppressed.len()),
         format!("message: {}", report.message),
-    ]
-    .join("\n")
+    ];
+    let filter = ReviewFilter {
+        include_generated: report.include_generated,
+        show_noise: report.show_noise,
+        min_priority: report.min_priority,
+    };
+    for group in report.review.visible_groups(filter).into_iter().take(20) {
+        let target = group
+            .target_decl
+            .as_deref()
+            .map(|target| format!(" -> {target}"))
+            .unwrap_or_default();
+        lines.push(format!(
+            "{}: {} {} {}{}",
+            group.id,
+            priority_label(group.review_priority),
+            action_label(group.recommended_action),
+            relation_label(group.relation),
+            target
+        ));
+        if let Some(hint) = &group.replacement_hint {
+            lines.push(format!(
+                "  hint: import={:?} callers={} target_module={}",
+                hint.import_status, hint.caller_count, hint.target_module
+            ));
+        }
+        if !group.blockers.is_empty() {
+            lines.push(format!("  blockers: {}", group.blockers.join(", ")));
+        }
+    }
+    lines.join("\n")
+}
+
+fn priority_label(priority: ReviewPriority) -> &'static str {
+    match priority {
+        ReviewPriority::High => "high",
+        ReviewPriority::Medium => "medium",
+        ReviewPriority::Low => "low",
+        ReviewPriority::Noise => "noise",
+    }
+}
+
+fn action_label(action: ReviewAction) -> &'static str {
+    match action {
+        ReviewAction::AlreadyInMathlib => "already-in-mathlib",
+        ReviewAction::LocalAlias => "local-alias",
+        ReviewAction::ReplaceLocalUses => "replace-local-uses",
+        ReviewAction::MergeGeneralization => "merge-generalization",
+        ReviewAction::SpecializationOf => "specialization-of",
+        ReviewAction::ProbableSourceClone => "probable-source-clone",
+        ReviewAction::ManualReview => "manual-review",
+    }
+}
+
+fn relation_label(relation: ReviewRelation) -> &'static str {
+    match relation {
+        ReviewRelation::ExactStatement => "exact-statement",
+        ReviewRelation::PermutedStatement => "permuted-statement",
+        ReviewRelation::ConnectiveEquivalent => "connective-equivalent",
+        ReviewRelation::Specialization => "specialization",
+        ReviewRelation::SourceClone => "source-clone",
+        ReviewRelation::SubsumptionCandidate => "subsumption-candidate",
+        ReviewRelation::NearStatement => "near-statement",
+    }
 }

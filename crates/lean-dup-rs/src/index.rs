@@ -126,6 +126,11 @@ impl DeclarationHandle {
     pub(crate) fn as_str(&self) -> &str {
         &self.0
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
 }
 
 /// Query over Lean-owned opaque semantic keys.

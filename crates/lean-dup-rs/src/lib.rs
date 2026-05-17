@@ -5,8 +5,11 @@ mod error;
 mod eval;
 mod index;
 mod progress;
+mod ranking;
 mod render;
+mod replacement_hints;
 mod retrieval;
+mod source_refs;
 pub mod worker;
 mod workspace;
 

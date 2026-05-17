@@ -141,11 +141,91 @@ fn audit_json_keeps_progress_and_profile_off_stdout() {
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let payload: Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(payload["command"], "audit");
-    assert_eq!(payload["status"], "stub");
+    assert_eq!(payload["status"], "ok");
+    assert!(payload["review"]["groups"].is_array());
     assert!(payload.get("kind").is_none());
     assert!(!stdout.contains("feature_row"));
     assert!(!stdout.contains("declaration_row"));
     assert!(!stdout.contains("probe_result"));
+}
+
+#[test]
+fn audit_fixture_mathlib_label_produces_actionable_hints() {
+    let cache = tempfile::TempDir::new().unwrap();
+    let root = repo_root();
+    let external = root.join("tests/fixtures/external");
+    let tiny = root.join("tests/fixtures/tiny");
+
+    Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["index", "--workspace"])
+        .arg(&external)
+        .args(["--module", "External", "--label", "mathlib"])
+        .assert()
+        .success();
+
+    let assert = Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&tiny)
+        .args([
+            "--module",
+            "Tiny",
+            "--compare-index",
+            "mathlib",
+            "--no-semantic-probes",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    let groups = payload["review"]["groups"].as_array().unwrap();
+    let exact = groups
+        .iter()
+        .find(|group| {
+            group["recommended_action"] == "already-in-mathlib"
+                && group["replacement_hint"]["target_decl"] == "External.same_as_tiny"
+        })
+        .expect("mathlib exact duplicate group");
+
+    assert_eq!(exact["review_priority"], "high");
+    assert_eq!(
+        exact["replacement_hint"]["target_decl"],
+        "External.same_as_tiny"
+    );
+    assert_eq!(exact["replacement_hint"]["import_status"], "missing");
+    assert!(exact["replacement_hint"]["caller_count"].as_u64().unwrap() > 0);
+    assert!(
+        !exact["replacement_hint"]["displayed_callers"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn audit_default_text_hides_noise_blockers() {
+    let cache = tempfile::TempDir::new().unwrap();
+    let root = repo_root();
+    let tiny = root.join("tests/fixtures/tiny");
+
+    let assert = Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--no-semantic-probes"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+
+    assert!(stdout.contains("command: audit"));
+    assert!(!stdout.contains("generated-declaration"));
+    assert!(!stdout.contains("broad-head-only"));
 }
 
 #[test]
