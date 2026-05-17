@@ -3,85 +3,49 @@
   "positive_clusters": [
     {
       "id": "exact-aliases",
-      "members": [
-        "Tiny.same_left",
-        "Tiny.use_same_left",
-        "Tiny.same_right",
-        "External.same_as_tiny"
-      ]
+      "members": ["Tiny.same_left", "Tiny.use_same_left", "Tiny.same_right", "External.same_as_tiny"]
     },
     {
       "id": "reordered-hypotheses",
-      "members": [
-        "Tiny.reordered_left",
-        "Tiny.reordered_right"
-      ]
+      "members": ["Tiny.reordered_left", "Tiny.reordered_right"]
     },
     {
       "id": "safe-permutation-axioms",
-      "members": [
-        "Tiny.independent_arrow_left",
-        "Tiny.independent_arrow_right"
-      ]
+      "members": ["Tiny.independent_arrow_left", "Tiny.independent_arrow_right"]
     },
     {
       "id": "connective-equivalence",
-      "members": [
-        "Tiny.connective_and_left",
-        "Tiny.connective_and_right"
-      ]
+      "members": ["Tiny.connective_and_left", "Tiny.connective_and_right"]
     },
     {
       "id": "connective-theorems",
-      "members": [
-        "Tiny.and_left",
-        "Tiny.and_right"
-      ]
+      "members": ["Tiny.and_left", "Tiny.and_right"]
     },
     {
       "id": "source-clones",
-      "members": [
-        "Tiny.clone_one",
-        "Tiny.clone_two",
-        "External.clone_external"
-      ]
+      "members": ["Tiny.clone_one", "Tiny.clone_two", "External.clone_external"]
     },
     {
       "id": "specialization",
-      "members": [
-        "Tiny.specialization_general",
-        "Tiny.specialization_specific"
-      ]
+      "members": ["Tiny.specialization_general", "Tiny.specialization_specific"]
     }
   ],
   "hard_negative_clusters": [
     {
       "id": "same-conclusion-not-duplicates",
-      "members": [
-        "Tiny.same_conclusion_nat_domain",
-        "Tiny.same_conclusion_bool_domain"
-      ]
+      "members": ["Tiny.same_conclusion_nat_domain", "Tiny.same_conclusion_bool_domain"]
     },
     {
       "id": "broad-head-only",
-      "members": [
-        "Tiny.broad_eq_only",
-        "Tiny.symmetric_eq_left"
-      ]
+      "members": ["Tiny.broad_eq_only", "Tiny.symmetric_eq_left"]
     },
     {
       "id": "similar-projections",
-      "members": [
-        "Tiny.related_left",
-        "Tiny.related_right"
-      ]
+      "members": ["Tiny.related_left", "Tiny.related_right"]
     },
     {
       "id": "generated-noise",
-      "members": [
-        "Tiny.GeneratedProbe.leaf",
-        "Tiny.GeneratedProbe.node"
-      ]
+      "members": ["Tiny.GeneratedProbe.leaf", "Tiny.GeneratedProbe.node"]
     }
   ]
 }

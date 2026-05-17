@@ -27,17 +27,11 @@
     },
     {
       "id": "anodyne-pairing-api",
-      "members": [
-        "SSet.Subcomplex.Pairing.toAnodynePresentation",
-        "SSet.Subcomplex.Pairing.anodyneExtensions"
-      ]
+      "members": ["SSet.Subcomplex.Pairing.toAnodynePresentation", "SSet.Subcomplex.Pairing.anodyneExtensions"]
     },
     {
       "id": "residue-field-unit-api",
-      "members": [
-        "IsLocalRing.isUnit_of_residue_isUnit",
-        "IsLocalRing.residue_ne_zero_iff_isUnit"
-      ]
+      "members": ["IsLocalRing.isUnit_of_residue_isUnit", "IsLocalRing.residue_ne_zero_iff_isUnit"]
     }
   ],
   "hard_negative_clusters": [
@@ -51,12 +45,7 @@
     },
     {
       "id": "broad-ext-uniqueness",
-      "members": [
-        "subsumption-candidate-129",
-        "subsumption-candidate-140",
-        "subsumption-candidate-149"
-      ]
+      "members": ["subsumption-candidate-129", "subsumption-candidate-140", "subsumption-candidate-149"]
     }
   ]
 }
-
