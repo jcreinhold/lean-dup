@@ -7,9 +7,9 @@ use crate::perf::{self, CostClass};
 use crate::progress::{Reporter, format_progress_event};
 use crate::ranking::{RankedGroup, ReviewAction, ReviewPriority, ReviewRelation};
 
-pub(crate) fn write_outcome<O: Write, E: Write>(outcome: Outcome, stdout: &mut O, stderr: &mut E) -> Result<()> {
+pub(crate) fn write_outcome<O: Write, E: Write>(mut outcome: Outcome, stdout: &mut O, stderr: &mut E) -> Result<()> {
     perf::measure_result(CostClass::Reporting, "report.render", || {
-        write_report(&outcome.reporter, stderr)?;
+        write_report(&mut outcome.reporter, stderr)?;
         match outcome.output_format {
             OutputFormat::Json => {
                 writeln!(stdout, "{}", serde_json::to_string_pretty(&outcome.report)?)?;
@@ -22,7 +22,8 @@ pub(crate) fn write_outcome<O: Write, E: Write>(outcome: Outcome, stdout: &mut O
     })
 }
 
-fn write_report<E: Write>(reporter: &Reporter, stderr: &mut E) -> Result<()> {
+fn write_report<E: Write>(reporter: &mut Reporter, stderr: &mut E) -> Result<()> {
+    reporter.finish_live_progress();
     for event in reporter.events() {
         writeln!(stderr, "{}", format_progress_event(event))?;
     }

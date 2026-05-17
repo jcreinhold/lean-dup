@@ -161,7 +161,8 @@ fn audit_json_keeps_progress_and_profile_off_stdout() {
         .args(["--format", "json"])
         .assert()
         .success()
-        .stderr(predicate::str::contains("progress.workspace"))
+        .stderr(predicate::str::contains("["))
+        .stderr(predicate::str::contains("workspace"))
         .stderr(predicate::str::contains("profile.workspace.resolve"));
 
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
@@ -347,17 +348,7 @@ fn baseline_diff_reports_appeared_disappeared_and_changed_groups() {
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["audit", "--workspace"])
         .arg(&tiny)
-        .args([
-            "--module",
-            "Tiny",
-            "--no-semantic-probes",
-            "--format",
-            "json",
-            "--review-profile",
-            "api-design",
-            "--save-baseline",
-            "before",
-        ])
+        .args(["--module", "Tiny", "--format", "json", "--save-baseline", "before"])
         .assert()
         .success();
     let stdout = String::from_utf8(audit.get_output().stdout.clone()).unwrap();

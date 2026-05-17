@@ -487,15 +487,7 @@ fn collect_probe_results(
     if missing_pairs.is_empty() {
         return Ok(results);
     }
-    let modules = workspace
-        .selected_roots
-        .iter()
-        .map(|module| ModuleDescriptor {
-            module: module.clone(),
-            origin: "workspace".to_owned(),
-            source_root: None,
-        })
-        .collect::<Vec<_>>();
+    let modules = probe_modules_for(workspace);
     let call = reporter.measure("worker.probe", |_| {
         WorkerClient::with_timeout(Duration::from_secs(5 * 60)).probe_batch(ProbeBatch {
             workspace_root: workspace.root.clone(),
@@ -523,6 +515,18 @@ fn collect_probe_results(
         results.insert(result.pair_id.clone(), result);
     }
     Ok(results)
+}
+
+fn probe_modules_for(workspace: &ResolvedWorkspace) -> Vec<ModuleDescriptor> {
+    workspace
+        .source_files
+        .iter()
+        .map(|source| ModuleDescriptor {
+            module: source.module.clone(),
+            origin: "workspace".to_owned(),
+            source_root: None,
+        })
+        .collect()
 }
 
 fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<EvaluationReport> {
@@ -754,4 +758,44 @@ fn missing_oleans(workspace: &ResolvedWorkspace) -> Vec<String> {
         .filter(|source| !workspace::olean_exists(&workspace.root, &source.module))
         .map(|source| source.module.clone())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workspace::SourceFile;
+
+    #[test]
+    fn probe_modules_use_resolved_source_files_not_selected_roots() {
+        let workspace = ResolvedWorkspace {
+            requested_root: PathBuf::from("/tmp/project"),
+            root: PathBuf::from("/tmp/project"),
+            lakefile: PathBuf::from("/tmp/project/lakefile.toml"),
+            module_roots: vec!["KanProofs".to_owned()],
+            selected_roots: vec!["KanProofs.Mathlib4Backports".to_owned()],
+            source_files: vec![
+                SourceFile {
+                    module: "KanProofs.Mathlib4Backports.CategoryTheory.Adhesive.Basic".to_owned(),
+                    path: PathBuf::from("/tmp/project/KanProofs/Mathlib4Backports/CategoryTheory/Adhesive/Basic.lean"),
+                },
+                SourceFile {
+                    module: "KanProofs.Mathlib4Backports.CategoryTheory.Monoidal.Arrow".to_owned(),
+                    path: PathBuf::from("/tmp/project/KanProofs/Mathlib4Backports/CategoryTheory/Monoidal/Arrow.lean"),
+                },
+            ],
+        };
+
+        let modules = probe_modules_for(&workspace);
+
+        assert_eq!(modules.len(), 2);
+        assert_eq!(
+            modules[0].module,
+            "KanProofs.Mathlib4Backports.CategoryTheory.Adhesive.Basic"
+        );
+        assert!(
+            !modules
+                .iter()
+                .any(|module| module.module == "KanProofs.Mathlib4Backports")
+        );
+    }
 }

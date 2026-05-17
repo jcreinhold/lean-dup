@@ -424,7 +424,7 @@ pub enum WorkerError {
     #[error("worker protocol violation: {message}")]
     Protocol { message: String },
 
-    #[error("worker returned a fatal diagnostic")]
+    #[error("worker returned a fatal diagnostic: {}", format_worker_diagnostics(.diagnostics))]
     WorkerDiagnostic { diagnostics: Vec<WorkerDiagnostic> },
 
     #[error("worker timed out after {timeout:?}")]
@@ -436,7 +436,7 @@ pub enum WorkerError {
     #[error("worker exited with status {status}")]
     NonZeroExit { status: i32, stderr: String },
 
-    #[error("worker ended before complete")]
+    #[error("worker ended before complete: {}", format_worker_diagnostics(.diagnostics))]
     EofBeforeComplete { diagnostics: Vec<WorkerDiagnostic> },
 
     #[error("invalid worker JSON on line {line}")]
@@ -455,6 +455,20 @@ pub enum WorkerError {
 
     #[error("could not build Lean worker; status {status}: {diagnostic}")]
     BuildFailed { status: i32, diagnostic: String },
+}
+
+fn format_worker_diagnostics(diagnostics: &[WorkerDiagnostic]) -> String {
+    if diagnostics.is_empty() {
+        return "no structured diagnostic payload".to_owned();
+    }
+    diagnostics
+        .iter()
+        .map(|diagnostic| {
+            let fatal = if diagnostic.fatal { " fatal" } else { "" };
+            format!("{}{}: {}", diagnostic.code, fatal, diagnostic.message)
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 impl TryFrom<Row> for WorkerVersion {
