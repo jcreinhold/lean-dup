@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::PathBuf;
 
 use assert_cmd::Command;
@@ -99,15 +100,6 @@ fn skeleton_commands_return_stub_status_without_worker_rows() {
     let root = repo_root();
     for args in [
         vec![
-            "index",
-            "--workspace",
-            root.to_str().unwrap(),
-            "--module",
-            "LeanDup",
-            "--label",
-            "fixture",
-        ],
-        vec![
             "show",
             "--workspace",
             root.to_str().unwrap(),
@@ -133,4 +125,68 @@ fn skeleton_commands_return_stub_status_without_worker_rows() {
         assert!(!stdout.contains("declaration_row"));
         assert!(!stdout.contains("probe_result"));
     }
+}
+
+#[test]
+fn index_builds_canonical_sqlite_and_reuses_cache() {
+    let cache = tempfile::TempDir::new().unwrap();
+    let external = repo_root().join("tests/fixtures/external");
+
+    let first = Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["index", "--workspace"])
+        .arg(&external)
+        .args(["--module", "External", "--label", "fixture"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("status: ok"))
+        .stdout(predicate::str::contains("cache: miss"))
+        .stdout(predicate::str::contains("index path:"))
+        .stdout(predicate::str::contains("declarations:"));
+    let first_stdout = String::from_utf8(first.get_output().stdout.clone()).unwrap();
+    let index_path = line_value(&first_stdout, "index path: ");
+    let index_dir = line_value(&first_stdout, "index dir: ");
+
+    assert!(PathBuf::from(&index_path).ends_with("index.sqlite"));
+    assert!(PathBuf::from(&index_path).exists());
+    assert_eq!(
+        PathBuf::from(&index_path).parent().unwrap(),
+        PathBuf::from(&index_dir)
+    );
+    assert!(
+        !PathBuf::from(&index_dir)
+            .join("declarations.jsonl.gz")
+            .exists()
+    );
+    assert!(!PathBuf::from(&index_dir).join("buckets.sqlite").exists());
+    assert!(
+        !PathBuf::from(&index_dir)
+            .join("fixture.metadata.json")
+            .exists()
+    );
+
+    let latest = fs::read_to_string(cache.path().join("indexes/fixture/latest.json")).unwrap();
+    assert!(latest.contains(&index_dir));
+
+    Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["index", "--workspace"])
+        .arg(&external)
+        .args(["--module", "External", "--label", "fixture"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("status: ok"))
+        .stdout(predicate::str::contains("cache: hit"))
+        .stdout(predicate::str::contains(format!(
+            "index path: {index_path}"
+        )));
+}
+
+fn line_value(text: &str, prefix: &str) -> String {
+    text.lines()
+        .find_map(|line| line.strip_prefix(prefix))
+        .unwrap_or_else(|| panic!("missing `{prefix}` in:\n{text}"))
+        .to_owned()
 }

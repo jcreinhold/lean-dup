@@ -237,7 +237,7 @@ pub struct RoleFeature {
 }
 
 /// Result of one bounded semantic probe pair.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProbeResult {
     pub pair_id: String,
     pub left_declaration_id: String,

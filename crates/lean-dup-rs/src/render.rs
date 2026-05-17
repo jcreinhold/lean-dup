@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use crate::cli::OutputFormat;
-use crate::commands::{AuditReport, DoctorReport, Outcome, Report, SkeletonReport};
+use crate::commands::{AuditReport, DoctorReport, IndexReport, Outcome, Report, SkeletonReport};
 use crate::error::Result;
 use crate::progress::Reporter;
 
@@ -51,10 +51,9 @@ fn write_report<E: Write>(reporter: &Reporter, stderr: &mut E) -> Result<()> {
 fn render_text(report: &Report) -> String {
     match report {
         Report::Doctor(report) => render_doctor(report),
-        Report::Index(report)
-        | Report::IndexMathlib(report)
-        | Report::Show(report)
-        | Report::Diff(report) => render_skeleton(report),
+        Report::Index(report) => render_index("index", report),
+        Report::IndexMathlib(report) => render_index("index-mathlib", report),
+        Report::Show(report) | Report::Diff(report) => render_skeleton(report),
         Report::Audit(report) => render_audit(report),
     }
 }
@@ -122,6 +121,34 @@ fn render_skeleton(report: &SkeletonReport) -> String {
         lines.push("force: true".to_owned());
     }
     lines.push(format!("message: {}", report.message));
+    lines.join("\n")
+}
+
+fn render_index(command: &str, report: &IndexReport) -> String {
+    let mut lines = vec![
+        format!("command: {command}"),
+        format!("status: {}", report.status),
+        format!(
+            "requested workspace: {}",
+            report.requested_workspace.display()
+        ),
+        format!("resolved Lake root: {}", report.lake_root.display()),
+        format!("selected roots: {}", report.selected_roots.join(", ")),
+        format!("source files: {}", report.source_count),
+        format!("cache root: {}", report.cache_root.display()),
+        format!("cache fingerprint: {}", report.cache_fingerprint),
+        format!("label: {}", report.label),
+        format!("cache: {:?}", report.cache_status).to_ascii_lowercase(),
+        format!("index path: {}", report.index_path.display()),
+        format!("index dir: {}", report.index_dir.display()),
+        format!("declarations: {}", report.declaration_count),
+    ];
+    if report.force {
+        lines.push("force: true".to_owned());
+    }
+    if !report.diagnostics.is_empty() {
+        lines.push(format!("diagnostics: {}", report.diagnostics.join("; ")));
+    }
     lines.join("\n")
 }
 

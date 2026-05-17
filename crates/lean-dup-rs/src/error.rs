@@ -34,6 +34,12 @@ pub(crate) enum Error {
     #[error("{0}")]
     Worker(#[from] crate::worker::WorkerError),
 
+    #[error("index error: {message}")]
+    Index { message: String },
+
+    #[error("sqlite error")]
+    Sqlite(#[from] rusqlite::Error),
+
     #[error("could not render JSON output")]
     Json(#[from] serde_json::Error),
 

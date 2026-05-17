@@ -9,6 +9,7 @@ use crate::cli::{
     ShowArgs,
 };
 use crate::error::Result;
+use crate::index::{CacheStatus, IndexBuildKind, IndexBuildRequest, IndexStore, IndexSummary};
 use crate::progress::Reporter;
 use crate::worker::WorkerClient;
 use crate::workspace::{self, ResolvedWorkspace, WorkspaceRequest};
@@ -24,8 +25,8 @@ pub(crate) struct Outcome {
 #[serde(tag = "command", rename_all = "kebab-case")]
 pub(crate) enum Report {
     Doctor(DoctorReport),
-    Index(SkeletonReport),
-    IndexMathlib(SkeletonReport),
+    Index(IndexReport),
+    IndexMathlib(IndexReport),
     Audit(AuditReport),
     Show(SkeletonReport),
     Diff(SkeletonReport),
@@ -64,6 +65,24 @@ pub(crate) struct SkeletonReport {
 }
 
 #[derive(Debug, Serialize)]
+pub(crate) struct IndexReport {
+    pub(crate) status: &'static str,
+    pub(crate) requested_workspace: PathBuf,
+    pub(crate) lake_root: PathBuf,
+    pub(crate) selected_roots: Vec<String>,
+    pub(crate) source_count: usize,
+    pub(crate) cache_root: PathBuf,
+    pub(crate) cache_fingerprint: String,
+    pub(crate) label: String,
+    pub(crate) cache_status: CacheStatus,
+    pub(crate) index_path: PathBuf,
+    pub(crate) index_dir: PathBuf,
+    pub(crate) declaration_count: usize,
+    pub(crate) diagnostics: Vec<String>,
+    pub(crate) force: bool,
+}
+
+#[derive(Debug, Serialize)]
 pub(crate) struct AuditReport {
     pub(crate) status: &'static str,
     pub(crate) requested_workspace: PathBuf,
@@ -87,6 +106,8 @@ struct Foundation {
     workspace: ResolvedWorkspace,
     cache: CacheFacts,
 }
+
+const INDEX_WORKER_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 pub(crate) fn run(cli: Cli) -> Result<Outcome> {
     let mut reporter = Reporter::new(cli.progress, cli.profile);
@@ -157,38 +178,55 @@ fn doctor(args: DoctorArgs, reporter: &mut Reporter) -> Result<DoctorReport> {
     })
 }
 
-fn index(args: IndexArgs, reporter: &mut Reporter) -> Result<SkeletonReport> {
-    let foundation = foundation(args.workspace, Some(args.module_root), reporter)?;
-    let missing = if args.require_oleans {
-        missing_oleans(&foundation.workspace)
-    } else {
-        Vec::new()
-    };
-    let message = if missing.is_empty() {
-        "index planning complete; persistence is implemented in prompt 10"
-    } else {
-        "index planning complete with missing oleans; persistence is implemented in prompt 10"
-    };
-    Ok(skeleton(
-        foundation,
-        message,
-        Some(args.label),
-        None,
-        None,
-        args.force,
-    ))
+fn index(args: IndexArgs, reporter: &mut Reporter) -> Result<IndexReport> {
+    let module_root = args.module_root.clone();
+    let label = args.label.clone();
+    let force = args.force;
+    let require_oleans = args.require_oleans;
+    let foundation = foundation(args.workspace, Some(module_root.clone()), reporter)?;
+    let store = IndexStore::new(foundation.cache.root.clone());
+    let summary = reporter.measure("index.build_or_reuse", |reporter| {
+        store.build_or_reuse(
+            IndexBuildRequest {
+                workspace: foundation.workspace.clone(),
+                label,
+                module_root,
+                origin: origin_for_label(&args.label),
+                include_private: true,
+                include_generated: false,
+                require_oleans,
+                force,
+                kind: IndexBuildKind::External,
+            },
+            &WorkerClient::with_timeout(INDEX_WORKER_TIMEOUT),
+            reporter,
+        )
+    })?;
+    Ok(index_report(foundation, summary, force))
 }
 
-fn index_mathlib(args: IndexMathlibArgs, reporter: &mut Reporter) -> Result<SkeletonReport> {
+fn index_mathlib(args: IndexMathlibArgs, reporter: &mut Reporter) -> Result<IndexReport> {
+    let force = args.force;
     let foundation = foundation(args.workspace, Some("Mathlib".to_owned()), reporter)?;
-    Ok(skeleton(
-        foundation,
-        "mathlib index planning complete; persistence is implemented in prompt 10",
-        Some("mathlib".to_owned()),
-        None,
-        None,
-        args.force,
-    ))
+    let store = IndexStore::new(foundation.cache.root.clone());
+    let summary = reporter.measure("index.build_or_reuse", |reporter| {
+        store.build_or_reuse(
+            IndexBuildRequest {
+                workspace: foundation.workspace.clone(),
+                label: "mathlib".to_owned(),
+                module_root: "Mathlib".to_owned(),
+                origin: "mathlib".to_owned(),
+                include_private: true,
+                include_generated: false,
+                require_oleans: true,
+                force,
+                kind: IndexBuildKind::External,
+            },
+            &WorkerClient::with_timeout(INDEX_WORKER_TIMEOUT),
+            reporter,
+        )
+    })?;
+    Ok(index_report(foundation, summary, force))
 }
 
 fn audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditReport> {
@@ -283,6 +321,35 @@ fn skeleton(
         group,
         baseline,
         force,
+    }
+}
+
+fn index_report(foundation: Foundation, summary: IndexSummary, force: bool) -> IndexReport {
+    IndexReport {
+        status: "ok",
+        requested_workspace: foundation.workspace.requested_root,
+        lake_root: foundation.workspace.root,
+        selected_roots: foundation.workspace.selected_roots,
+        source_count: foundation.workspace.source_files.len(),
+        cache_root: foundation.cache.root,
+        cache_fingerprint: foundation.cache.fingerprint,
+        label: summary.label,
+        cache_status: summary.cache_status,
+        index_path: summary.path,
+        index_dir: summary.index_dir,
+        declaration_count: summary.declaration_count,
+        diagnostics: summary.diagnostics,
+        force,
+    }
+}
+
+fn origin_for_label(label: &str) -> String {
+    if label == "mathlib" {
+        "mathlib".to_owned()
+    } else if label == "workspace" {
+        "workspace".to_owned()
+    } else {
+        format!("external:{label}")
     }
 }
 
