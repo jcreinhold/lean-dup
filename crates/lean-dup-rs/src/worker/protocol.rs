@@ -13,6 +13,7 @@ pub(super) const SCHEMA_VERSION: &str = "lean-dup.worker.v1";
 pub(super) enum Command {
     Extract,
     Features,
+    Index,
     Probe,
     Doctor,
     Version,
@@ -23,6 +24,7 @@ impl Command {
         match self {
             Self::Extract => "extract",
             Self::Features => "features",
+            Self::Index => "index",
             Self::Probe => "probe",
             Self::Doctor => "doctor",
             Self::Version => "version",
@@ -81,6 +83,14 @@ pub(super) struct ProtocolOutput {
     pub(super) rows: Vec<Row>,
     pub(super) events: Vec<WorkerEvent>,
     pub(super) diagnostics: Vec<WorkerDiagnostic>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum ProtocolItem {
+    Row(Row),
+    Event(WorkerEvent),
+    Diagnostic(WorkerDiagnostic),
+    Complete,
 }
 
 #[derive(Debug, Clone)]
@@ -184,6 +194,16 @@ struct CompletePayload {
     elapsed_ms: Option<u64>,
 }
 
+#[derive(Debug, Default, Clone)]
+struct ParsedCounts {
+    version: usize,
+    declaration: usize,
+    feature: usize,
+    probe: usize,
+    progress: usize,
+    error: usize,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ErrorPayload {
@@ -208,37 +228,78 @@ pub(super) fn parse_output(
     let mut rows = Vec::new();
     let mut events = Vec::new();
     let mut diagnostics = Vec::new();
-    let mut complete = None;
+    let mut parser = StreamParser::new(expected_request_id.to_owned(), expected_command);
 
     for (index, line) in stdout.lines().enumerate() {
+        match parser.accept_line(line, index + 1)? {
+            Some(ProtocolItem::Row(row)) => rows.push(row),
+            Some(ProtocolItem::Event(event)) => events.push(event),
+            Some(ProtocolItem::Diagnostic(diagnostic)) => diagnostics.push(diagnostic),
+            Some(ProtocolItem::Complete) | None => {}
+        }
+    }
+    parser.finish()?;
+    Ok(ProtocolOutput {
+        rows,
+        events,
+        diagnostics,
+    })
+}
+
+#[derive(Debug)]
+pub(super) struct StreamParser {
+    expected_request_id: String,
+    expected_command: Command,
+    counts: ParsedCounts,
+    complete: Option<CompletePayload>,
+    pub(super) diagnostics: Vec<WorkerDiagnostic>,
+}
+
+impl StreamParser {
+    pub(super) fn new(expected_request_id: String, expected_command: Command) -> Self {
+        Self {
+            expected_request_id,
+            expected_command,
+            counts: ParsedCounts::default(),
+            complete: None,
+            diagnostics: Vec::new(),
+        }
+    }
+
+    pub(super) fn accept_line(&mut self, line: &str, line_number: usize) -> Result<Option<ProtocolItem>, WorkerError> {
         if line.trim().is_empty() {
-            continue;
+            return Ok(None);
         }
         let envelope: Envelope = serde_json::from_str(line).map_err(|source| WorkerError::InvalidJsonLine {
-            line: index + 1,
+            line: line_number,
             source,
         })?;
-        validate_envelope_context(&envelope, expected_request_id, expected_command)?;
+        validate_envelope_context(&envelope, &self.expected_request_id, self.expected_command)?;
         match envelope.kind {
             ResponseKind::VersionResult => {
                 let payload: WorkerVersionPayload = parse_payload(envelope.payload)?;
-                rows.push(Row::Version(payload.into()));
+                self.counts.version += 1;
+                Ok(Some(ProtocolItem::Row(Row::Version(payload.into()))))
             }
             ResponseKind::DeclarationRow => {
                 let payload: DeclarationPayload = parse_payload(envelope.payload)?;
-                rows.push(Row::Declaration(payload.into()));
+                self.counts.declaration += 1;
+                Ok(Some(ProtocolItem::Row(Row::Declaration(payload.into()))))
             }
             ResponseKind::FeatureRow => {
                 let payload: FeaturePayload = parse_payload(envelope.payload)?;
-                rows.push(Row::Feature(payload.into()));
+                self.counts.feature += 1;
+                Ok(Some(ProtocolItem::Row(Row::Feature(payload.into()))))
             }
             ResponseKind::ProbeResult => {
                 let payload: ProbePayload = parse_payload(envelope.payload)?;
-                rows.push(Row::Probe(payload.into()));
+                self.counts.probe += 1;
+                Ok(Some(ProtocolItem::Row(Row::Probe(payload.into()))))
             }
             ResponseKind::Progress => {
                 let payload: ProgressPayload = parse_payload(envelope.payload)?;
-                events.push(payload.into());
+                self.counts.progress += 1;
+                Ok(Some(ProtocolItem::Event(payload.into())))
             }
             ResponseKind::Error => {
                 let payload: ErrorPayload = parse_payload(envelope.payload)?;
@@ -253,29 +314,29 @@ pub(super) fn parse_output(
                         diagnostics: vec![diagnostic],
                     });
                 }
-                diagnostics.push(diagnostic);
+                self.counts.error += 1;
+                self.diagnostics.push(diagnostic.clone());
+                Ok(Some(ProtocolItem::Diagnostic(diagnostic)))
             }
             ResponseKind::Complete => {
                 let payload: CompletePayload = parse_payload(envelope.payload)?;
-                complete = Some(payload);
+                self.complete = Some(payload);
+                Ok(Some(ProtocolItem::Complete))
             }
-            ResponseKind::DoctorResult => {
-                return Err(WorkerError::Protocol {
-                    message: "doctor_result is not consumed by the Rust worker client".to_owned(),
-                });
-            }
+            ResponseKind::DoctorResult => Err(WorkerError::Protocol {
+                message: "doctor_result is not consumed by the Rust worker client".to_owned(),
+            }),
         }
     }
 
-    let Some(complete_payload) = complete else {
-        return Err(WorkerError::EofBeforeComplete { diagnostics });
-    };
-    validate_row_counts(&complete_payload, &rows, &events, &diagnostics)?;
-    Ok(ProtocolOutput {
-        rows,
-        events,
-        diagnostics,
-    })
+    pub(super) fn finish(self) -> Result<(), WorkerError> {
+        let Some(complete_payload) = self.complete else {
+            return Err(WorkerError::EofBeforeComplete {
+                diagnostics: self.diagnostics,
+            });
+        };
+        validate_count_values(&complete_payload, &self.counts)
+    }
 }
 
 fn parse_payload<T: for<'de> Deserialize<'de>>(payload: Value) -> Result<T, WorkerError> {
@@ -313,32 +374,15 @@ fn validate_envelope_context(
     Ok(())
 }
 
-fn validate_row_counts(
-    complete: &CompletePayload,
-    rows: &[Row],
-    events: &[WorkerEvent],
-    diagnostics: &[WorkerDiagnostic],
-) -> Result<(), WorkerError> {
+fn validate_count_values(complete: &CompletePayload, counts: &ParsedCounts) -> Result<(), WorkerError> {
     let _elapsed_ms = complete.elapsed_ms;
     let expected = [
-        (
-            "version_result",
-            rows.iter().filter(|row| matches!(row, Row::Version(_))).count(),
-        ),
-        (
-            "declaration_row",
-            rows.iter().filter(|row| matches!(row, Row::Declaration(_))).count(),
-        ),
-        (
-            "feature_row",
-            rows.iter().filter(|row| matches!(row, Row::Feature(_))).count(),
-        ),
-        (
-            "probe_result",
-            rows.iter().filter(|row| matches!(row, Row::Probe(_))).count(),
-        ),
-        ("progress", events.len()),
-        ("error", diagnostics.len()),
+        ("version_result", counts.version),
+        ("declaration_row", counts.declaration),
+        ("feature_row", counts.feature),
+        ("probe_result", counts.probe),
+        ("progress", counts.progress),
+        ("error", counts.error),
     ];
     for (kind, count) in expected {
         let Some(value) = complete.row_counts.get(kind) else {

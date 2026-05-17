@@ -15,7 +15,7 @@ open Lean
 open Lean.Meta
 
 /-- Semantic algorithm marker for Lean-owned feature rows. -/
-def version : String := "features.roles.v1"
+def version : String := "features.roles.v2"
 
 /-- Feature errors are mapped by the worker into protocol error envelopes. -/
 inductive ErrorKind where
@@ -238,7 +238,13 @@ private def fingerprintsJson (fingerprints : LeanDup.Canonical.Fingerprints) : J
     , ("conclusion_shape", Json.str fingerprints.conclusionShape)
     ]
 
-private def rowPayload
+/--
+Encode one accepted declaration's semantic features as a protocol payload.
+
+Rust may store and compare the returned opaque keys but must not infer Lean
+expression structure from them.
+-/
+def rowPayload
     (declaration : LeanDup.Extract.AcceptedDeclaration)
     (fingerprints : LeanDup.Canonical.Fingerprints)
     (roleFeatures : Array RoleFeature)
@@ -252,7 +258,13 @@ private def rowPayload
     , ("low_signal_markers", markersJson markers)
     ]
 
-private def featureRows
+/--
+Compute semantic feature rows for accepted declarations in the current Lean
+environment.
+
+The caller controls chunking. This function owns the semantic row contents.
+-/
+def featureRows
     (declarations : Array LeanDup.Extract.AcceptedDeclaration) : MetaM (Array Json) := do
   let mut rows := #[]
   for declaration in declarations do

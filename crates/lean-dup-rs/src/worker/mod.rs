@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use crate::perf::{self, CostClass};
 
-use self::protocol::{Command, Request, Row};
+use self::protocol::{Command, ProtocolItem, Request, Row};
 use self::subprocess::SubprocessTransport;
 use self::transport::{CallControl, WorkerTransport};
 
@@ -75,6 +75,11 @@ impl WorkerClient {
         self.cancelled.store(true, Ordering::Relaxed);
     }
 
+    /// Return the per-call timeout used for worker subprocesses.
+    pub(crate) fn timeout(&self) -> Duration {
+        self.timeout
+    }
+
     /// Return the worker and semantic algorithm versions for a Lake workspace.
     pub fn version(&self, workspace_root: PathBuf) -> Result<WorkerCall<WorkerVersion>, WorkerError> {
         let payload = serde_json::json!({ "workspace_root": workspace_root });
@@ -98,6 +103,51 @@ impl WorkerClient {
             payload["declaration_ids"] = serde_json::json!(declaration_ids);
         }
         self.call(Request::new(request_id(), Command::Features, payload))
+    }
+
+    /// Stream declaration and feature rows from one import-once index command.
+    ///
+    /// The caller receives semantic rows and progress events as they arrive.
+    /// The worker client still owns JSONL framing, request ids, subprocess
+    /// lifetime, and structured diagnostic handling.
+    pub fn index_stream(
+        &self,
+        batch: IndexBatch,
+        sink: &mut dyn FnMut(IndexStreamItem) -> Result<(), WorkerError>,
+    ) -> Result<WorkerCall<()>, WorkerError> {
+        let mut payload = protocol::modules_payload(&batch.workspace_root_string(), &batch.modules);
+        payload["include_private"] = Value::Bool(batch.include_private);
+        payload["include_generated"] = Value::Bool(batch.include_generated);
+        payload["declaration_chunk_size"] = serde_json::json!(batch.declaration_chunk_size);
+        payload["declaration_shard_index"] = serde_json::json!(batch.declaration_shard_index);
+        payload["declaration_shard_count"] = serde_json::json!(batch.declaration_shard_count);
+        let request = Request::new(request_id(), Command::Index, payload);
+        let mut adapter = |item: ProtocolItem| match item {
+            ProtocolItem::Row(Row::Declaration(row)) => sink(IndexStreamItem::Declaration(row)),
+            ProtocolItem::Row(Row::Feature(row)) => sink(IndexStreamItem::Feature(row)),
+            ProtocolItem::Row(_) => Err(WorkerError::Protocol {
+                message: "worker returned non-index row for index call".to_owned(),
+            }),
+            ProtocolItem::Event(event) => sink(IndexStreamItem::Event(event)),
+            ProtocolItem::Diagnostic(diagnostic) => sink(IndexStreamItem::Diagnostic(diagnostic)),
+            ProtocolItem::Complete => Ok(()),
+        };
+        let output = self.transport.call_stream(
+            request,
+            CallControl {
+                timeout: self.timeout,
+                cancelled: self.cancelled.clone(),
+            },
+            &mut adapter,
+        )?;
+        for event in &output.events {
+            perf::record_worker_event(&event.phase, event.elapsed_ms, event.current);
+        }
+        Ok(WorkerCall {
+            rows: Vec::new(),
+            events: output.events,
+            diagnostics: output.diagnostics,
+        })
     }
 
     /// Run bounded semantic probes for candidate declaration pairs.
@@ -145,6 +195,33 @@ pub struct WorkerCall<T> {
     pub rows: Vec<T>,
     pub events: Vec<WorkerEvent>,
     pub diagnostics: Vec<WorkerDiagnostic>,
+}
+
+/// Input for import-once declaration and feature indexing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexBatch {
+    pub workspace_root: PathBuf,
+    pub modules: Vec<ModuleDescriptor>,
+    pub include_private: bool,
+    pub include_generated: bool,
+    pub declaration_chunk_size: usize,
+    pub declaration_shard_index: usize,
+    pub declaration_shard_count: usize,
+}
+
+impl IndexBatch {
+    fn workspace_root_string(&self) -> String {
+        self.workspace_root.to_string_lossy().into_owned()
+    }
+}
+
+/// One streamed event from an import-once index command.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum IndexStreamItem {
+    Declaration(DeclarationRow),
+    Feature(FeatureRow),
+    Event(WorkerEvent),
+    Diagnostic(WorkerDiagnostic),
 }
 
 /// Version and compatibility facts reported by the Lean worker.

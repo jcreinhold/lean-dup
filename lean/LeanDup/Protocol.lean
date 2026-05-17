@@ -26,6 +26,7 @@ def workerVersion : String := "0.1.0"
 inductive Command where
   | extract
   | features
+  | index
   | probe
   | doctor
   | version
@@ -37,6 +38,7 @@ namespace Command
 def asString : Command → String
   | .extract => "extract"
   | .features => "features"
+  | .index => "index"
   | .probe => "probe"
   | .doctor => "doctor"
   | .version => "version"
@@ -45,6 +47,7 @@ def asString : Command → String
 def parse? : String → Option Command
   | "extract" => some .extract
   | "features" => some .features
+  | "index" => some .index
   | "probe" => some .probe
   | "doctor" => some .doctor
   | "version" => some .version
@@ -205,7 +208,7 @@ private def commandArrayJson (commands : Array Command) : Json :=
 
 /-- All protocol commands supported by this worker version. -/
 def supportedCommands : Array Command :=
-  #[.extract, .features, .probe, .doctor, .version]
+  #[.extract, .features, .index, .probe, .doctor, .version]
 
 /-- Optional protocol capabilities supported by this foundation worker. -/
 def supportedCapabilities : Array String := #[]

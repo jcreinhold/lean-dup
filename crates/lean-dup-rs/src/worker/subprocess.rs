@@ -1,13 +1,14 @@
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
 use std::sync::atomic::Ordering;
+use std::sync::mpsc;
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use super::WorkerError;
-use super::protocol::{self, ProtocolOutput, Request};
+use super::protocol::{self, ProtocolItem, ProtocolOutput, Request, StreamParser};
 use super::transport::{CallControl, WorkerTransport};
 use crate::perf::{self, CostClass};
 
@@ -32,6 +33,15 @@ struct ProcessOutput {
     stdout: String,
     stderr: String,
     timed_out: bool,
+}
+
+#[derive(Debug)]
+struct StreamProcessOutput {
+    status: i32,
+    stderr: String,
+    timed_out: bool,
+    events: Vec<super::WorkerEvent>,
+    diagnostics: Vec<super::WorkerDiagnostic>,
 }
 
 impl SubprocessTransport {
@@ -144,6 +154,61 @@ impl WorkerTransport for SubprocessTransport {
         }
         parsed
     }
+
+    fn call_stream(
+        &self,
+        request: Request,
+        control: CallControl,
+        sink: &mut dyn FnMut(ProtocolItem) -> Result<(), WorkerError>,
+    ) -> Result<ProtocolOutput, WorkerError> {
+        let input = perf::measure_result(CostClass::Transport, "worker.encode_json", || {
+            serde_json::to_string(&request.to_json()).map_err(|source| WorkerError::Protocol {
+                message: source.to_string(),
+            })
+        })?;
+        perf::record_count(CostClass::Transport, "worker.stdin_bytes", input.len() as u64);
+        let output = if let Some(command) = &self.command_override {
+            run_process_streaming(
+                &command.cwd,
+                &command.program,
+                &command.args,
+                &input,
+                &control,
+                &request,
+                sink,
+            )?
+        } else {
+            let worker_path = self.build_worker(&control)?;
+            let worker = worker_path.to_string_lossy().into_owned();
+            perf::measure_result(CostClass::WorkerStartup, "worker.subprocess_call", || {
+                run_process_streaming(
+                    &request_workspace(&request)?,
+                    "lake",
+                    &["env".to_owned(), worker],
+                    &input,
+                    &control,
+                    &request,
+                    sink,
+                )
+            })?
+        };
+        if output.timed_out {
+            return Err(WorkerError::Timeout {
+                timeout: control.timeout,
+            });
+        }
+        if output.status != 0 {
+            return Err(WorkerError::NonZeroExit {
+                status: output.status,
+                stderr: output.stderr,
+            });
+        }
+        Ok(ProtocolOutput {
+            rows: Vec::new(),
+            events: output.events,
+            diagnostics: output.diagnostics,
+        })
+    }
 }
 
 static WORKER_PATH_CACHE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
@@ -252,6 +317,197 @@ fn run_process(
     })
 }
 
+fn run_process_streaming(
+    cwd: &Path,
+    program: &str,
+    args: &[String],
+    stdin: &str,
+    control: &CallControl,
+    request: &Request,
+    sink: &mut dyn FnMut(ProtocolItem) -> Result<(), WorkerError>,
+) -> Result<StreamProcessOutput, WorkerError> {
+    if control.cancelled.load(Ordering::Relaxed) {
+        return Err(WorkerError::Cancelled);
+    }
+    let mut child = ProcessCommand::new(program)
+        .args(args)
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|source| WorkerError::Io {
+            message: format!("could not start `{program}`"),
+            source,
+        })?;
+
+    if let Some(mut child_stdin) = child.stdin.take() {
+        child_stdin
+            .write_all(stdin.as_bytes())
+            .map_err(|source| WorkerError::Io {
+                message: "could not write worker request".to_owned(),
+                source,
+            })?;
+    }
+
+    let stdout = child.stdout.take().expect("stdout was piped");
+    let stderr = child.stderr.take().expect("stderr was piped");
+    let (line_tx, line_rx) = mpsc::channel();
+    let stdout_handle = thread::spawn(move || read_lines(stdout, line_tx));
+    let stderr_handle = thread::spawn(move || read_stream(stderr, STDERR_LIMIT));
+    let mut parser = StreamParser::new(request.request_id.clone(), request.command);
+    let mut events = Vec::new();
+    let mut diagnostics = Vec::new();
+    let mut stdout_bytes = 0_u64;
+    let mut stdout_lines = 0_u64;
+    let started = Instant::now();
+    let mut parser_error = None;
+
+    let (status, timed_out) = loop {
+        match line_rx.recv_timeout(Duration::from_millis(10)) {
+            Ok(Ok(line)) => {
+                stdout_bytes += line.len() as u64;
+                stdout_lines += 1;
+                if let Err(error) = process_stream_line(
+                    &mut parser,
+                    line,
+                    stdout_lines as usize,
+                    &mut events,
+                    &mut diagnostics,
+                    sink,
+                ) {
+                    parser_error = Some(error);
+                    let _ = child.kill();
+                }
+            }
+            Ok(Err(source)) => {
+                parser_error = Some(WorkerError::Io {
+                    message: "could not read worker stdout".to_owned(),
+                    source,
+                });
+                let _ = child.kill();
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {}
+        }
+
+        if let Some(status) = child.try_wait().map_err(|source| WorkerError::Io {
+            message: "could not wait for worker process".to_owned(),
+            source,
+        })? {
+            break (status.code().unwrap_or(1), false);
+        }
+        if parser_error.is_some() {
+            let _ = child.wait();
+            break (1, false);
+        }
+        if control.cancelled.load(Ordering::Relaxed) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(WorkerError::Cancelled);
+        }
+        if started.elapsed() > control.timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            break (1, true);
+        }
+    };
+
+    for line in line_rx.try_iter() {
+        let line = line.map_err(|source| WorkerError::Io {
+            message: "could not read worker stdout".to_owned(),
+            source,
+        })?;
+        stdout_bytes += line.len() as u64;
+        stdout_lines += 1;
+        if let Err(error) = process_stream_line(
+            &mut parser,
+            line,
+            stdout_lines as usize,
+            &mut events,
+            &mut diagnostics,
+            sink,
+        ) {
+            parser_error = Some(error);
+        }
+    }
+
+    let stdout_result = stdout_handle.join().map_err(|_| WorkerError::Protocol {
+        message: "stdout reader thread panicked".to_owned(),
+    })?;
+    if parser_error.is_none()
+        && let Err(source) = stdout_result
+    {
+        parser_error = Some(WorkerError::Io {
+            message: "could not read worker stdout".to_owned(),
+            source,
+        });
+    }
+    let stderr = stderr_handle
+        .join()
+        .map_err(|_| WorkerError::Protocol {
+            message: "stderr reader thread panicked".to_owned(),
+        })?
+        .map_err(|source| WorkerError::Io {
+            message: "could not read worker stderr".to_owned(),
+            source,
+        })?;
+
+    perf::record_count(CostClass::Transport, "worker.stdout_bytes", stdout_bytes);
+    perf::record_count(CostClass::Transport, "worker.stdout_lines", stdout_lines);
+    if let Some(error) = parser_error {
+        return Err(error);
+    }
+    if status == 0 {
+        parser.finish()?;
+    }
+
+    Ok(StreamProcessOutput {
+        status,
+        stderr,
+        timed_out,
+        events,
+        diagnostics,
+    })
+}
+
+fn process_stream_line(
+    parser: &mut StreamParser,
+    line: String,
+    line_number: usize,
+    events: &mut Vec<super::WorkerEvent>,
+    diagnostics: &mut Vec<super::WorkerDiagnostic>,
+    sink: &mut dyn FnMut(ProtocolItem) -> Result<(), WorkerError>,
+) -> Result<(), WorkerError> {
+    match parser.accept_line(line.trim_end_matches(['\r', '\n']), line_number)? {
+        Some(ProtocolItem::Event(event)) => {
+            events.push(event.clone());
+            sink(ProtocolItem::Event(event))
+        }
+        Some(ProtocolItem::Diagnostic(diagnostic)) => {
+            diagnostics.push(diagnostic.clone());
+            sink(ProtocolItem::Diagnostic(diagnostic))
+        }
+        Some(item) => sink(item),
+        None => Ok(()),
+    }
+}
+
+fn read_lines(stream: impl Read, sender: mpsc::Sender<std::io::Result<String>>) -> std::io::Result<()> {
+    let mut reader = BufReader::new(stream);
+    loop {
+        let mut line = String::new();
+        let bytes = reader.read_line(&mut line)?;
+        if bytes == 0 {
+            break;
+        }
+        if sender.send(Ok(line)).is_err() {
+            break;
+        }
+    }
+    Ok(())
+}
+
 fn read_stream(mut stream: impl Read, limit: usize) -> std::io::Result<String> {
     let mut bytes = Vec::new();
     stream.read_to_end(&mut bytes)?;
@@ -269,7 +525,7 @@ mod tests {
 
     use super::SubprocessTransport;
     use crate::worker::WorkerError;
-    use crate::worker::protocol::{Command, Request};
+    use crate::worker::protocol::{Command, ProtocolItem, Request};
     use crate::worker::transport::{CallControl, WorkerTransport};
 
     fn script(body: &str) -> (TempDir, SubprocessTransport) {
@@ -402,5 +658,27 @@ printf '%s\n' '{"schema_version":"lean-dup.worker.v1","request_id":"r1","command
         );
         let output = transport.call(request(Command::Version), control()).unwrap();
         assert_eq!(output.rows.len(), 1);
+    }
+
+    #[test]
+    fn streamed_progress_is_delivered_before_complete() {
+        let (_temp, transport) = script(
+            r#"printf '%s\n' '{"schema_version":"lean-dup.worker.v1","request_id":"r1","command":"index","kind":"progress","payload":{"phase":"lean.index.chunk","current":1,"total":2,"module":null,"declaration":null,"elapsed_ms":7,"message":"first chunk"}}'
+printf '%s\n' '{"schema_version":"lean-dup.worker.v1","request_id":"r1","command":"index","kind":"complete","payload":{"row_counts":{"progress":1},"elapsed_ms":null}}'"#,
+        );
+        let mut seen = Vec::new();
+        let output = transport
+            .call_stream(request(Command::Index), control(), &mut |item| {
+                match item {
+                    ProtocolItem::Event(event) => seen.push(event.phase),
+                    ProtocolItem::Complete => seen.push("complete".to_owned()),
+                    _ => {}
+                }
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(seen, vec!["lean.index.chunk", "complete"]);
+        assert_eq!(output.events.len(), 1);
     }
 }

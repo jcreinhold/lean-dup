@@ -13,7 +13,7 @@ open Lean
 open Lean.Meta
 
 /-- Semantic algorithm marker for canonical declaration fingerprints. -/
-def version : String := "canonical.expr.v1"
+def version : String := "canonical.expr.v2"
 
 /--
 Opaque semantic keys for one declaration statement.
@@ -102,43 +102,88 @@ private def fvarKey (ctx : SerializerContext) (fvarId : FVarId) : String :=
   | some index => s!"v{index}"
   | none => s!"free:{fvarId.name}"
 
-private partial def exprKey (ctx : SerializerContext) (mode : ExprMode) : Expr → String
-  | .bvar index => s!"b{index}"
-  | .fvar fvarId => fvarKey ctx fvarId
-  | .mvar mvarId => s!"mvar:{mvarId.name}"
-  | .sort level => s!"(sort {levelKey ctx.levels (Level.normalize level)})"
-  | .const name levels =>
-      let levelKeys := levels.map fun level => levelKey ctx.levels (Level.normalize level)
-      s!"(const {name}[{String.intercalate "," levelKeys}])"
-  | expr@(.app ..) =>
-      let (head, args) := appFnArgs expr
-      if mode == .connective then
-        match head, args.toList with
-        | .const ``And _, [left, right] =>
-            s!"(And {sortParts #[exprKey ctx mode left, exprKey ctx mode right]})"
-        | .const ``Or _, [left, right] =>
-            s!"(Or {sortParts #[exprKey ctx mode left, exprKey ctx mode right]})"
-        | .const ``Iff _, [left, right] =>
-            s!"(Iff {sortParts #[exprKey ctx mode left, exprKey ctx mode right]})"
-        | .const ``Eq _, [type, left, right] =>
-            s!"(Eq {exprKey ctx mode type} {sortParts #[exprKey ctx mode left, exprKey ctx mode right]})"
-        | _, _ => appKey ctx mode head args
-      else
-        appKey ctx mode head args
-  | .lam _ domain body binderInfo =>
-      s!"(lam {binderInfoKey binderInfo} {exprKey ctx mode domain} {exprKey ctx mode body})"
-  | .forallE _ domain body binderInfo =>
-      s!"(forall {binderInfoKey binderInfo} {exprKey ctx mode domain} {exprKey ctx mode body})"
-  | .letE _ type value body _ =>
-      s!"(let {exprKey ctx mode type} {exprKey ctx mode value} {exprKey ctx mode body})"
-  | .lit (.natVal value) => s!"(nat {value})"
-  | .lit (.strVal value) => s!"(str {value.length}:{value})"
-  | .mdata _ body => exprKey ctx mode body
-  | .proj typeName index body => s!"(proj {typeName}.{index} {exprKey ctx mode body})"
+private def exprNodeBudget : Nat := 4000
+
+private def exprDepthBudget : Nat := 80
+
+private partial def exprKeyCore
+    (ctx : SerializerContext)
+    (mode : ExprMode)
+    (depth : Nat)
+    (expr : Expr) : StateM Nat String := do
+  let remaining ← get
+  if remaining == 0 then
+    pure "(truncated budget)"
+  else if depth == 0 then
+    pure "(truncated depth)"
+  else
+    set (remaining - 1)
+    match expr with
+    | .bvar index => pure s!"b{index}"
+    | .fvar fvarId => pure (fvarKey ctx fvarId)
+    | .mvar mvarId => pure s!"mvar:{mvarId.name}"
+    | .sort level => pure s!"(sort {levelKey ctx.levels (Level.normalize level)})"
+    | .const name levels =>
+        let levelKeys := levels.map fun level => levelKey ctx.levels (Level.normalize level)
+        pure s!"(const {name}[{String.intercalate "," levelKeys}])"
+    | app@(.app ..) =>
+        let (head, args) := appFnArgs app
+        if mode == .connective then
+          match head, args.toList with
+          | .const ``And _, [left, right] =>
+              let leftKey ← exprKeyCore ctx mode (depth - 1) left
+              let rightKey ← exprKeyCore ctx mode (depth - 1) right
+              pure s!"(And {sortParts #[leftKey, rightKey]})"
+          | .const ``Or _, [left, right] =>
+              let leftKey ← exprKeyCore ctx mode (depth - 1) left
+              let rightKey ← exprKeyCore ctx mode (depth - 1) right
+              pure s!"(Or {sortParts #[leftKey, rightKey]})"
+          | .const ``Iff _, [left, right] =>
+              let leftKey ← exprKeyCore ctx mode (depth - 1) left
+              let rightKey ← exprKeyCore ctx mode (depth - 1) right
+              pure s!"(Iff {sortParts #[leftKey, rightKey]})"
+          | .const ``Eq _, [type, left, right] =>
+              let typeKey ← exprKeyCore ctx mode (depth - 1) type
+              let leftKey ← exprKeyCore ctx mode (depth - 1) left
+              let rightKey ← exprKeyCore ctx mode (depth - 1) right
+              pure s!"(Eq {typeKey} {sortParts #[leftKey, rightKey]})"
+          | _, _ => appKey ctx mode (depth - 1) head args
+        else
+          appKey ctx mode (depth - 1) head args
+    | .lam _ domain body binderInfo =>
+        let domainKey ← exprKeyCore ctx mode (depth - 1) domain
+        let bodyKey ← exprKeyCore ctx mode (depth - 1) body
+        pure s!"(lam {binderInfoKey binderInfo} {domainKey} {bodyKey})"
+    | .forallE _ domain body binderInfo =>
+        let domainKey ← exprKeyCore ctx mode (depth - 1) domain
+        let bodyKey ← exprKeyCore ctx mode (depth - 1) body
+        pure s!"(forall {binderInfoKey binderInfo} {domainKey} {bodyKey})"
+    | .letE _ type value body _ =>
+        let typeKey ← exprKeyCore ctx mode (depth - 1) type
+        let valueKey ← exprKeyCore ctx mode (depth - 1) value
+        let bodyKey ← exprKeyCore ctx mode (depth - 1) body
+        pure s!"(let {typeKey} {valueKey} {bodyKey})"
+    | .lit (.natVal value) => pure s!"(nat {value})"
+    | .lit (.strVal value) => pure s!"(str {value.length}:{value})"
+    | .mdata _ body => exprKeyCore ctx mode (depth - 1) body
+    | .proj typeName index body =>
+        let bodyKey ← exprKeyCore ctx mode (depth - 1) body
+        pure s!"(proj {typeName}.{index} {bodyKey})"
 where
-  appKey (ctx : SerializerContext) (mode : ExprMode) (head : Expr) (args : Array Expr) : String :=
-    let parts := args.map (exprKey ctx mode)
-    s!"(app {exprKey ctx mode head} [{String.intercalate "," parts.toList}])"
+  appKey
+      (ctx : SerializerContext)
+      (mode : ExprMode)
+      (depth : Nat)
+      (head : Expr)
+      (args : Array Expr) : StateM Nat String := do
+    let headKey ← exprKeyCore ctx mode depth head
+    let mut parts := #[]
+    for arg in args do
+      parts := parts.push (← exprKeyCore ctx mode depth arg)
+    pure s!"(app {headKey} [{String.intercalate "," parts.toList}])"
+
+private def exprKey (ctx : SerializerContext) (mode : ExprMode) (expr : Expr) : String :=
+  (exprKeyCore ctx mode exprDepthBudget expr).run' exprNodeBudget
 
 private def dependencies (type : Expr) (fvars : Array Expr) : Array Nat := Id.run do
   let used := (collectFVars {} type).fvarSet

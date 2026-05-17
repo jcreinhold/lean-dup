@@ -3,7 +3,7 @@ use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use super::WorkerError;
-use super::protocol::{ProtocolOutput, Request};
+use super::protocol::{ProtocolItem, ProtocolOutput, Request};
 
 #[derive(Debug, Clone)]
 pub(super) struct CallControl {
@@ -13,4 +13,11 @@ pub(super) struct CallControl {
 
 pub(super) trait WorkerTransport {
     fn call(&self, request: Request, control: CallControl) -> Result<ProtocolOutput, WorkerError>;
+
+    fn call_stream(
+        &self,
+        request: Request,
+        control: CallControl,
+        sink: &mut dyn FnMut(ProtocolItem) -> Result<(), WorkerError>,
+    ) -> Result<ProtocolOutput, WorkerError>;
 }

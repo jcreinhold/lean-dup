@@ -49,7 +49,8 @@ structure Options where
   includeGenerated : Bool
   deriving Repr
 
-private structure Context where
+/-- Extraction context shared by worker commands that reuse one imported environment. -/
+structure Context where
   modules : Array ModuleSpec
   options : Options
 
@@ -106,7 +107,13 @@ private def parseWorkspaceRoot (json : Json) : Except Error (Option String) := d
       if value.isEmpty then pure none else pure (some value)
   | some _ => throw <| invalidRequest "`workspace_root` must be a string or null"
 
-private def parseOptions (payload : Json) : Except Error Options := do
+/--
+Parse extraction options shared by declaration, feature, and index commands.
+
+The options describe caller-visible filtering policy only; import scheduling
+and chunking remain owned by the worker implementation.
+-/
+def parseOptions (payload : Json) : Except Error Options := do
   let workspaceRoot? ← parseWorkspaceRoot payload
   let includePrivate ← parseBoolField payload "include_private" false
   let includeGenerated ← parseBoolField payload "include_generated" false
@@ -275,7 +282,14 @@ private def collectModuleDeclarations (context : Context) (moduleSpec : ModuleSp
           range? := range? }
   pure declarations
 
-private def collectAcceptedDeclarations (context : Context) : MetaM (Array AcceptedDeclaration) := do
+/--
+Collect declarations accepted by extraction filters from the current imported
+environment.
+
+The returned order is deterministic for one environment but is not a public
+protocol contract.
+-/
+def collectAcceptedDeclarations (context : Context) : MetaM (Array AcceptedDeclaration) := do
   let mut declarations := #[]
   for moduleSpec in context.modules do
     let moduleDeclarations ← collectModuleDeclarations context moduleSpec
@@ -283,7 +297,13 @@ private def collectAcceptedDeclarations (context : Context) : MetaM (Array Accep
       declarations := declarations.push declaration
   pure declarations
 
-private def rowPayloadFromAccepted (options : Options) (decl : AcceptedDeclaration) : MetaM Json := do
+/--
+Encode one accepted declaration as the protocol declaration-row payload.
+
+The payload contains display/source facts. Semantic comparison must use the
+feature rows emitted by `LeanDup.Features`.
+-/
+def rowPayloadFromAccepted (options : Options) (decl : AcceptedDeclaration) : MetaM Json := do
   let typeText := (← ppExpr decl.constInfo.type).pretty
   pure <|
     rowPayload
@@ -311,7 +331,13 @@ private def uniqueModuleImports (modules : Array ModuleSpec) : Array Import := I
       imports := imports.push ({ module := dottedName moduleSpec.module } : Import)
   imports
 
-private unsafe def importRequestedModules (modules : Array ModuleSpec) :
+/--
+Import the distinct requested modules and return the resulting environment.
+
+Callers provide module descriptors; this function owns search-path setup and
+Lean import mechanics.
+-/
+unsafe def importRequestedModules (modules : Array ModuleSpec) :
     IO (Except Error Environment) := do
   Lean.enableInitializersExecution
   initSearchPath (← getBuildDir)

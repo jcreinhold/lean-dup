@@ -11,13 +11,15 @@ use crate::error::{Error, Result, read, read_to_string};
 use crate::perf::{self, CostClass};
 use crate::progress::Reporter;
 use crate::worker::{
-    DeclarationRow, ExtractBatch, FeatureRow, FeaturesBatch, Fingerprints, ModuleDescriptor, ProbePair, ProbeResult,
-    RoleFeature, SourceSpan, WorkerClient, WorkerDiagnostic, WorkerError, WorkerEvent, WorkerVersion,
+    DeclarationRow, ExtractBatch, FeatureRow, FeaturesBatch, Fingerprints, IndexBatch, IndexStreamItem,
+    ModuleDescriptor, ProbePair, ProbeResult, RoleFeature, SourceSpan, WorkerClient, WorkerDiagnostic, WorkerError,
+    WorkerEvent, WorkerVersion,
 };
 use crate::workspace::{self, ResolvedWorkspace};
 
 const INDEX_SCHEMA_VERSION: &str = "lean-dup.index.sqlite.v1";
-const MATHLIB_MODULE_BATCH_SIZE: usize = 20;
+const MATHLIB_DECLARATION_CHUNK_SIZE: usize = 32;
+const MAX_MATHLIB_INDEX_JOBS: usize = 2;
 
 /// Builds, resolves, and opens persisted declaration indexes.
 ///
@@ -673,6 +675,8 @@ fn modules_for(request: &IndexBuildRequest) -> Vec<ModuleDescriptor> {
 }
 
 fn index_cache_key(request: &IndexBuildRequest, version: &WorkerVersion) -> Result<IndexCacheKey> {
+    let shared_mathlib = request.kind == IndexBuildKind::ProjectMathlib;
+    let execution_root = request.execution_root();
     Ok(IndexCacheKey {
         index_schema_version: INDEX_SCHEMA_VERSION,
         protocol_version: version.protocol_version.clone(),
@@ -685,17 +689,41 @@ fn index_cache_key(request: &IndexBuildRequest, version: &WorkerVersion) -> Resu
         label: request.label.clone(),
         kind: request.kind,
         origin: request.origin.clone(),
-        workspace_root: request.workspace.root.display().to_string(),
+        workspace_root: if shared_mathlib {
+            "project-pinned-mathlib".to_owned()
+        } else {
+            request.workspace.root.display().to_string()
+        },
         module_root: request.module_root.clone(),
         selected_roots: request.workspace.selected_roots.clone(),
         include_private: request.include_private,
         include_generated: request.include_generated,
         require_oleans: request.require_oleans,
-        lean_toolchain: optional_text(request.workspace.lean_toolchain_path())?,
-        lakefile: file_digest(request.workspace.lakefile.clone())?,
-        lake_manifest: file_digest(request.workspace.manifest_path())?,
-        git_head: git_output(&request.workspace.root, &["rev-parse", "HEAD"]),
-        git_dirty: git_output(&request.workspace.root, &["status", "--porcelain"]),
+        lean_toolchain: optional_text(if shared_mathlib {
+            execution_root.join("lean-toolchain")
+        } else {
+            request.workspace.lean_toolchain_path()
+        })?,
+        lakefile: if shared_mathlib {
+            file_digest_relative(&request.workspace.root, request.workspace.lakefile.clone())?
+        } else {
+            file_digest(request.workspace.lakefile.clone())?
+        },
+        lake_manifest: if shared_mathlib {
+            file_digest_relative(&request.workspace.root, request.workspace.manifest_path())?
+        } else {
+            file_digest(request.workspace.manifest_path())?
+        },
+        git_head: if shared_mathlib {
+            git_output(&request.workspace.root, &["rev-parse", "HEAD"])
+        } else {
+            git_output(&request.workspace.root, &["rev-parse", "HEAD"])
+        },
+        git_dirty: if shared_mathlib {
+            git_output(&request.workspace.root, &["status", "--porcelain"])
+        } else {
+            git_output(&request.workspace.root, &["status", "--porcelain"])
+        },
         sources: request
             .workspace
             .source_files
@@ -703,7 +731,11 @@ fn index_cache_key(request: &IndexBuildRequest, version: &WorkerVersion) -> Resu
             .map(|source| {
                 Ok(SourceDigest {
                     module: source.module.clone(),
-                    path: source.path.display().to_string(),
+                    path: if shared_mathlib {
+                        relative_path(&request.workspace.root, &source.path)
+                    } else {
+                        source.path.display().to_string()
+                    },
                     digest: optional_hash(source.path.clone())?,
                 })
             })
@@ -766,12 +798,10 @@ struct BatchedIndexBuild {
     diagnostics: Vec<String>,
 }
 
-struct BatchInsertContext<'a> {
-    request: &'a IndexBuildRequest,
-    worker: &'a WorkerClient,
-    total: usize,
+struct StreamingIndexWriter {
+    pending_declarations: HashMap<String, DeclarationRow>,
+    pending_features: HashMap<String, FeatureRow>,
     written: usize,
-    diagnostics: Vec<String>,
 }
 
 fn write_batched_sqlite_index(
@@ -791,169 +821,139 @@ fn write_batched_sqlite_index(
     if temp_path.exists() {
         remove_file(&temp_path)?;
     }
-    let mut connection = Connection::open(&temp_path)?;
+    let connection = Connection::open(&temp_path)?;
     initialize_schema(&connection)?;
     write_metadata(&connection, cache_key_json, request)?;
 
     let modules = modules_for(request);
-    let total = modules.len();
-    let mut context = BatchInsertContext {
-        request,
-        worker,
-        total,
+    let total_modules = modules.len();
+    let mut writer = StreamingIndexWriter {
+        pending_declarations: HashMap::new(),
+        pending_features: HashMap::new(),
         written: 0,
-        diagnostics: Vec::new(),
     };
     reporter.event(
         "index.mathlib",
         Some(0),
-        Some(total as u64),
-        format!("building mathlib index in batches of {MATHLIB_MODULE_BATCH_SIZE} modules"),
+        Some(total_modules as u64),
+        format!("streaming mathlib index from one worker over {total_modules} modules"),
     );
-    for batch in modules.chunks(MATHLIB_MODULE_BATCH_SIZE) {
-        context.insert_module_batch(&mut connection, reporter, batch.to_vec())?;
-    }
-    replace_file(&temp_path, index_path)?;
-    Ok(BatchedIndexBuild {
-        diagnostics: context.diagnostics,
-    })
-}
-
-impl<'a> BatchInsertContext<'a> {
-    fn insert_module_batch(
-        &mut self,
-        connection: &mut Connection,
-        reporter: &mut Reporter,
-        modules: Vec<ModuleDescriptor>,
-    ) -> Result<()> {
-        let label = module_batch_label(&modules);
-        reporter.event(
-            "index.mathlib.batch",
-            Some(self.written as u64),
-            Some(self.total as u64),
-            format!("starting {label}"),
-        );
-        match extract_and_insert_batch(connection, self.request, self.worker, reporter, modules.clone()) {
-            Ok(batch_diagnostics) => {
-                self.diagnostics.extend(batch_diagnostics);
-                self.written += modules.len();
-                reporter.event(
-                    "index.mathlib.batch",
-                    Some(self.written as u64),
-                    Some(self.total as u64),
-                    format!("finished {label}"),
-                );
+    connection.execute_batch("BEGIN IMMEDIATE")?;
+    let mut diagnostics = Vec::new();
+    let mut insertion_error = None;
+    let call = reporter.measure("worker.index", |measure_reporter| {
+        worker.index_stream(
+            IndexBatch {
+                workspace_root: request.execution_root(),
+                modules,
+                include_private: request.include_private,
+                include_generated: request.include_generated,
+                declaration_chunk_size: MATHLIB_DECLARATION_CHUNK_SIZE,
+            },
+            &mut |item| {
+                match item {
+                    IndexStreamItem::Declaration(row) => {
+                        if let Err(error) = writer.accept_declaration(&connection, row) {
+                            insertion_error = Some(error);
+                            return Err(WorkerError::Protocol {
+                                message: "could not insert streamed declaration row".to_owned(),
+                            });
+                        }
+                    }
+                    IndexStreamItem::Feature(row) => {
+                        if let Err(error) = writer.accept_feature(&connection, row) {
+                            insertion_error = Some(error);
+                            return Err(WorkerError::Protocol {
+                                message: "could not insert streamed feature row".to_owned(),
+                            });
+                        }
+                    }
+                    IndexStreamItem::Event(event) => {
+                        measure_reporter.event(
+                            format!("worker.{}", event.phase),
+                            event.current,
+                            event.total,
+                            event.message,
+                        );
+                    }
+                    IndexStreamItem::Diagnostic(diagnostic) => {
+                        diagnostics.push(format!("{}: {}", diagnostic.code, diagnostic.message));
+                    }
+                }
                 Ok(())
+            },
+        )
+    });
+    match call {
+        Ok(call) => {
+            diagnostics.extend(diagnostics_to_strings(call.diagnostics));
+            if let Some(error) = insertion_error {
+                let _ = connection.execute_batch("ROLLBACK");
+                return Err(error);
             }
-            Err(Error::Worker(error)) if is_heartbeat_error(&error) && modules.len() > 1 => {
-                reporter.event(
-                    "index.mathlib.batch",
-                    Some(self.written as u64),
-                    Some(self.total as u64),
-                    format!("splitting heartbeat-limited batch {label}"),
-                );
-                let mid = modules.len() / 2;
-                let right = modules[mid..].to_vec();
-                let left = modules[..mid].to_vec();
-                self.insert_module_batch(connection, reporter, left)?;
-                self.insert_module_batch(connection, reporter, right)
+            writer.finish()?;
+            connection.execute_batch("COMMIT")?;
+        }
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            if let Some(error) = insertion_error {
+                return Err(error);
             }
-            Err(Error::Worker(error)) if is_heartbeat_error(&error) => Err(Error::Index {
-                message: format!("mathlib module batch failed after splitting to {label}: {error}"),
-            }),
-            Err(error) => Err(error),
+            return Err(error.into());
         }
     }
+    replace_file(&temp_path, index_path)?;
+    Ok(BatchedIndexBuild { diagnostics })
 }
 
-fn extract_and_insert_batch(
-    connection: &mut Connection,
-    request: &IndexBuildRequest,
-    worker: &WorkerClient,
-    reporter: &mut Reporter,
-    modules: Vec<ModuleDescriptor>,
-) -> Result<Vec<String>> {
-    let declarations = reporter.measure("worker.extract", |_| {
-        worker.extract_batch(ExtractBatch {
-            workspace_root: request.execution_root(),
-            modules: modules.clone(),
-            include_private: request.include_private,
-            include_generated: request.include_generated,
-        })
-    })?;
-    record_worker_events(reporter, &declarations.events);
-    let declaration_ids = declarations
-        .rows
-        .iter()
-        .map(|row| row.declaration_id.clone())
-        .collect::<Vec<_>>();
-    let features = reporter.measure("worker.features", |_| {
-        worker.features_batch(FeaturesBatch {
-            workspace_root: request.execution_root(),
-            modules,
-            declaration_ids: Some(declaration_ids),
-            include_private: request.include_private,
-            include_generated: request.include_generated,
-        })
-    })?;
-    record_worker_events(reporter, &features.events);
-    let mut diagnostics = diagnostics_to_strings(declarations.diagnostics);
-    diagnostics.extend(diagnostics_to_strings(features.diagnostics));
-    perf::record_count(
-        CostClass::SqliteIndex,
-        "sqlite.index.declarations",
-        declarations.rows.len() as u64,
-    );
-    perf::record_count(
-        CostClass::SqliteIndex,
-        "sqlite.index.features",
-        features.rows.len() as u64,
-    );
-    perf::measure_result(CostClass::SqliteIndex, "sqlite.index.write_batch", || {
-        insert_declaration_rows(connection, declarations.rows, features.rows)
-    })?;
-    Ok(diagnostics)
-}
+impl StreamingIndexWriter {
+    fn accept_declaration(&mut self, connection: &Connection, declaration: DeclarationRow) -> Result<()> {
+        let id = declaration.declaration_id.clone();
+        if let Some(feature) = self.pending_features.remove(&id) {
+            self.insert_pair(connection, &declaration, &feature)
+        } else {
+            self.pending_declarations.insert(id, declaration);
+            Ok(())
+        }
+    }
 
-fn insert_declaration_rows(
-    connection: &mut Connection,
-    declarations: Vec<DeclarationRow>,
-    features: Vec<FeatureRow>,
-) -> Result<()> {
-    let features_by_id = features
-        .into_iter()
-        .map(|feature| (feature.declaration_id.clone(), feature))
-        .collect::<HashMap<_, _>>();
-    let transaction = connection.transaction()?;
-    for declaration in declarations {
-        let Some(feature) = features_by_id.get(&declaration.declaration_id) else {
+    fn accept_feature(&mut self, connection: &Connection, feature: FeatureRow) -> Result<()> {
+        let id = feature.declaration_id.clone();
+        if let Some(declaration) = self.pending_declarations.remove(&id) {
+            self.insert_pair(connection, &declaration, &feature)
+        } else {
+            self.pending_features.insert(id, feature);
+            Ok(())
+        }
+    }
+
+    fn insert_pair(
+        &mut self,
+        connection: &Connection,
+        declaration: &DeclarationRow,
+        feature: &FeatureRow,
+    ) -> Result<()> {
+        insert_declaration(connection, declaration, feature)?;
+        self.written += 1;
+        if self.written.is_multiple_of(1000) {
+            perf::record_count(CostClass::SqliteIndex, "sqlite.index.declarations", self.written as u64);
+        }
+        Ok(())
+    }
+
+    fn finish(self) -> Result<()> {
+        if !self.pending_declarations.is_empty() || !self.pending_features.is_empty() {
             return Err(Error::Index {
                 message: format!(
-                    "worker emitted declaration without feature row: {}",
-                    declaration.qualified_name
+                    "worker index stream ended with {} declarations and {} features unmatched",
+                    self.pending_declarations.len(),
+                    self.pending_features.len()
                 ),
             });
-        };
-        insert_declaration(&transaction, &declaration, feature)?;
-    }
-    transaction.commit()?;
-    Ok(())
-}
-
-fn module_batch_label(modules: &[ModuleDescriptor]) -> String {
-    match (modules.first(), modules.last()) {
-        (Some(first), Some(last)) if first.module == last.module => first.module.clone(),
-        (Some(first), Some(last)) => format!("{}..{}", first.module, last.module),
-        _ => "empty batch".to_owned(),
-    }
-}
-
-fn is_heartbeat_error(error: &WorkerError) -> bool {
-    match error {
-        WorkerError::WorkerDiagnostic { diagnostics } => diagnostics.iter().any(|diagnostic| {
-            diagnostic.message.contains("maximum number of heartbeats") || diagnostic.message.contains("timeout at")
-        }),
-        _ => false,
+        }
+        perf::record_count(CostClass::SqliteIndex, "sqlite.index.declarations", self.written as u64);
+        perf::record_count(CostClass::SqliteIndex, "sqlite.index.features", self.written as u64);
+        Ok(())
     }
 }
 
@@ -1326,6 +1326,17 @@ fn file_digest(path: PathBuf) -> Result<Option<FileDigest>> {
     }))
 }
 
+fn file_digest_relative(root: &Path, path: PathBuf) -> Result<Option<FileDigest>> {
+    Ok(optional_hash(path.clone())?.map(|digest| FileDigest {
+        path: relative_path(root, &path),
+        digest,
+    }))
+}
+
+fn relative_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root).unwrap_or(path).to_string_lossy().into_owned()
+}
+
 fn optional_hash(path: PathBuf) -> Result<Option<String>> {
     if !path.exists() {
         return Ok(None);
@@ -1666,6 +1677,82 @@ name = "B"
     }
 
     #[test]
+    fn project_mathlib_cache_key_ignores_absolute_project_paths() {
+        let left = TempDir::new().unwrap();
+        let right = TempDir::new().unwrap();
+        let left_mathlib = left.path().join(".lake/packages/mathlib");
+        let right_mathlib = right.path().join(".lake/packages/mathlib");
+        for root in [left.path(), right.path()] {
+            fs::write(root.join("lakefile.toml"), "[[lean_lib]]\nname = \"Project\"\n").unwrap();
+            fs::write(root.join("lean-toolchain"), "leanprover/lean4:v4.30.0-rc2\n").unwrap();
+            fs::write(root.join("Project.lean"), "#check Nat\n").unwrap();
+            let mathlib = root.join(".lake/packages/mathlib");
+            fs::create_dir_all(mathlib.join("Mathlib")).unwrap();
+            fs::write(mathlib.join("lakefile.toml"), "[[lean_lib]]\nname = \"Mathlib\"\n").unwrap();
+            fs::write(mathlib.join("Mathlib.lean"), "#check Nat\n").unwrap();
+        }
+
+        let version = fake_version("features.v1");
+        let left_workspace = resolve(
+            WorkspaceRequest {
+                requested_root: left_mathlib,
+                module_root: Some("Mathlib".to_owned()),
+            },
+            &mut Reporter::new(false, false),
+        )
+        .unwrap();
+        let right_workspace = resolve(
+            WorkspaceRequest {
+                requested_root: right_mathlib,
+                module_root: Some("Mathlib".to_owned()),
+            },
+            &mut Reporter::new(false, false),
+        )
+        .unwrap();
+        let left_key = serde_json::to_string(
+            &index_cache_key(
+                &project_mathlib_request(left_workspace, left.path().to_path_buf()),
+                &version,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let right_key = serde_json::to_string(
+            &index_cache_key(
+                &project_mathlib_request(right_workspace, right.path().to_path_buf()),
+                &version,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(left_key, right_key);
+
+        fs::write(
+            right.path().join(".lake/packages/mathlib/Mathlib.lean"),
+            "#check Bool\n",
+        )
+        .unwrap();
+        let right_workspace = resolve(
+            WorkspaceRequest {
+                requested_root: right.path().join(".lake/packages/mathlib"),
+                module_root: Some("Mathlib".to_owned()),
+            },
+            &mut Reporter::new(false, false),
+        )
+        .unwrap();
+        let changed_key = serde_json::to_string(
+            &index_cache_key(
+                &project_mathlib_request(right_workspace, right.path().to_path_buf()),
+                &version,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_ne!(left_key, changed_key);
+    }
+
+    #[test]
     fn sqlite_cache_validation_rejects_schema_mismatch() {
         let temp = TempDir::new().unwrap();
         let index_path = temp.path().join("index.sqlite");
@@ -1696,6 +1783,21 @@ name = "B"
             require_oleans: false,
             force: false,
             kind: IndexBuildKind::External,
+        }
+    }
+
+    fn project_mathlib_request(workspace: ResolvedWorkspace, execution_root: PathBuf) -> IndexBuildRequest {
+        IndexBuildRequest {
+            workspace,
+            execution_root: Some(execution_root),
+            label: "mathlib".to_owned(),
+            module_root: "Mathlib".to_owned(),
+            origin: "mathlib".to_owned(),
+            include_private: true,
+            include_generated: false,
+            require_oleans: true,
+            force: false,
+            kind: IndexBuildKind::ProjectMathlib,
         }
     }
 
