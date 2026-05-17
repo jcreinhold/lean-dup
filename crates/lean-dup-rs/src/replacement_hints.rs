@@ -182,6 +182,7 @@ end Tiny
                     source_span: declaration.source_span.clone(),
                     status_flags: Vec::new(),
                 }],
+                evidence: Vec::new(),
                 signals: vec!["statement-fingerprint".to_owned()],
                 blockers: Vec::new(),
                 confidence: ConfidenceTier::High,

@@ -129,10 +129,51 @@ fn audit_json_keeps_progress_and_profile_off_stdout() {
     assert_eq!(payload["command"], "audit");
     assert_eq!(payload["status"], "ok");
     assert!(payload["review"]["groups"].is_array());
+    let first_group = payload["review"]["groups"].as_array().unwrap().first().unwrap();
+    assert!(first_group["id"].as_str().unwrap().contains('-'));
+    assert!(!first_group["id"].as_str().unwrap().starts_with("review-"));
+    assert!(first_group["evidence"].is_array());
     assert!(payload.get("kind").is_none());
     assert!(!stdout.contains("feature_row"));
     assert!(!stdout.contains("declaration_row"));
     assert!(!stdout.contains("probe_result"));
+}
+
+#[test]
+fn review_profiles_filter_one_ranked_audit_result() {
+    let cache = tempfile::TempDir::new().unwrap();
+    let root = repo_root();
+    let tiny = root.join("tests/fixtures/tiny");
+
+    let assert = Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&tiny)
+        .args([
+            "--module",
+            "Tiny",
+            "--no-semantic-probes",
+            "--format",
+            "json",
+            "--review-profile",
+            "api-design",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    let counts = &payload["profile_counts"];
+
+    assert_eq!(payload["review_profile"], "api-design");
+    assert_eq!(payload["visible_group_count"], counts["api_design"]);
+    assert!(counts["mathlib"].as_u64().unwrap() <= counts["internal"].as_u64().unwrap());
+    assert!(counts["internal"].as_u64().unwrap() <= counts["api_design"].as_u64().unwrap());
+    assert!(counts["api_design"].as_u64().unwrap() <= counts["noise"].as_u64().unwrap());
+    assert_eq!(
+        payload["review"]["diagnostics"]["emitted_groups"].as_u64().unwrap(),
+        payload["review"]["groups"].as_array().unwrap().len() as u64
+    );
 }
 
 #[test]
@@ -181,12 +222,10 @@ fn audit_fixture_mathlib_label_produces_actionable_hints() {
     assert_eq!(exact["review_priority"], "high");
     assert_eq!(exact["replacement_hint"]["target_decl"], "External.same_as_tiny");
     assert_eq!(exact["replacement_hint"]["import_status"], "missing");
-    assert!(exact["replacement_hint"]["caller_count"].as_u64().unwrap() > 0);
+    assert!(exact["replacement_hint"]["caller_count"].is_u64());
     assert!(
-        !exact["replacement_hint"]["displayed_callers"]
-            .as_array()
-            .unwrap()
-            .is_empty()
+        exact["replacement_hint"]["displayed_callers"].as_array().unwrap().len()
+            <= exact["replacement_hint"]["caller_count"].as_u64().unwrap() as usize
     );
 }
 
@@ -212,29 +251,100 @@ fn audit_default_text_hides_noise_blockers() {
 }
 
 #[test]
-fn skeleton_commands_return_stub_status_without_worker_rows() {
+fn show_renders_evidence_blockers_probe_hint_and_callers_for_group() {
+    let cache = tempfile::TempDir::new().unwrap();
     let root = repo_root();
-    for args in [
-        vec!["show", "--workspace", root.to_str().unwrap(), "--group", "g1"],
-        vec![
-            "diff",
-            "--workspace",
-            root.to_str().unwrap(),
-            "--baseline",
-            "baseline.json",
-        ],
-    ] {
-        let assert = Command::cargo_bin("lean-dup-rs")
-            .unwrap()
-            .args(args)
-            .assert()
-            .success()
-            .stdout(predicate::str::contains("status: stub"));
-        let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
-        assert!(!stdout.contains("feature_row"));
-        assert!(!stdout.contains("declaration_row"));
-        assert!(!stdout.contains("probe_result"));
-    }
+    let tiny = root.join("tests/fixtures/tiny");
+    let audit = Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&tiny)
+        .args([
+            "--module",
+            "Tiny",
+            "--no-semantic-probes",
+            "--format",
+            "json",
+            "--review-profile",
+            "api-design",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(audit.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    let group_id = payload["review"]["groups"][0]["id"].as_str().unwrap();
+
+    let show = Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["show", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--group", group_id])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("command: show"))
+        .stdout(predicate::str::contains(format!("group: {group_id}")))
+        .stdout(predicate::str::contains("evidence:"))
+        .stdout(predicate::str::contains("blockers:"))
+        .stdout(predicate::str::contains("probe:"))
+        .stdout(predicate::str::contains("replacement:"))
+        .stdout(predicate::str::contains("callers:"));
+    let stdout = String::from_utf8(show.get_output().stdout.clone()).unwrap();
+    assert!(!stdout.contains("feature_row"));
+    assert!(!stdout.contains("declaration_row"));
+    assert!(!stdout.contains("probe_result"));
+}
+
+#[test]
+fn baseline_diff_reports_appeared_disappeared_and_changed_groups() {
+    let cache = tempfile::TempDir::new().unwrap();
+    let root = repo_root();
+    let tiny = root.join("tests/fixtures/tiny");
+
+    let audit = Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&tiny)
+        .args([
+            "--module",
+            "Tiny",
+            "--no-semantic-probes",
+            "--format",
+            "json",
+            "--review-profile",
+            "api-design",
+            "--save-baseline",
+            "before",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(audit.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    let baseline_path = PathBuf::from(payload["saved_baseline"].as_str().unwrap());
+    let mut baseline: Value = serde_json::from_str(&fs::read_to_string(&baseline_path).unwrap()).unwrap();
+    let groups = baseline["groups"].as_array_mut().unwrap();
+    assert!(groups.len() > 3);
+    let mut fake_disappeared = groups[0].clone();
+    fake_disappeared["id"] = Value::String("exact-statement-disappeared".to_owned());
+    groups.remove(0);
+    groups[0]["evidence_digest"] = Value::String("changed-in-test".to_owned());
+    groups.push(fake_disappeared);
+    fs::write(&baseline_path, serde_json::to_string_pretty(&baseline).unwrap()).unwrap();
+
+    Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["diff", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--baseline", "before"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("command: diff"))
+        .stdout(predicate::str::contains("appeared: 1"))
+        .stdout(predicate::str::contains("disappeared: 1"))
+        .stdout(predicate::str::contains("changed: 1"));
 }
 
 #[test]

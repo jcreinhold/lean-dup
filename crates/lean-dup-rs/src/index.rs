@@ -810,7 +810,9 @@ fn insert_declaration(connection: &Connection, declaration: &DeclarationRow, fea
             feature.feature_version,
             serde_json::to_string(&feature.fingerprints)?,
             serde_json::to_string(&feature.role_features)?,
-            feature.binder_count,
+            i64::try_from(feature.binder_count).map_err(|_| Error::Index {
+                message: format!("binder count exceeds sqlite integer range: {}", feature.binder_count),
+            })?,
             serde_json::to_string(&feature.low_signal_markers)?,
         ],
     )?;
@@ -1103,7 +1105,8 @@ fn worker_source_digest() -> Result<Option<String>> {
         hasher.update(read(path)?);
         hasher.update([0]);
     }
-    Ok(Some(format!("{:x}", hasher.finalize())))
+    let digest = hasher.finalize();
+    Ok(Some(digest.iter().map(|byte| format!("{byte:02x}")).collect()))
 }
 
 fn repo_root() -> PathBuf {

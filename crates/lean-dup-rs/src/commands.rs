@@ -3,10 +3,11 @@ use std::time::Duration;
 
 use serde::Serialize;
 
+use crate::baseline::{self, BaselineDiff};
 use crate::cache::{self, CacheFacts};
 use crate::cli::{
     AuditArgs, Cli, Command, DiffArgs, DoctorArgs, EvalArgs, EvalFormat, IndexArgs, IndexMathlibArgs, OutputFormat,
-    ShowArgs,
+    ReviewProfile, ShowArgs,
 };
 use crate::error::Result;
 use crate::eval::{EvalRequest, EvaluationReport};
@@ -16,7 +17,8 @@ use crate::index::{
 };
 use crate::progress::Reporter;
 use crate::ranking::{
-    RankedReview, RankingInput, RankingProfile, ReviewFilter, ReviewPriority as RankedPriority, rank_candidates,
+    RankedGroup, RankedReview, RankingInput, RankingProfile, ReviewFilter, ReviewPriority as RankedPriority,
+    rank_candidates,
 };
 use crate::replacement_hints::{ReplacementHintProfile, attach_replacement_hints};
 use crate::retrieval::{RetrievalDiagnostics, RetrievalOutput, retrieve_candidates};
@@ -40,8 +42,8 @@ pub(crate) enum Report {
     IndexMathlib(IndexReport),
     Audit(AuditReport),
     Eval(EvaluationReport),
-    Show(SkeletonReport),
-    Diff(SkeletonReport),
+    Show(ShowReport),
+    Diff(DiffReport),
 }
 
 #[derive(Debug, Serialize)]
@@ -58,22 +60,6 @@ pub(crate) struct DoctorReport {
     pub(crate) lean_version: String,
     pub(crate) require_oleans: bool,
     pub(crate) missing_oleans: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub(crate) struct SkeletonReport {
-    pub(crate) status: &'static str,
-    pub(crate) requested_workspace: PathBuf,
-    pub(crate) lake_root: PathBuf,
-    pub(crate) selected_roots: Vec<String>,
-    pub(crate) source_count: usize,
-    pub(crate) cache_root: PathBuf,
-    pub(crate) cache_fingerprint: String,
-    pub(crate) message: &'static str,
-    pub(crate) label: Option<String>,
-    pub(crate) group: Option<String>,
-    pub(crate) baseline: Option<PathBuf>,
-    pub(crate) force: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -112,15 +98,67 @@ pub(crate) struct AuditReport {
     pub(crate) include_generated: bool,
     pub(crate) show_noise: bool,
     pub(crate) min_priority: RankedPriority,
+    pub(crate) review_profile: ReviewProfile,
+    pub(crate) profile_counts: ReviewProfileCounts,
     pub(crate) retrieval: RetrievalDiagnostics,
     pub(crate) review: RankedReview,
+    pub(crate) visible_groups: Vec<RankedGroup>,
     pub(crate) visible_group_count: usize,
+    pub(crate) saved_baseline: Option<PathBuf>,
     pub(crate) message: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct ReviewProfileCounts {
+    pub(crate) mathlib: usize,
+    pub(crate) internal: usize,
+    pub(crate) api_design: usize,
+    pub(crate) noise: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct ShowReport {
+    pub(crate) status: &'static str,
+    pub(crate) requested_workspace: PathBuf,
+    pub(crate) lake_root: PathBuf,
+    pub(crate) selected_roots: Vec<String>,
+    pub(crate) source_count: usize,
+    pub(crate) cache_root: PathBuf,
+    pub(crate) cache_fingerprint: String,
+    pub(crate) group: RankedGroup,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct DiffReport {
+    pub(crate) status: &'static str,
+    pub(crate) requested_workspace: PathBuf,
+    pub(crate) lake_root: PathBuf,
+    pub(crate) selected_roots: Vec<String>,
+    pub(crate) source_count: usize,
+    pub(crate) cache_root: PathBuf,
+    pub(crate) cache_fingerprint: String,
+    pub(crate) diff: BaselineDiff,
 }
 
 struct Foundation {
     workspace: ResolvedWorkspace,
     cache: CacheFacts,
+}
+
+struct AuditComputation {
+    foundation: Foundation,
+    include_private: bool,
+    include_imports: bool,
+    import_roots: Vec<String>,
+    compare_indexes: Vec<String>,
+    compare_mathlib: bool,
+    threshold: f64,
+    include_generated: bool,
+    show_noise: bool,
+    min_priority: RankedPriority,
+    review_profile: ReviewProfile,
+    retrieval: RetrievalDiagnostics,
+    review: RankedReview,
 }
 
 const INDEX_WORKER_TIMEOUT: Duration = Duration::from_secs(30 * 60);
@@ -243,6 +281,57 @@ fn index_mathlib(args: IndexMathlibArgs, reporter: &mut Reporter) -> Result<Inde
 }
 
 fn audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditReport> {
+    let save_baseline = args.save_baseline.clone();
+    let computation = compute_audit(args, reporter)?;
+    let filter = profile_filter(
+        computation.review_profile,
+        computation.include_generated,
+        computation.show_noise,
+        computation.min_priority,
+    );
+    let visible_groups = computation
+        .review
+        .visible_groups(filter)
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    let visible_group_count = visible_groups.len();
+    let profile_counts = profile_counts(&computation.review);
+    let saved_baseline = if let Some(name) = save_baseline {
+        let snapshot = baseline::snapshot(&computation.review, computation.foundation.cache.fingerprint.clone());
+        Some(baseline::save(&computation.foundation.cache.root, &name, &snapshot)?)
+    } else {
+        None
+    };
+    Ok(AuditReport {
+        status: "ok",
+        requested_workspace: computation.foundation.workspace.requested_root,
+        lake_root: computation.foundation.workspace.root,
+        selected_roots: computation.foundation.workspace.selected_roots,
+        source_count: computation.foundation.workspace.source_files.len(),
+        cache_root: computation.foundation.cache.root,
+        cache_fingerprint: computation.foundation.cache.fingerprint,
+        include_private: computation.include_private,
+        include_imports: computation.include_imports,
+        import_roots: computation.import_roots,
+        compare_indexes: computation.compare_indexes,
+        compare_mathlib: computation.compare_mathlib,
+        threshold: computation.threshold,
+        include_generated: computation.include_generated,
+        show_noise: computation.show_noise,
+        min_priority: computation.min_priority,
+        review_profile: computation.review_profile,
+        profile_counts,
+        retrieval: computation.retrieval,
+        review: computation.review,
+        visible_groups,
+        visible_group_count,
+        saved_baseline,
+        message: "audit ranking queue generated",
+    })
+}
+
+fn compute_audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditComputation> {
     let include_private = args.effective_include_private();
     let module_root = args.module_root.clone();
     let force = false;
@@ -289,21 +378,8 @@ fn audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditReport> {
         profile: RankingProfile::default(),
     });
     let review = attach_replacement_hints(review, &source_facts, ReplacementHintProfile::default());
-    let min_priority = ranked_priority(args.min_priority);
-    let filter = ReviewFilter {
-        include_generated: args.include_generated,
-        show_noise: args.show_noise,
-        min_priority,
-    };
-    let visible_group_count = review.visible_groups(filter).len();
-    Ok(AuditReport {
-        status: "ok",
-        requested_workspace: foundation.workspace.requested_root,
-        lake_root: foundation.workspace.root,
-        selected_roots: foundation.workspace.selected_roots,
-        source_count: foundation.workspace.source_files.len(),
-        cache_root: foundation.cache.root,
-        cache_fingerprint: foundation.cache.fingerprint,
+    Ok(AuditComputation {
+        foundation,
         include_private,
         include_imports: args.include_imports,
         import_roots: args.import_roots,
@@ -312,11 +388,10 @@ fn audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditReport> {
         threshold: args.threshold,
         include_generated: args.include_generated,
         show_noise: args.show_noise,
-        min_priority,
+        min_priority: ranked_priority(args.min_priority),
+        review_profile: args.review_profile,
         retrieval: retrieval_output.diagnostics,
         review,
-        visible_group_count,
-        message: "audit ranking queue generated",
     })
 }
 
@@ -436,28 +511,46 @@ fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<EvaluationReport> {
     )
 }
 
-fn show(args: ShowArgs, reporter: &mut Reporter) -> Result<SkeletonReport> {
-    let foundation = foundation(args.workspace, None, reporter)?;
-    Ok(skeleton(
-        foundation,
-        "show is stubbed until report persistence is implemented in prompt 14",
-        None,
-        Some(args.group),
-        None,
-        false,
-    ))
+fn show(args: ShowArgs, reporter: &mut Reporter) -> Result<ShowReport> {
+    let requested_group = args.group.clone();
+    let computation = compute_audit(default_audit_args(args.workspace, args.module_root), reporter)?;
+    let group = computation
+        .review
+        .groups
+        .iter()
+        .find(|group| group.id == requested_group)
+        .cloned()
+        .ok_or_else(|| crate::error::Error::Index {
+            message: format!("unknown audit group: {requested_group}"),
+        })?;
+    Ok(ShowReport {
+        status: "ok",
+        requested_workspace: computation.foundation.workspace.requested_root,
+        lake_root: computation.foundation.workspace.root,
+        selected_roots: computation.foundation.workspace.selected_roots,
+        source_count: computation.foundation.workspace.source_files.len(),
+        cache_root: computation.foundation.cache.root,
+        cache_fingerprint: computation.foundation.cache.fingerprint,
+        group,
+    })
 }
 
-fn diff(args: DiffArgs, reporter: &mut Reporter) -> Result<SkeletonReport> {
-    let foundation = foundation(args.workspace, None, reporter)?;
-    Ok(skeleton(
-        foundation,
-        "diff is stubbed until baseline reports are implemented in prompt 14",
-        None,
-        None,
-        Some(args.baseline),
-        false,
-    ))
+fn diff(args: DiffArgs, reporter: &mut Reporter) -> Result<DiffReport> {
+    let baseline_name = args.baseline.clone();
+    let computation = compute_audit(default_audit_args(args.workspace, args.module_root), reporter)?;
+    let (baseline_path, saved) = baseline::load(&computation.foundation.cache.root, &baseline_name)?;
+    let current = baseline::snapshot(&computation.review, computation.foundation.cache.fingerprint.clone());
+    let diff = baseline::diff(baseline_name, baseline_path, saved, current);
+    Ok(DiffReport {
+        status: "ok",
+        requested_workspace: computation.foundation.workspace.requested_root,
+        lake_root: computation.foundation.workspace.root,
+        selected_roots: computation.foundation.workspace.selected_roots,
+        source_count: computation.foundation.workspace.source_files.len(),
+        cache_root: computation.foundation.cache.root,
+        cache_fingerprint: computation.foundation.cache.fingerprint,
+        diff,
+    })
 }
 
 fn foundation(requested_root: PathBuf, module_root: Option<String>, reporter: &mut Reporter) -> Result<Foundation> {
@@ -473,30 +566,6 @@ fn foundation(requested_root: PathBuf, module_root: Option<String>, reporter: &m
         reporter.event("cache", None, None, format!("cache root {}", cache.root.display()));
         Ok(Foundation { workspace, cache })
     })
-}
-
-fn skeleton(
-    foundation: Foundation,
-    message: &'static str,
-    label: Option<String>,
-    group: Option<String>,
-    baseline: Option<PathBuf>,
-    force: bool,
-) -> SkeletonReport {
-    SkeletonReport {
-        status: "stub",
-        requested_workspace: foundation.workspace.requested_root,
-        lake_root: foundation.workspace.root,
-        selected_roots: foundation.workspace.selected_roots,
-        source_count: foundation.workspace.source_files.len(),
-        cache_root: foundation.cache.root,
-        cache_fingerprint: foundation.cache.fingerprint,
-        message,
-        label,
-        group,
-        baseline,
-        force,
-    }
 }
 
 fn index_report(foundation: Foundation, summary: IndexSummary, force: bool) -> IndexReport {
@@ -534,6 +603,97 @@ fn ranked_priority(priority: crate::cli::ReviewPriority) -> RankedPriority {
         crate::cli::ReviewPriority::Medium => RankedPriority::Medium,
         crate::cli::ReviewPriority::Low => RankedPriority::Low,
         crate::cli::ReviewPriority::Noise => RankedPriority::Noise,
+    }
+}
+
+fn profile_filter(
+    profile: ReviewProfile,
+    include_generated: bool,
+    show_noise: bool,
+    _min_priority: RankedPriority,
+) -> ReviewFilter {
+    let profile_filter = match profile {
+        ReviewProfile::Mathlib => ReviewFilter {
+            include_generated: false,
+            show_noise: false,
+            min_priority: RankedPriority::High,
+        },
+        ReviewProfile::Internal => ReviewFilter {
+            include_generated: false,
+            show_noise: false,
+            min_priority: RankedPriority::Medium,
+        },
+        ReviewProfile::ApiDesign => ReviewFilter {
+            include_generated: false,
+            show_noise: false,
+            min_priority: RankedPriority::Low,
+        },
+        ReviewProfile::Noise => ReviewFilter {
+            include_generated: true,
+            show_noise: true,
+            min_priority: RankedPriority::Noise,
+        },
+    };
+    ReviewFilter {
+        include_generated: include_generated || profile_filter.include_generated,
+        show_noise: show_noise || profile_filter.show_noise,
+        min_priority: profile_filter.min_priority,
+    }
+}
+
+fn profile_counts(review: &RankedReview) -> ReviewProfileCounts {
+    ReviewProfileCounts {
+        mathlib: review
+            .visible_groups(profile_filter(
+                ReviewProfile::Mathlib,
+                false,
+                false,
+                RankedPriority::Low,
+            ))
+            .len(),
+        internal: review
+            .visible_groups(profile_filter(
+                ReviewProfile::Internal,
+                false,
+                false,
+                RankedPriority::Low,
+            ))
+            .len(),
+        api_design: review
+            .visible_groups(profile_filter(
+                ReviewProfile::ApiDesign,
+                false,
+                false,
+                RankedPriority::Low,
+            ))
+            .len(),
+        noise: review
+            .visible_groups(profile_filter(ReviewProfile::Noise, false, false, RankedPriority::Low))
+            .len(),
+    }
+}
+
+fn default_audit_args(workspace: PathBuf, module_root: Option<String>) -> AuditArgs {
+    AuditArgs {
+        workspace,
+        module_root,
+        format: OutputFormat::Text,
+        public_only: false,
+        include_private: true,
+        no_include_private: true,
+        include_imports: false,
+        import_roots: Vec::new(),
+        compare_indexes: Vec::new(),
+        compare_mathlib: false,
+        mathlib_workspace: None,
+        threshold: 0.78,
+        include_generated: false,
+        show_noise: false,
+        min_priority: crate::cli::ReviewPriority::Low,
+        review_profile: ReviewProfile::Mathlib,
+        save_baseline: None,
+        semantic_probes: true,
+        replacement_hints: true,
     }
 }
 

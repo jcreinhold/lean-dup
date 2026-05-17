@@ -115,6 +115,12 @@ pub(crate) struct AuditArgs {
     #[arg(long, value_enum, default_value_t = ReviewPriority::Low)]
     pub(crate) min_priority: ReviewPriority,
 
+    #[arg(long = "review-profile", value_enum, default_value_t = ReviewProfile::Mathlib)]
+    pub(crate) review_profile: ReviewProfile,
+
+    #[arg(long = "save-baseline")]
+    pub(crate) save_baseline: Option<String>,
+
     #[arg(long = "no-semantic-probes", action = clap::ArgAction::SetFalse)]
     pub(crate) semantic_probes: bool,
 
@@ -145,6 +151,9 @@ pub(crate) struct ShowArgs {
     #[arg(long)]
     pub(crate) workspace: PathBuf,
 
+    #[arg(long = "module")]
+    pub(crate) module_root: Option<String>,
+
     #[arg(long)]
     pub(crate) group: String,
 }
@@ -154,8 +163,11 @@ pub(crate) struct DiffArgs {
     #[arg(long)]
     pub(crate) workspace: PathBuf,
 
+    #[arg(long = "module")]
+    pub(crate) module_root: Option<String>,
+
     #[arg(long)]
-    pub(crate) baseline: PathBuf,
+    pub(crate) baseline: String,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]
@@ -171,6 +183,15 @@ pub(crate) enum ReviewPriority {
     High,
     Medium,
     Low,
+    Noise,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum ReviewProfile {
+    Mathlib,
+    Internal,
+    ApiDesign,
     Noise,
 }
 

@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::index::HydratedDeclaration;
 use crate::retrieval::{CandidateSet, KeyContribution, RetrievedCandidate};
@@ -79,6 +80,7 @@ pub(crate) struct RankedGroup {
     pub(crate) pair_id: String,
     pub(crate) relation: ReviewRelation,
     pub(crate) members: Vec<ReviewMember>,
+    pub(crate) evidence: Vec<ReviewEvidence>,
     pub(crate) signals: Vec<String>,
     pub(crate) blockers: Vec<String>,
     pub(crate) confidence: ConfidenceTier,
@@ -103,6 +105,26 @@ pub(crate) struct ReviewMember {
     pub(crate) visibility: String,
     pub(crate) source_span: Option<SourceSpan>,
     pub(crate) status_flags: Vec<String>,
+}
+
+/// One typed evidence item supporting a ranked group.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub(crate) struct ReviewEvidence {
+    pub(crate) kind: String,
+    pub(crate) role: Option<String>,
+    pub(crate) display: Option<String>,
+    pub(crate) score: f64,
+}
+
+impl ReviewEvidence {
+    pub(crate) fn summary(&self) -> String {
+        let role = self.role.as_deref().unwrap_or("-");
+        let display = self.display.as_deref().unwrap_or("-");
+        format!(
+            "evidence={} role={} display={} score={:.3}",
+            self.kind, role, display, self.score
+        )
+    }
 }
 
 /// Relation selected as the strongest explanation for a group.
@@ -172,13 +194,15 @@ pub(crate) struct RankingDiagnostics {
 pub(crate) fn rank_candidates(input: RankingInput<'_>) -> RankedReview {
     let mut groups = Vec::new();
     let mut suppressed = Vec::new();
+    let mut seen_group_ids = BTreeSet::new();
 
     for set in input.candidate_sets {
         for candidate in &set.candidates {
-            let mut group = rank_pair(&set.anchor, candidate, &input);
+            let group = rank_pair(&set.anchor, candidate, &input);
             suppressed.extend(suppressed_relations(&group, candidate));
-            group.id = format!("review-{}", groups.len() + 1);
-            groups.push(group);
+            if seen_group_ids.insert(group.id.clone()) {
+                groups.push(group);
+            }
         }
     }
 
@@ -280,11 +304,14 @@ fn rank_pair(anchor: &HydratedDeclaration, candidate: &RetrievedCandidate, input
         input.profile.transitional_alias_callers,
     );
 
+    let evidence = review_evidence(&candidate.explanation.contributions);
+
     RankedGroup {
-        id: String::new(),
+        id: stable_group_id(anchor, &candidate.declaration, relation),
         pair_id: candidate.pair_id.clone(),
         relation,
         members: vec![member(anchor), member(&candidate.declaration)],
+        evidence,
         signals: signals.into_iter().collect(),
         blockers: blockers.into_iter().collect(),
         confidence,
@@ -296,6 +323,40 @@ fn rank_pair(anchor: &HydratedDeclaration, candidate: &RetrievedCandidate, input
         local_caller_count,
         replacement_hint: None,
     }
+}
+
+fn stable_group_id(anchor: &HydratedDeclaration, candidate: &HydratedDeclaration, relation: ReviewRelation) -> String {
+    let mut member_ids = vec![anchor.declaration_id.as_str(), candidate.declaration_id.as_str()];
+    member_ids.sort();
+    let relation = match relation {
+        ReviewRelation::ExactStatement => "exact-statement",
+        ReviewRelation::PermutedStatement => "permuted-statement",
+        ReviewRelation::ConnectiveEquivalent => "connective-equivalent",
+        ReviewRelation::Specialization => "specialization",
+        ReviewRelation::SourceClone => "source-clone",
+        ReviewRelation::SubsumptionCandidate => "subsumption-candidate",
+        ReviewRelation::NearStatement => "near-statement",
+    };
+    let encoded = serde_json::to_vec(&(relation, member_ids)).expect("stable group id ingredients serialize");
+    let digest = Sha256::digest(&encoded);
+    let suffix = digest
+        .iter()
+        .take(6)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("{relation}-{suffix}")
+}
+
+fn review_evidence(contributions: &[KeyContribution]) -> Vec<ReviewEvidence> {
+    contributions
+        .iter()
+        .map(|contribution| ReviewEvidence {
+            kind: contribution.kind.clone(),
+            role: contribution.role.clone(),
+            display: contribution.display.clone(),
+            score: contribution.score,
+        })
+        .collect()
 }
 
 fn action_for(
@@ -441,13 +502,12 @@ fn recommended_target<'a>(
     anchor: &'a HydratedDeclaration,
     candidate: &'a HydratedDeclaration,
 ) -> Option<&'a HydratedDeclaration> {
-    if candidate.origin == "mathlib" {
-        Some(candidate)
-    } else if anchor.origin == "mathlib" {
-        Some(anchor)
-    } else if candidate.origin != "workspace" {
-        Some(candidate)
-    } else if anchor.origin != "workspace" {
+    let priority = |declaration: &HydratedDeclaration| match declaration.origin.as_str() {
+        "mathlib" => 0,
+        "workspace" => 2,
+        _ => 1,
+    };
+    if (priority(anchor), &anchor.qualified_name) <= (priority(candidate), &candidate.qualified_name) {
         Some(anchor)
     } else {
         Some(candidate)
