@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
 #[command(name = "lean-dup-rs")]
@@ -27,6 +27,8 @@ pub(crate) enum Command {
     Eval(EvalArgs),
     Show(ShowArgs),
     Diff(DiffArgs),
+    #[command(hide = true)]
+    Perf(PerfArgs),
 }
 
 #[derive(Debug, Clone, clap::Args)]
@@ -147,6 +149,27 @@ pub(crate) struct EvalArgs {
 }
 
 #[derive(Debug, Clone, clap::Args)]
+pub(crate) struct PerfArgs {
+    #[arg(long, value_enum)]
+    pub(crate) workload: PerfWorkload,
+
+    #[arg(long, value_enum, default_value_t = PerfFormat::Json)]
+    pub(crate) format: PerfFormat,
+
+    #[arg(long)]
+    pub(crate) output: Option<PathBuf>,
+
+    #[arg(long)]
+    pub(crate) cache_root: Option<PathBuf>,
+
+    #[arg(long)]
+    pub(crate) kanproofs_workspace: Option<PathBuf>,
+
+    #[arg(long)]
+    pub(crate) mathlib_workspace: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, clap::Args)]
 pub(crate) struct ShowArgs {
     #[arg(long)]
     pub(crate) workspace: PathBuf,
@@ -218,6 +241,23 @@ impl EvalSuite {
 pub(crate) enum EvalFormat {
     Table,
     Json,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum PerfFormat {
+    Json,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum PerfWorkload {
+    ColdMathlibIndex,
+    WarmMathlibIndex,
+    KanproofsTargetedMathlib,
+    KanproofsFullNoMathlib,
+    KanproofsFullMathlib,
+    FixtureAudit,
 }
 
 impl AuditArgs {

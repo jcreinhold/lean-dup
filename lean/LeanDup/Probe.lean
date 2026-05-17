@@ -489,22 +489,33 @@ private def probeRows
   pure rows
 
 /--
-Import requested modules once and emit probe-result payloads for candidate
-declaration pairs.
+Import requested modules once and emit probe-result payloads with worker phase
+statistics for candidate declaration pairs.
 
 Each pair is isolated: a pair-local failure becomes `status = "unavailable"`;
 only malformed requests or import/environment failures abort the command.
 -/
-unsafe def run (payload : Json) (modules : Array LeanDup.Extract.ModuleSpec) :
-    IO (Except Error (Array Json)) := do
+unsafe def runProfiled (payload : Json) (modules : Array LeanDup.Extract.ModuleSpec) :
+    IO (Except Error LeanDup.Extract.RunOutput) := do
   match parseRequestPairs payload with
   | Except.error err => pure <| Except.error err
   | Except.ok pairs =>
       let result ←
-        LeanDup.Extract.withAcceptedDeclarations payload modules fun _options declarations => do
+        LeanDup.Extract.withAcceptedDeclarationsProfiled payload modules fun _options declarations => do
           probeRows pairs declarations
       match result with
       | Except.error err => pure <| Except.error (fromExtractError err)
-      | Except.ok rows => pure <| Except.ok rows
+      | Except.ok (rows, stats) =>
+          pure <| Except.ok { rows := rows, stats := { stats with rowCount := rows.size } }
+
+/--
+Import requested modules once and emit probe-result payloads for candidate
+declaration pairs.
+-/
+unsafe def run (payload : Json) (modules : Array LeanDup.Extract.ModuleSpec) :
+    IO (Except Error (Array Json)) := do
+  match ← runProfiled payload modules with
+  | Except.error err => pure <| Except.error err
+  | Except.ok output => pure <| Except.ok output.rows
 
 end LeanDup.Probe

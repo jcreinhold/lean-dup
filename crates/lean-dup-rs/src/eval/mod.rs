@@ -1,7 +1,7 @@
 pub(crate) mod table;
 
 mod labels;
-mod memory;
+pub(crate) mod memory;
 mod scoring;
 mod suites;
 

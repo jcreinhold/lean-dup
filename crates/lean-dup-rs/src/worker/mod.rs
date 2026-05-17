@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::perf::{self, CostClass};
+
 use self::protocol::{Command, Request, Row};
 use self::subprocess::SubprocessTransport;
 use self::transport::{CallControl, WorkerTransport};
@@ -100,6 +102,8 @@ impl WorkerClient {
 
     /// Run bounded semantic probes for candidate declaration pairs.
     pub fn probe_batch(&self, batch: ProbeBatch) -> Result<WorkerCall<ProbeResult>, WorkerError> {
+        perf::record_count(CostClass::LeanSemantic, "worker.probe.batch", 1);
+        perf::record_count(CostClass::LeanSemantic, "worker.probe.pairs", batch.pairs.len() as u64);
         let mut payload = protocol::modules_payload(&batch.workspace_root_string(), &batch.modules);
         payload["pairs"] = serde_json::json!(batch.pairs);
         if let Some(max_pairs) = batch.max_pairs {
@@ -119,6 +123,9 @@ impl WorkerClient {
                 cancelled: self.cancelled.clone(),
             },
         )?;
+        for event in &output.events {
+            perf::record_worker_event(&event.phase, event.elapsed_ms, event.current);
+        }
         let rows = output
             .rows
             .into_iter()

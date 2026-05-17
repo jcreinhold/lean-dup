@@ -25,6 +25,33 @@ fn help_lists_foundation_commands() {
     for command in ["doctor", "index", "index-mathlib", "audit", "eval", "show", "diff"] {
         assert!(stdout.contains(command), "missing {command} in help:\n{stdout}");
     }
+    assert!(
+        !stdout.contains("perf"),
+        "hidden perf command leaked into help:\n{stdout}"
+    );
+}
+
+#[test]
+fn hidden_perf_fixture_workload_emits_json_metrics() {
+    let cache = tempfile::TempDir::new().unwrap();
+    let output = tempfile::NamedTempFile::new().unwrap();
+    let assert = Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .args(["perf", "--workload", "fixture-audit", "--cache-root"])
+        .arg(cache.path())
+        .args(["--output"])
+        .arg(output.path())
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["command"], "perf");
+    assert_eq!(payload["status"], "ok");
+    assert_eq!(payload["report"]["workload"], "fixture-audit");
+    assert!(payload["report"]["elapsed_ms"].as_u64().unwrap() > 0);
+    assert!(payload["report"]["events"].as_array().unwrap().len() > 1);
+    assert!(output.path().exists());
 }
 
 #[test]

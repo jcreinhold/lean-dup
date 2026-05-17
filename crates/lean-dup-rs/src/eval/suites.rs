@@ -148,7 +148,7 @@ fn suite_definition(request: &EvalRequest) -> SuiteDefinition {
             workspace: request
                 .workspace
                 .clone()
-                .unwrap_or_else(|| PathBuf::from("/Users/jcreinhold/Code/kan")),
+                .unwrap_or_else(|| PathBuf::from("/Users/jcreinhold/Code/kan-proofs")),
             module_root: "KanProofs".to_owned(),
             origin: "workspace".to_owned(),
             external: None,
@@ -160,7 +160,7 @@ fn suite_definition(request: &EvalRequest) -> SuiteDefinition {
             workspace: request
                 .workspace
                 .clone()
-                .unwrap_or_else(|| PathBuf::from("/Users/jcreinhold/Code/kan")),
+                .unwrap_or_else(|| PathBuf::from("/Users/jcreinhold/Code/kan-proofs")),
             module_root: "KanProofs".to_owned(),
             origin: "workspace".to_owned(),
             external: Some(ExternalSuiteIndex {

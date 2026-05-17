@@ -518,6 +518,23 @@ mod tests {
     }
 
     #[test]
+    fn progress_events_are_parsed_and_counted() {
+        let stdout = format!(
+            "{}\n{}",
+            line(
+                "progress",
+                r#"{"phase":"lean.import","current":2,"total":2,"module":null,"declaration":null,"elapsed_ms":11,"message":"imported requested modules"}"#
+            ),
+            line("complete", r#"{"row_counts":{"progress":1},"elapsed_ms":null}"#)
+        );
+        let output = parse_output(&stdout, "r1", Command::Version).unwrap();
+
+        assert_eq!(output.events.len(), 1);
+        assert_eq!(output.events[0].phase, "lean.import");
+        assert_eq!(output.events[0].elapsed_ms, Some(11));
+    }
+
+    #[test]
     fn fatal_worker_error_discards_rows() {
         let stdout = format!(
             "{}\n{}",

@@ -15,6 +15,7 @@ use crate::index::{
     CacheStatus, IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, IndexSummary, OpenedIndex,
     ProbeCacheEntry,
 };
+use crate::perf::{self, CostClass};
 use crate::progress::Reporter;
 use crate::ranking::{
     RankedGroup, RankedReview, RankingInput, RankingProfile, ReviewFilter, ReviewPriority as RankedPriority,
@@ -42,6 +43,7 @@ pub(crate) enum Report {
     IndexMathlib(IndexReport),
     Audit(AuditReport),
     Eval(EvaluationReport),
+    Perf(crate::perf::PerfReport),
     Show(ShowReport),
     Diff(DiffReport),
 }
@@ -183,6 +185,10 @@ pub(crate) fn run(cli: Cli) -> Result<Outcome> {
                 OutputFormat::Text
             };
             (Report::Eval(eval(args, &mut reporter)?), format)
+        }
+        Command::Perf(args) => {
+            let _format = args.format;
+            (Report::Perf(crate::perf::run(args)?), OutputFormat::Json)
         }
         Command::Show(args) => (Report::Show(show(args, &mut reporter)?), OutputFormat::Text),
         Command::Diff(args) => (Report::Diff(diff(args, &mut reporter)?), OutputFormat::Text),
@@ -370,14 +376,20 @@ fn compute_audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditComput
         args.semantic_probes,
         reporter,
     )?;
-    let source_facts = collect_source_facts(SourceFactInput::new(&workspace_rows));
-    let review = rank_candidates(RankingInput {
-        candidate_sets: &retrieval_output.candidate_sets,
-        probe_results: &probe_results,
-        source_facts: &source_facts,
-        profile: RankingProfile::default(),
+    let source_facts = perf::measure(CostClass::RetrievalRanking, "source_refs.collect", || {
+        collect_source_facts(SourceFactInput::new(&workspace_rows))
     });
-    let review = attach_replacement_hints(review, &source_facts, ReplacementHintProfile::default());
+    let review = perf::measure(CostClass::RetrievalRanking, "ranking.rank_candidates", || {
+        rank_candidates(RankingInput {
+            candidate_sets: &retrieval_output.candidate_sets,
+            probe_results: &probe_results,
+            source_facts: &source_facts,
+            profile: RankingProfile::default(),
+        })
+    });
+    let review = perf::measure(CostClass::RetrievalRanking, "ranking.replacement_hints", || {
+        attach_replacement_hints(review, &source_facts, ReplacementHintProfile::default())
+    });
     Ok(AuditComputation {
         foundation,
         include_private,

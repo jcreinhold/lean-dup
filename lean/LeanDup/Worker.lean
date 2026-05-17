@@ -56,6 +56,24 @@ private unsafe def checkImports (modules : Array ModuleDescriptor) : IO DoctorCh
 private def completed (request : Request) (rows : Array Envelope) : Array Envelope :=
   rows.push (completeEnvelope request (rows.map (·.kind)))
 
+private def phaseRows (request : Request) (stats : LeanDup.Extract.RunStats) : Array Envelope :=
+  #[
+    progressEnvelope
+      request
+      "lean.import"
+      (some stats.declarationCount)
+      (some stats.declarationCount)
+      (some stats.importMs)
+      "imported requested modules",
+    progressEnvelope
+      request
+      "lean.semantic"
+      (some stats.rowCount)
+      (some stats.declarationCount)
+      (some stats.semanticMs)
+      "computed semantic rows"
+  ]
+
 private unsafe def handleDoctor (request : Request) : IO (Except ProtocolError (Array Envelope × UInt32)) := do
   match request.modules with
   | .error err => pure <| .error err
@@ -93,10 +111,12 @@ private unsafe def handleExtract (request : Request) : IO (Except ProtocolError 
   match request.modules with
   | .error err => pure <| .error err
   | .ok modules =>
-      match ← LeanDup.Extract.run request.payload (toExtractModules modules) with
+      match ← LeanDup.Extract.runProfiled request.payload (toExtractModules modules) with
       | .error err => pure <| .error (extractError request err)
-      | .ok payloads =>
-          let rows := payloads.map fun payload => envelope request .declarationRow payload
+      | .ok output =>
+          let rows :=
+            phaseRows request output.stats ++
+              (output.rows.map fun payload => envelope request .declarationRow payload)
           pure <| .ok (completed request rows, 0)
 
 private def featureErrorCode : LeanDup.Features.ErrorKind → ErrorCode
@@ -116,10 +136,12 @@ private unsafe def handleFeatures (request : Request) : IO (Except ProtocolError
   match request.modules with
   | .error err => pure <| .error err
   | .ok modules =>
-      match ← LeanDup.Features.run request.payload (toExtractModules modules) with
+      match ← LeanDup.Features.runProfiled request.payload (toExtractModules modules) with
       | .error err => pure <| .error (featureError request err)
-      | .ok payloads =>
-          let rows := payloads.map fun payload => envelope request .featureRow payload
+      | .ok output =>
+          let rows :=
+            phaseRows request output.stats ++
+              (output.rows.map fun payload => envelope request .featureRow payload)
           pure <| .ok (completed request rows, 0)
 
 private def probeErrorCode : LeanDup.Probe.ErrorKind → ErrorCode
@@ -139,10 +161,12 @@ private unsafe def handleProbe (request : Request) : IO (Except ProtocolError (A
   match request.modules with
   | .error err => pure <| .error err
   | .ok modules =>
-      match ← LeanDup.Probe.run request.payload (toExtractModules modules) with
+      match ← LeanDup.Probe.runProfiled request.payload (toExtractModules modules) with
       | .error err => pure <| .error (probeError request err)
-      | .ok payloads =>
-          let rows := payloads.map fun payload => envelope request .probeResult payload
+      | .ok output =>
+          let rows :=
+            phaseRows request output.stats ++
+              (output.rows.map fun payload => envelope request .probeResult payload)
           pure <| .ok (completed request rows, 0)
 
 private unsafe def dispatch (request : Request) : IO (Except ProtocolError (Array Envelope × UInt32)) := do

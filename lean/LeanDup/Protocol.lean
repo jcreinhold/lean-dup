@@ -299,6 +299,37 @@ def envelope (request : Request) (kind : ResponseKind) (payload : Json) : Envelo
     kind := kind
     payload := payload }
 
+private def natOrNull : Option Nat → Json
+  | some value => Json.num value
+  | none => Json.null
+
+/-- Build an opaque progress payload for worker phase attribution. -/
+def progressPayload
+    (phase : String)
+    (current? : Option Nat)
+    (total? : Option Nat)
+    (elapsedMs? : Option Nat)
+    (message : String) : Json :=
+  Json.mkObj
+    [ ("phase", Json.str phase)
+    , ("current", natOrNull current?)
+    , ("total", natOrNull total?)
+    , ("module", Json.null)
+    , ("declaration", Json.null)
+    , ("elapsed_ms", natOrNull elapsedMs?)
+    , ("message", Json.str message)
+    ]
+
+/-- Build a progress envelope without exposing Lean implementation details. -/
+def progressEnvelope
+    (request : Request)
+    (phase : String)
+    (current? : Option Nat)
+    (total? : Option Nat)
+    (elapsedMs? : Option Nat)
+    (message : String) : Envelope :=
+  envelope request .progress (progressPayload phase current? total? elapsedMs? message)
+
 private def countableKinds : Array ResponseKind :=
   #[ .versionResult
    , .doctorResult

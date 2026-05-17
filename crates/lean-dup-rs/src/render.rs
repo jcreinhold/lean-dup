@@ -3,20 +3,23 @@ use std::io::Write;
 use crate::cli::{OutputFormat, ReviewProfile};
 use crate::commands::{AuditReport, DiffReport, DoctorReport, IndexReport, Outcome, Report, ShowReport};
 use crate::error::Result;
+use crate::perf::{self, CostClass};
 use crate::progress::Reporter;
 use crate::ranking::{RankedGroup, ReviewAction, ReviewPriority, ReviewRelation};
 
 pub(crate) fn write_outcome<O: Write, E: Write>(outcome: Outcome, stdout: &mut O, stderr: &mut E) -> Result<()> {
-    write_report(&outcome.reporter, stderr)?;
-    match outcome.output_format {
-        OutputFormat::Json => {
-            writeln!(stdout, "{}", serde_json::to_string_pretty(&outcome.report)?)?;
+    perf::measure_result(CostClass::Reporting, "report.render", || {
+        write_report(&outcome.reporter, stderr)?;
+        match outcome.output_format {
+            OutputFormat::Json => {
+                writeln!(stdout, "{}", serde_json::to_string_pretty(&outcome.report)?)?;
+            }
+            OutputFormat::Text => {
+                writeln!(stdout, "{}", render_text(&outcome.report))?;
+            }
         }
-        OutputFormat::Text => {
-            writeln!(stdout, "{}", render_text(&outcome.report))?;
-        }
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 fn write_report<E: Write>(reporter: &Reporter, stderr: &mut E) -> Result<()> {
@@ -54,7 +57,25 @@ fn render_text(report: &Report) -> String {
         Report::Diff(report) => render_diff(report),
         Report::Audit(report) => render_audit(report),
         Report::Eval(report) => crate::eval::table::render_metrics(&report.metrics),
+        Report::Perf(report) => render_perf(report),
     }
+}
+
+fn render_perf(report: &crate::perf::PerfReport) -> String {
+    let mut lines = vec![
+        "command: perf".to_owned(),
+        format!("status: {}", report.status),
+        format!("workload: {:?}", report.workload).to_ascii_lowercase(),
+        format!("cache root: {}", report.cache_root.display()),
+        format!("exit code: {}", report.report.exit_code),
+        format!("elapsed ms: {}", report.report.elapsed_ms),
+        format!("stdout bytes: {}", report.report.stdout_bytes),
+        format!("stderr bytes: {}", report.report.stderr_bytes),
+    ];
+    for (class, elapsed_ms) in &report.report.summary.elapsed_ms_by_class {
+        lines.push(format!("cost {:?}: {elapsed_ms}ms", class).to_ascii_lowercase());
+    }
+    lines.join("\n")
 }
 
 fn render_doctor(report: &DoctorReport) -> String {

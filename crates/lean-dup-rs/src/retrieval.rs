@@ -8,6 +8,7 @@ use crate::index::{
     DeclarationHandle, FingerprintKind, FingerprintQuery, HydratedDeclaration, OpenedIndex, PostingKey,
     RoleFeatureQuery,
 };
+use crate::perf::{self, CostClass};
 
 const TOP_K_PER_WORKSPACE_DECLARATION: usize = 80;
 const ROLE_POSTING_LIMIT: usize = 512;
@@ -116,6 +117,22 @@ pub(crate) fn retrieve_candidates(
     workspace: &[HydratedDeclaration],
     indexes: &[OpenedIndex],
 ) -> Result<RetrievalOutput> {
+    perf::record_count(
+        CostClass::RetrievalRanking,
+        "retrieval.workspace_declarations",
+        workspace.len() as u64,
+    );
+    perf::record_count(
+        CostClass::RetrievalRanking,
+        "retrieval.external_indexes",
+        indexes.len() as u64,
+    );
+    perf::measure_result(CostClass::RetrievalRanking, "retrieval.total", || {
+        retrieve_candidates_inner(workspace, indexes)
+    })
+}
+
+fn retrieve_candidates_inner(workspace: &[HydratedDeclaration], indexes: &[OpenedIndex]) -> Result<RetrievalOutput> {
     let mut diagnostics = RetrievalDiagnostics::default();
     if workspace.is_empty() {
         return Ok(RetrievalOutput {
@@ -199,6 +216,16 @@ pub(crate) fn retrieve_candidates(
         }
     }
     diagnostics.candidate_count = candidate_sets.iter().map(|set| set.candidates.len()).sum::<usize>();
+    perf::record_count(
+        CostClass::RetrievalRanking,
+        "retrieval.candidates",
+        diagnostics.candidate_count as u64,
+    );
+    perf::record_count(
+        CostClass::RetrievalRanking,
+        "retrieval.hydrated_external",
+        diagnostics.hydrated_external_count as u64,
+    );
 
     Ok(RetrievalOutput {
         candidate_sets,

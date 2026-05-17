@@ -52,6 +52,18 @@ private structure Context where
   modules : Array ModuleSpec
   options : Options
 
+/-- Coarse worker cost facts for one semantic command. -/
+structure RunStats where
+  importMs : Nat
+  semanticMs : Nat
+  declarationCount : Nat
+  rowCount : Nat
+
+/-- Semantic rows plus coarse cost facts. -/
+structure RunOutput where
+  rows : Array Json
+  stats : RunStats
+
 /--
 One declaration accepted by extraction filters.
 
@@ -317,35 +329,45 @@ The action receives Lean environment facts, not protocol rows. Callers must emit
 their own command-specific payloads and must not treat `statement_text` or source
 snippets as semantic input.
 -/
-unsafe def withAcceptedDeclarations {α : Type}
+unsafe def withAcceptedDeclarationsProfiled {α : Type}
     (payload : Json)
     (modules : Array ModuleSpec)
     (operation : Options → Array AcceptedDeclaration → MetaM α) :
-    IO (Except Error α) := do
+    IO (Except Error (α × RunStats)) := do
   if modules.isEmpty then
     return .error <| invalidRequest "`modules` must contain at least one module"
   match parseOptions payload with
   | .error err => pure <| .error err
   | .ok options =>
+      let importStarted ← IO.monoMsNow
       match ← importRequestedModules modules with
       | .error err => pure <| .error err
       | .ok env =>
+          let importFinished ← IO.monoMsNow
           let context : Context := { modules := modules, options := options }
           let coreContext : Core.Context :=
             { fileName := "<lean-dup-extract>"
               fileMap := default
               options := Options.empty }
           try
+            let semanticStarted ← IO.monoMsNow
             let (result, _, _) ←
               MetaM.toIO
                 (do
                   let declarations ← collectAcceptedDeclarations context
-                  operation options declarations)
+                  let result ← operation options declarations
+                  pure (result, declarations.size))
                 coreContext
                 { env := env }
                 {}
                 {}
-            pure <| .ok result
+            let semanticFinished ← IO.monoMsNow
+            let stats : RunStats :=
+              { importMs := importFinished - importStarted
+                semanticMs := semanticFinished - semanticStarted
+                declarationCount := result.2
+                rowCount := 0 }
+            pure <| .ok (result.1, stats)
           catch error =>
             pure <|
               .error
@@ -354,12 +376,38 @@ unsafe def withAcceptedDeclarations {α : Type}
                   details := none }
 
 /--
+Import the requested modules once and run a Lean action over declarations
+accepted by the same filters used by `extract`.
+
+The action receives Lean environment facts, not protocol rows. Callers must emit
+their own command-specific payloads and must not treat `statement_text` or source
+snippets as semantic input.
+-/
+unsafe def withAcceptedDeclarations {α : Type}
+    (payload : Json)
+    (modules : Array ModuleSpec)
+    (operation : Options → Array AcceptedDeclaration → MetaM α) :
+    IO (Except Error α) := do
+  match ← withAcceptedDeclarationsProfiled payload modules operation with
+  | .error err => pure <| .error err
+  | .ok (result, _stats) => pure <| .ok result
+
+/--
 Import the requested modules once and return declaration-row payloads accepted
 by the supplied extraction options.
 -/
+unsafe def runProfiled (payload : Json) (modules : Array ModuleSpec) :
+    IO (Except Error RunOutput) := do
+  match ← withAcceptedDeclarationsProfiled payload modules fun options declarations =>
+      collectRows options declarations with
+  | .error err => pure <| .error err
+  | .ok (rows, stats) =>
+      pure <| .ok { rows := rows, stats := { stats with rowCount := rows.size } }
+
 unsafe def run (payload : Json) (modules : Array ModuleSpec) :
     IO (Except Error (Array Json)) := do
-  withAcceptedDeclarations payload modules fun options declarations =>
-    collectRows options declarations
+  match ← runProfiled payload modules with
+  | .error err => pure <| .error err
+  | .ok output => pure <| .ok output.rows
 
 end LeanDup.Extract

@@ -269,13 +269,13 @@ The emitted fingerprints and role features are Lean-owned opaque keys. Rust may
 compare and weight them, but it must not reconstruct them from display or source
 facts.
 -/
-unsafe def run (payload : Json) (modules : Array LeanDup.Extract.ModuleSpec) :
-    IO (Except Error (Array Json)) := do
+unsafe def runProfiled (payload : Json) (modules : Array LeanDup.Extract.ModuleSpec) :
+    IO (Except Error LeanDup.Extract.RunOutput) := do
   match parseDeclarationIds payload with
   | Except.error err => pure <| Except.error err
   | Except.ok ids? =>
       let result ←
-        LeanDup.Extract.withAcceptedDeclarations payload modules fun _options declarations => do
+        LeanDup.Extract.withAcceptedDeclarationsProfiled payload modules fun _options declarations => do
           match selectDeclarations ids? declarations with
           | Except.error err => pure <| Except.error err
           | Except.ok selected => do
@@ -283,7 +283,14 @@ unsafe def run (payload : Json) (modules : Array LeanDup.Extract.ModuleSpec) :
               pure <| Except.ok rows
       match result with
       | Except.error err => pure <| Except.error (fromExtractError err)
-      | Except.ok (Except.error err) => pure <| Except.error err
-      | Except.ok (Except.ok rows) => pure <| Except.ok rows
+      | Except.ok (Except.error err, _stats) => pure <| Except.error err
+      | Except.ok (Except.ok rows, stats) =>
+          pure <| Except.ok { rows := rows, stats := { stats with rowCount := rows.size } }
+
+unsafe def run (payload : Json) (modules : Array LeanDup.Extract.ModuleSpec) :
+    IO (Except Error (Array Json)) := do
+  match ← runProfiled payload modules with
+  | .error err => pure <| .error err
+  | .ok output => pure <| .ok output.rows
 
 end LeanDup.Features

@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
 use crate::error::{Error, Result, read, read_to_string};
+use crate::perf::{self, CostClass};
 use crate::progress::Reporter;
 use crate::worker::{
     DeclarationRow, ExtractBatch, FeatureRow, FeaturesBatch, Fingerprints, ModuleDescriptor, ProbePair, ProbeResult,
@@ -442,18 +443,21 @@ impl OpenedIndex {
         if keys.is_empty() {
             return Ok(Vec::new());
         }
-        let connection = open_readonly(&self.path)?;
-        let mut counts = Vec::with_capacity(keys.len());
-        for key in keys {
-            if key.is_empty() {
-                continue;
+        perf::record_count(CostClass::SqliteIndex, "sqlite.posting_count.keys", keys.len() as u64);
+        perf::measure_result(CostClass::SqliteIndex, "sqlite.posting_counts", || {
+            let connection = open_readonly(&self.path)?;
+            let mut counts = Vec::with_capacity(keys.len());
+            for key in keys {
+                if key.is_empty() {
+                    continue;
+                }
+                counts.push(PostingCount {
+                    key: key.clone(),
+                    count: posting_count(&connection, key)?,
+                });
             }
-            counts.push(PostingCount {
-                key: key.clone(),
-                count: posting_count(&connection, key)?,
-            });
-        }
-        Ok(counts)
+            Ok(counts)
+        })
     }
 
     /// Return handles matched by each requested semantic key.
@@ -464,22 +468,30 @@ impl OpenedIndex {
         if keys.is_empty() {
             return Ok(Vec::new());
         }
-        let connection = open_readonly(&self.path)?;
-        let mut postings = Vec::new();
-        for key in keys {
-            if key.is_empty() {
-                continue;
+        perf::record_count(CostClass::SqliteIndex, "sqlite.matched_posting.keys", keys.len() as u64);
+        perf::measure_result(CostClass::SqliteIndex, "sqlite.matched_postings", || {
+            let connection = open_readonly(&self.path)?;
+            let mut postings = Vec::new();
+            for key in keys {
+                if key.is_empty() {
+                    continue;
+                }
+                postings.extend(
+                    posting_handles(&connection, key)?
+                        .into_iter()
+                        .map(|handle| MatchedPosting {
+                            key: key.clone(),
+                            handle,
+                        }),
+                );
             }
-            postings.extend(
-                posting_handles(&connection, key)?
-                    .into_iter()
-                    .map(|handle| MatchedPosting {
-                        key: key.clone(),
-                        handle,
-                    }),
+            perf::record_count(
+                CostClass::SqliteIndex,
+                "sqlite.matched_posting.rows",
+                postings.len() as u64,
             );
-        }
-        Ok(postings)
+            Ok(postings)
+        })
     }
 
     /// Return every declaration handle in deterministic order.
@@ -531,29 +543,39 @@ impl OpenedIndex {
         if handles.is_empty() {
             return Ok(Vec::new());
         }
-        let connection = open_readonly(&self.path)?;
-        let mut hydrated = Vec::with_capacity(handles.len());
-        for handle in handles {
-            let declaration = load_declaration(&connection, handle)?;
-            hydrated.push(declaration);
-        }
-        Ok(hydrated)
+        perf::record_count(
+            CostClass::SqliteIndex,
+            "sqlite.hydrate.declarations",
+            handles.len() as u64,
+        );
+        perf::measure_result(CostClass::SqliteIndex, "sqlite.hydrate", || {
+            let connection = open_readonly(&self.path)?;
+            let mut hydrated = Vec::with_capacity(handles.len());
+            for handle in handles {
+                let declaration = load_declaration(&connection, handle)?;
+                hydrated.push(declaration);
+            }
+            Ok(hydrated)
+        })
     }
 
     pub(crate) fn cache_probe_results(&self, entries: &[ProbeCacheEntry]) -> Result<()> {
         if entries.is_empty() {
             return Ok(());
         }
-        let mut connection = Connection::open(&self.path)?;
-        let transaction = connection.transaction()?;
-        for entry in entries {
-            transaction.execute(
-                "INSERT OR REPLACE INTO probe_cache VALUES (?1, ?2)",
-                params![probe_cache_key(&entry.pair), probe_cache_payload(&entry.result)],
-            )?;
-        }
-        transaction.commit()?;
-        Ok(())
+        perf::record_count(CostClass::SqliteIndex, "sqlite.probe_cache.rows", entries.len() as u64);
+        perf::measure_result(CostClass::SqliteIndex, "sqlite.probe_cache.write", || {
+            let mut connection = Connection::open(&self.path)?;
+            let transaction = connection.transaction()?;
+            for entry in entries {
+                transaction.execute(
+                    "INSERT OR REPLACE INTO probe_cache VALUES (?1, ?2)",
+                    params![probe_cache_key(&entry.pair), probe_cache_payload(&entry.result)],
+                )?;
+            }
+            transaction.commit()?;
+            Ok(())
+        })
     }
 
     pub(crate) fn cached_probe_result(&self, pair: &ProbePair) -> Result<Option<ProbeResult>> {
@@ -684,28 +706,36 @@ fn write_sqlite_index(
         remove_file(&temp_path)?;
     }
 
-    let features_by_id = features
-        .into_iter()
-        .map(|feature| (feature.declaration_id.clone(), feature))
-        .collect::<HashMap<_, _>>();
-    let mut connection = Connection::open(&temp_path)?;
-    initialize_schema(&connection)?;
-    let transaction = connection.transaction()?;
-    write_metadata(&transaction, cache_key_json, request)?;
-    for declaration in declarations {
-        let Some(feature) = features_by_id.get(&declaration.declaration_id) else {
-            return Err(Error::Index {
-                message: format!(
-                    "worker emitted declaration without feature row: {}",
-                    declaration.qualified_name
-                ),
-            });
-        };
-        insert_declaration(&transaction, &declaration, feature)?;
-    }
-    transaction.commit()?;
-    replace_file(&temp_path, index_path)?;
-    Ok(())
+    perf::record_count(
+        CostClass::SqliteIndex,
+        "sqlite.index.declarations",
+        declarations.len() as u64,
+    );
+    perf::record_count(CostClass::SqliteIndex, "sqlite.index.features", features.len() as u64);
+    perf::measure_result(CostClass::SqliteIndex, "sqlite.index.write", || {
+        let features_by_id = features
+            .into_iter()
+            .map(|feature| (feature.declaration_id.clone(), feature))
+            .collect::<HashMap<_, _>>();
+        let mut connection = Connection::open(&temp_path)?;
+        initialize_schema(&connection)?;
+        let transaction = connection.transaction()?;
+        write_metadata(&transaction, cache_key_json, request)?;
+        for declaration in declarations {
+            let Some(feature) = features_by_id.get(&declaration.declaration_id) else {
+                return Err(Error::Index {
+                    message: format!(
+                        "worker emitted declaration without feature row: {}",
+                        declaration.qualified_name
+                    ),
+                });
+            };
+            insert_declaration(&transaction, &declaration, feature)?;
+        }
+        transaction.commit()?;
+        replace_file(&temp_path, index_path)?;
+        Ok(())
+    })
 }
 
 fn initialize_schema(connection: &Connection) -> Result<()> {
@@ -873,19 +903,21 @@ fn optional_json<T: Serialize>(value: &Option<T>) -> Result<Option<String>> {
 }
 
 fn sqlite_cache_is_current(index_path: &Path, cache_key_json: &str) -> Result<bool> {
-    let connection = match open_readonly(index_path) {
-        Ok(connection) => connection,
-        Err(_) => return Ok(false),
-    };
-    let schema_version = match metadata_value(&connection, "schema_version") {
-        Ok(value) => value,
-        Err(_) => return Ok(false),
-    };
-    let cache_key = match metadata_value(&connection, "cache_key") {
-        Ok(value) => value,
-        Err(_) => return Ok(false),
-    };
-    Ok(schema_version.as_deref() == Some(INDEX_SCHEMA_VERSION) && cache_key.as_deref() == Some(cache_key_json))
+    perf::measure_result(CostClass::SqliteIndex, "sqlite.cache_check", || {
+        let connection = match open_readonly(index_path) {
+            Ok(connection) => connection,
+            Err(_) => return Ok(false),
+        };
+        let schema_version = match metadata_value(&connection, "schema_version") {
+            Ok(value) => value,
+            Err(_) => return Ok(false),
+        };
+        let cache_key = match metadata_value(&connection, "cache_key") {
+            Ok(value) => value,
+            Err(_) => return Ok(false),
+        };
+        Ok(schema_version.as_deref() == Some(INDEX_SCHEMA_VERSION) && cache_key.as_deref() == Some(cache_key_json))
+    })
 }
 
 #[allow(dead_code)]
@@ -948,9 +980,11 @@ fn posting_handles(connection: &Connection, key: &PostingKey) -> Result<Vec<Decl
 }
 
 fn declaration_count(index_path: &Path) -> Result<usize> {
-    let connection = open_readonly(index_path)?;
-    let count = connection.query_row("SELECT COUNT(*) FROM declarations", [], |row| row.get::<_, i64>(0))?;
-    Ok(count as usize)
+    perf::measure_result(CostClass::SqliteIndex, "sqlite.declaration_count", || {
+        let connection = open_readonly(index_path)?;
+        let count = connection.query_row("SELECT COUNT(*) FROM declarations", [], |row| row.get::<_, i64>(0))?;
+        Ok(count as usize)
+    })
 }
 
 #[allow(dead_code)]

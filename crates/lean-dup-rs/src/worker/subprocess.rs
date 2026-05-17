@@ -2,12 +2,14 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
 use std::sync::atomic::Ordering;
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use super::WorkerError;
 use super::protocol::{self, ProtocolOutput, Request};
 use super::transport::{CallControl, WorkerTransport};
+use crate::perf::{self, CostClass};
 
 const STDERR_LIMIT: usize = 8 * 1024;
 
@@ -52,13 +54,27 @@ impl SubprocessTransport {
         if self.command_override.is_some() {
             return Ok(PathBuf::new());
         }
-        let output = run_process(
-            &self.worker_root,
-            "lake",
-            &["build".to_owned(), "lean_dup_worker".to_owned()],
-            "",
-            control,
-        )?;
+        let worker_path = self.worker_root.join(".lake/build/bin/lean_dup_worker");
+        let mut cache =
+            WORKER_PATH_CACHE
+                .get_or_init(|| Mutex::new(None))
+                .lock()
+                .map_err(|_| WorkerError::Protocol {
+                    message: "worker build cache mutex poisoned".to_owned(),
+                })?;
+        if !worker_build_cache_disabled() && cache.as_ref() == Some(&worker_path) && worker_path.exists() {
+            perf::record_count(CostClass::WorkerStartup, "worker.build.cache_hit", 1);
+            return Ok(worker_path);
+        }
+        let output = perf::measure_result(CostClass::WorkerStartup, "worker.build_process", || {
+            run_process(
+                &self.worker_root,
+                "lake",
+                &["build".to_owned(), "lean_dup_worker".to_owned()],
+                "",
+                control,
+            )
+        })?;
         if output.timed_out {
             return Err(WorkerError::Timeout {
                 timeout: control.timeout,
@@ -70,25 +86,33 @@ impl SubprocessTransport {
                 diagnostic: output.stderr,
             });
         }
-        Ok(self.worker_root.join(".lake/build/bin/lean_dup_worker"))
+        if !worker_build_cache_disabled() {
+            *cache = Some(worker_path.clone());
+        }
+        Ok(worker_path)
     }
 
     fn invoke_worker(&self, request: &Request, control: &CallControl) -> Result<ProcessOutput, WorkerError> {
-        let input = serde_json::to_string(&request.to_json()).map_err(|source| WorkerError::Protocol {
-            message: source.to_string(),
+        let input = perf::measure_result(CostClass::Transport, "worker.encode_json", || {
+            serde_json::to_string(&request.to_json()).map_err(|source| WorkerError::Protocol {
+                message: source.to_string(),
+            })
         })?;
+        perf::record_count(CostClass::Transport, "worker.stdin_bytes", input.len() as u64);
         if let Some(command) = &self.command_override {
             return run_process(&command.cwd, &command.program, &command.args, &input, control);
         }
         let worker_path = self.build_worker(control)?;
         let worker = worker_path.to_string_lossy().into_owned();
-        run_process(
-            &request_workspace(request)?,
-            "lake",
-            &["env".to_owned(), worker],
-            &input,
-            control,
-        )
+        perf::measure_result(CostClass::WorkerStartup, "worker.subprocess_call", || {
+            run_process(
+                &request_workspace(request)?,
+                "lake",
+                &["env".to_owned(), worker],
+                &input,
+                control,
+            )
+        })
     }
 }
 
@@ -100,7 +124,15 @@ impl WorkerTransport for SubprocessTransport {
                 timeout: control.timeout,
             });
         }
-        let parsed = protocol::parse_output(&output.stdout, &request.request_id, request.command);
+        perf::record_count(CostClass::Transport, "worker.stdout_bytes", output.stdout.len() as u64);
+        perf::record_count(
+            CostClass::Transport,
+            "worker.stdout_lines",
+            output.stdout.lines().count() as u64,
+        );
+        let parsed = perf::measure_result(CostClass::Transport, "worker.parse_jsonl", || {
+            protocol::parse_output(&output.stdout, &request.request_id, request.command)
+        });
         if output.status != 0 {
             return Err(WorkerError::NonZeroExit {
                 status: output.status,
@@ -109,6 +141,12 @@ impl WorkerTransport for SubprocessTransport {
         }
         parsed
     }
+}
+
+static WORKER_PATH_CACHE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
+
+fn worker_build_cache_disabled() -> bool {
+    std::env::var_os("LEAN_DUP_DISABLE_WORKER_BUILD_CACHE").is_some()
 }
 
 fn request_workspace(request: &Request) -> Result<PathBuf, WorkerError> {
