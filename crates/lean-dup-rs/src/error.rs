@@ -24,15 +24,15 @@ pub(crate) enum Error {
     #[error("no Lean source files found for selected module roots in {0}")]
     NoSourceFiles(PathBuf),
 
-    #[error("Lake command failed: {command}\n{diagnostic}")]
-    LakeCommand { command: String, diagnostic: String },
-
     #[error("invalid lakefile TOML: {path}")]
     LakefileToml {
         path: PathBuf,
         #[source]
         source: toml::de::Error,
     },
+
+    #[error("{0}")]
+    Worker(#[from] crate::worker::WorkerError),
 
     #[error("could not render JSON output")]
     Json(#[from] serde_json::Error),

@@ -2,9 +2,9 @@ mod cache;
 mod cli;
 mod commands;
 mod error;
-mod lake;
 mod progress;
 mod render;
+pub mod worker;
 mod workspace;
 
 use std::ffi::OsString;

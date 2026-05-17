@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use serde::Serialize;
 
@@ -8,8 +9,8 @@ use crate::cli::{
     ShowArgs,
 };
 use crate::error::Result;
-use crate::lake;
 use crate::progress::Reporter;
+use crate::worker::WorkerClient;
 use crate::workspace::{self, ResolvedWorkspace, WorkspaceRequest};
 
 #[derive(Debug)]
@@ -119,7 +120,15 @@ pub(crate) fn run(cli: Cli) -> Result<Outcome> {
 
 fn doctor(args: DoctorArgs, reporter: &mut Reporter) -> Result<DoctorReport> {
     let foundation = foundation(args.workspace, args.module_root, reporter)?;
-    let lean_version = lake::lean_version(&foundation.workspace.root, reporter)?;
+    let worker_version = reporter.measure("worker.version", |_| {
+        WorkerClient::with_timeout(Duration::from_secs(60))
+            .version(foundation.workspace.root.clone())
+    })?;
+    let worker_version = worker_version
+        .rows
+        .into_iter()
+        .next()
+        .expect("worker version returns one version row");
     let missing_oleans = if args.require_oleans {
         missing_oleans(&foundation.workspace)
     } else {
@@ -140,7 +149,9 @@ fn doctor(args: DoctorArgs, reporter: &mut Reporter) -> Result<DoctorReport> {
         source_count: foundation.workspace.source_files.len(),
         cache_root: foundation.cache.root,
         cache_fingerprint: foundation.cache.fingerprint,
-        lean_version: lean_version.text,
+        lean_version: worker_version
+            .lean_version
+            .unwrap_or_else(|| "unknown Lean version".to_owned()),
         require_oleans: args.require_oleans,
         missing_oleans,
     })
