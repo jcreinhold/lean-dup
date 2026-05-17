@@ -12,6 +12,7 @@ mod ranking;
 mod render;
 mod replacement_hints;
 mod retrieval;
+mod semantic_verification;
 mod source_refs;
 pub mod worker;
 mod workspace;

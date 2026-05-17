@@ -211,6 +211,62 @@ That is enough to validate the architecture change and live progress, but a full
 the next semantic hot-path improvement. The worker transport now prefers structured worker diagnostics over generic
 nonzero-exit errors when a failing subprocess emitted JSONL diagnostics.
 
+## Semantic Probe Recovery Follow-Up
+
+A later full KanProofs audit exposed the next bottleneck after the shared mathlib index completed. The old semantic
+probe path sent a broad candidate set to Lean and failed the whole audit when one pair hit the default heartbeat budget
+inside `whnf`/`isDefEq`:
+
+```text
+worker returned a fatal diagnostic: internal_error fatal: declaration processing failed: (deterministic) timeout at `whnf`, maximum number of heartbeats (200000) has been reached
+```
+
+The first no-probe full audit also showed that report construction was still not useful: it spent more than three
+minutes in Rust source-reference scanning and ranking after indexes were loaded, with no user-visible progress.
+
+Accepted changes:
+
+- Added a private semantic-verification boundary that owns probe selection, budgets, per-declaration caps, chunking,
+  cache keys, worker recovery, and diagnostics.
+- Moved expensive probes after cheap ranking and shaped the default mathlib queue before source-reference scanning.
+- Made the default mathlib profile hide feature-only subsumption candidates and unprobed non-theorem shape collisions.
+- Added hidden tuning flags: `--probe-budget`, `--probe-policy`, and `--probe-chunk-size`.
+- Cached probe results with declaration fingerprints and a probe-policy version rather than only the pair id.
+- Preserved pair-local Lean failures as `status = "unavailable"` where possible, and used Rust chunk bisection to isolate
+  recoverable worker failures.
+
+Rejected design: exposing cache, chunk, or Lean reduction controls directly in normal audit workflows. That would make
+callers know which failures are heartbeat failures, which candidates are mathlib-source candidates, and which SQLite
+cache identity is safe. The chosen design is deeper because audit asks for verified evidence under a review policy; the
+semantic-verification module owns the policy mechanics.
+
+Measured follow-up workloads:
+
+| Workload | Cache state | Result | Wall observation | Retrieval ms | Raw candidates | Review groups | Visible groups | Planned probes | Cached probes | Worker probes | Unavailable |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| full KanProofs with mathlib, old broad probes | warm mathlib | failed | n/a | n/a | n/a | n/a | n/a | broad batch | 0 | broad batch | fatal heartbeat |
+| full KanProofs with mathlib, old no-probe path | warm mathlib | manually stopped | >180 s | n/a | n/a | n/a | n/a | 0 | 0 | 0 | n/a |
+| full KanProofs with mathlib, bounded probes after fix | warm mathlib | ok | ~48 s | 22955 | 464707 | 3403 | 0 | 177 | 143 | 34 | 70 |
+| full KanProofs with mathlib, no probes after shaping | warm mathlib | ok | ~15 s | 16647 | 464707 | 3403 | 0 | 0 | 0 | 0 | 0 |
+| targeted `KanProofs.Mathlib4Backports` with mathlib | warm mathlib | ok | ~5 s | 2567 | 1360 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+The visible result count of zero is intentional for the default mathlib profile. The raw retrieval layer still found
+feature overlaps, but the actionable queue rejected them because they were not theorem-level or verified replacement
+candidates. A short-lived intermediate run classified unrelated inductive and definition declarations as exact
+statement matches from static fingerprints alone; this was rejected as bullshit and fixed by requiring theorem-like
+declarations for unprobed statement equivalence. Reducible definitions now require probe evidence.
+
+POSD intervention mapping:
+
+- Define errors out of existence: one heartbeat-limited pair no longer makes the audit command fail; it becomes an
+  unavailable probe result or an isolated recoverable diagnostic.
+- Pull complexity down: probe budgeting, chunk bisection, cache-key construction, and mathlib module import selection
+  are internal to semantic verification.
+- Optimize the abstraction boundary before micro-tuning: source-reference scanning now runs over the shaped review
+  queue instead of every workspace declaration in the default mathlib workflow.
+- Remove work before tuning: the default profile stops building hints, source facts, and JSON-visible findings for
+  feature-only mathlib overlaps.
+
 ## Red Flag Review
 
 Shallow module: no remaining red flag. The hidden harness owns workload and metric policy rather than exposing it across

@@ -252,6 +252,7 @@ pub(crate) struct HydratedDeclaration {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[allow(dead_code)]
 pub(crate) struct ProbeCacheEntry {
+    pub(crate) cache_key: String,
     pub(crate) pair: ProbePair,
     pub(crate) result: ProbeResult,
 }
@@ -441,6 +442,11 @@ impl IndexStore {
 
 #[allow(dead_code)]
 impl OpenedIndex {
+    #[cfg(test)]
+    pub(crate) fn for_test(path: PathBuf) -> Self {
+        Self { path }
+    }
+
     /// Return stable index facts needed for diagnostics and origin-aware pairing.
     pub(crate) fn facts(&self) -> Result<OpenedIndexFacts> {
         let connection = open_readonly(&self.path)?;
@@ -588,7 +594,7 @@ impl OpenedIndex {
             for entry in entries {
                 transaction.execute(
                     "INSERT OR REPLACE INTO probe_cache VALUES (?1, ?2)",
-                    params![probe_cache_key(&entry.pair), probe_cache_payload(&entry.result)],
+                    params![entry.cache_key.as_str(), probe_cache_payload(&entry.result)],
                 )?;
             }
             transaction.commit()?;
@@ -596,12 +602,12 @@ impl OpenedIndex {
         })
     }
 
-    pub(crate) fn cached_probe_result(&self, pair: &ProbePair) -> Result<Option<ProbeResult>> {
+    pub(crate) fn cached_probe_result(&self, cache_key: &str) -> Result<Option<ProbeResult>> {
         let connection = open_readonly(&self.path)?;
         let payload = connection
             .query_row(
                 "SELECT payload_json FROM probe_cache WHERE pair_key = ?1",
-                params![probe_cache_key(pair)],
+                params![cache_key],
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
@@ -1468,6 +1474,7 @@ fn hex_digest(bytes: &[u8]) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+#[cfg(test)]
 fn probe_cache_key(pair: &ProbePair) -> String {
     hex_digest(
         serde_json::to_string(pair)
@@ -1602,11 +1609,15 @@ mod tests {
         };
         by_path
             .cache_probe_results(&[super::ProbeCacheEntry {
+                cache_key: super::probe_cache_key(&pair),
                 pair: pair.clone(),
                 result: result.clone(),
             }])
             .unwrap();
-        assert_eq!(by_path.cached_probe_result(&pair).unwrap(), Some(result));
+        assert_eq!(
+            by_path.cached_probe_result(&super::probe_cache_key(&pair)).unwrap(),
+            Some(result)
+        );
     }
 
     #[test]

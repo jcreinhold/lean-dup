@@ -129,6 +129,15 @@ pub(crate) struct AuditArgs {
     #[arg(long = "no-semantic-probes", action = clap::ArgAction::SetFalse)]
     pub(crate) semantic_probes: bool,
 
+    #[arg(long = "probe-budget", hide = true, default_value_t = 500)]
+    pub(crate) probe_budget: usize,
+
+    #[arg(long = "probe-policy", hide = true, value_enum, default_value_t = ProbePolicy::Actionable)]
+    pub(crate) probe_policy: ProbePolicy,
+
+    #[arg(long = "probe-chunk-size", hide = true, default_value_t = 16)]
+    pub(crate) probe_chunk_size: usize,
+
     #[arg(long = "no-replacement-hints", action = clap::ArgAction::SetFalse)]
     pub(crate) replacement_hints: bool,
 }
@@ -219,6 +228,13 @@ pub(crate) enum ReviewProfile {
     Internal,
     ApiDesign,
     Noise,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum ProbePolicy {
+    Actionable,
+    Broad,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]

@@ -13,7 +13,6 @@ use crate::error::Result;
 use crate::eval::{EvalRequest, EvaluationReport};
 use crate::index::{
     CacheStatus, IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, IndexSummary, OpenedIndex,
-    ProbeCacheEntry,
 };
 use crate::perf::{self, CostClass};
 use crate::progress::Reporter;
@@ -22,10 +21,13 @@ use crate::ranking::{
     rank_candidates,
 };
 use crate::replacement_hints::{ReplacementHintProfile, attach_replacement_hints};
-use crate::retrieval::{RetrievalDiagnostics, RetrievalOutput, retrieve_candidates};
+use crate::retrieval::{RetrievalDiagnostics, retrieve_candidates};
+use crate::semantic_verification::{
+    ProbeDiagnostics, ProbeSettings, SemanticVerificationInput, VerificationIndex, candidate_sets_for_review,
+    verify_candidate_probes,
+};
 use crate::source_refs::{SourceFactInput, collect_source_facts};
 use crate::worker::WorkerClient;
-use crate::worker::{ModuleDescriptor, ProbeBatch, ProbePair, ProbeResult};
 use crate::workspace::{self, ResolvedWorkspace, WorkspaceRequest};
 
 #[derive(Debug)]
@@ -103,6 +105,7 @@ pub(crate) struct AuditReport {
     pub(crate) review_profile: ReviewProfile,
     pub(crate) profile_counts: ReviewProfileCounts,
     pub(crate) retrieval: RetrievalDiagnostics,
+    pub(crate) semantic_verification: ProbeDiagnostics,
     pub(crate) review: RankedReview,
     pub(crate) visible_groups: Vec<RankedGroup>,
     pub(crate) visible_group_count: usize,
@@ -160,6 +163,7 @@ struct AuditComputation {
     min_priority: RankedPriority,
     review_profile: ReviewProfile,
     retrieval: RetrievalDiagnostics,
+    semantic_verification: ProbeDiagnostics,
     review: RankedReview,
 }
 
@@ -341,6 +345,7 @@ fn audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditReport> {
         review_profile: computation.review_profile,
         profile_counts,
         retrieval: computation.retrieval,
+        semantic_verification: computation.semantic_verification,
         review: computation.review,
         visible_groups,
         visible_group_count,
@@ -380,22 +385,55 @@ fn compute_audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditComput
     let local_index = store.resolve(IndexReference::Label(local_label))?;
     let local_handles = local_index.all_handles()?;
     let workspace_rows = local_index.hydrate(&local_handles)?;
-    let compare_indexes = open_compare_indexes(&args, &store, &foundation.workspace, reporter)?;
-    let retrieval_output = reporter.measure("retrieval", |_| retrieve_candidates(&workspace_rows, &compare_indexes))?;
-    let probe_results = collect_probe_results(
-        &retrieval_output,
-        &local_index,
-        &foundation.workspace,
-        args.semantic_probes,
+    let compare = open_compare_indexes(&args, &store, &foundation.workspace, reporter)?;
+    let retrieval_output = reporter.measure("retrieval", |_| retrieve_candidates(&workspace_rows, &compare.indexes))?;
+    let review_candidate_sets = perf::measure(CostClass::RetrievalRanking, "ranking.candidate_shaping", || {
+        candidate_sets_for_review(
+            &retrieval_output.candidate_sets,
+            args.compare_mathlib,
+            args.review_profile,
+            args.show_noise,
+        )
+    });
+    let source_fact_rows = source_fact_declarations(
+        &workspace_rows,
+        &review_candidate_sets,
+        args.compare_mathlib,
+        args.review_profile,
+        args.show_noise,
+    );
+    let source_facts = perf::measure(CostClass::RetrievalRanking, "source_refs.collect", || {
+        collect_source_facts(SourceFactInput::new(&source_fact_rows))
+    });
+    let cheap_review = perf::measure(CostClass::RetrievalRanking, "ranking.rank_candidates.initial", || {
+        rank_candidates(RankingInput {
+            candidate_sets: &review_candidate_sets,
+            probe_results: &std::collections::BTreeMap::new(),
+            source_facts: &source_facts,
+            profile: RankingProfile::default(),
+        })
+    });
+    let verification = verify_candidate_probes(
+        SemanticVerificationInput {
+            candidate_sets: &review_candidate_sets,
+            cheap_review: &cheap_review,
+            local_index: VerificationIndex::new(&local_index),
+            workspace: &foundation.workspace,
+            mathlib_source: compare.mathlib_source.as_ref(),
+            enabled: args.semantic_probes,
+            settings: ProbeSettings {
+                policy: args.probe_policy,
+                budget: args.probe_budget,
+                per_declaration_cap: 2,
+                chunk_size: args.probe_chunk_size,
+            },
+        },
         reporter,
     )?;
-    let source_facts = perf::measure(CostClass::RetrievalRanking, "source_refs.collect", || {
-        collect_source_facts(SourceFactInput::new(&workspace_rows))
-    });
-    let review = perf::measure(CostClass::RetrievalRanking, "ranking.rank_candidates", || {
+    let review = perf::measure(CostClass::RetrievalRanking, "ranking.rank_candidates.final", || {
         rank_candidates(RankingInput {
-            candidate_sets: &retrieval_output.candidate_sets,
-            probe_results: &probe_results,
+            candidate_sets: &review_candidate_sets,
+            probe_results: &verification.results,
             source_facts: &source_facts,
             profile: RankingProfile::default(),
         })
@@ -416,8 +454,14 @@ fn compute_audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditComput
         min_priority: ranked_priority(args.min_priority),
         review_profile: args.review_profile,
         retrieval: retrieval_output.diagnostics,
+        semantic_verification: verification.diagnostics,
         review,
     })
+}
+
+struct CompareIndexes {
+    indexes: Vec<OpenedIndex>,
+    mathlib_source: Option<ResolvedWorkspace>,
 }
 
 fn open_compare_indexes(
@@ -425,8 +469,9 @@ fn open_compare_indexes(
     store: &IndexStore,
     project_workspace: &ResolvedWorkspace,
     reporter: &mut Reporter,
-) -> Result<Vec<OpenedIndex>> {
+) -> Result<CompareIndexes> {
     let mut indexes = Vec::new();
+    let mut mathlib_source = None;
     for label in &args.compare_indexes {
         indexes.push(store.resolve(IndexReference::Label(label.clone()))?);
     }
@@ -436,7 +481,7 @@ fn open_compare_indexes(
         let execution_root = mathlib.execution_root();
         store.build_or_reuse(
             IndexBuildRequest {
-                workspace: mathlib.source,
+                workspace: mathlib.source.clone(),
                 execution_root: Some(execution_root),
                 label: "mathlib".to_owned(),
                 module_root: "Mathlib".to_owned(),
@@ -450,83 +495,45 @@ fn open_compare_indexes(
             &WorkerClient::with_timeout(INDEX_WORKER_TIMEOUT),
             reporter,
         )?;
+        mathlib_source = Some(mathlib.source);
         indexes.push(store.resolve(IndexReference::Label("mathlib".to_owned()))?);
     }
-    Ok(indexes)
+    Ok(CompareIndexes {
+        indexes,
+        mathlib_source,
+    })
 }
 
-fn collect_probe_results(
-    output: &RetrievalOutput,
-    local_index: &OpenedIndex,
-    workspace: &ResolvedWorkspace,
-    enabled: bool,
-    reporter: &mut Reporter,
-) -> Result<std::collections::BTreeMap<String, ProbeResult>> {
-    let mut results = std::collections::BTreeMap::new();
-    if !enabled {
-        return Ok(results);
+fn source_fact_declarations(
+    workspace_rows: &[crate::index::HydratedDeclaration],
+    candidate_sets: &[crate::retrieval::CandidateSet],
+    compare_mathlib: bool,
+    review_profile: ReviewProfile,
+    show_noise: bool,
+) -> Vec<crate::index::HydratedDeclaration> {
+    if !compare_mathlib || show_noise || review_profile != ReviewProfile::Mathlib {
+        return workspace_rows.to_vec();
     }
-    let mut missing_pairs = Vec::new();
-    for set in &output.candidate_sets {
+
+    let by_id = workspace_rows
+        .iter()
+        .map(|declaration| (declaration.declaration_id.as_str(), declaration))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut selected = std::collections::BTreeMap::new();
+    for set in candidate_sets {
+        if let Some(anchor) = by_id.get(set.anchor.declaration_id.as_str()) {
+            selected.insert(anchor.declaration_id.clone(), (*anchor).clone());
+        }
         for candidate in &set.candidates {
-            if candidate.declaration.origin != "workspace" {
-                continue;
-            }
-            let pair = ProbePair {
-                pair_id: candidate.pair_id.clone(),
-                left_declaration_id: set.anchor.declaration_id.clone(),
-                right_declaration_id: candidate.declaration.declaration_id.clone(),
-            };
-            if let Some(cached) = local_index.cached_probe_result(&pair)? {
-                results.insert(candidate.pair_id.clone(), cached);
-            } else {
-                missing_pairs.push(pair);
+            if candidate.declaration.origin == "workspace" {
+                selected.insert(
+                    candidate.declaration.declaration_id.clone(),
+                    candidate.declaration.clone(),
+                );
             }
         }
     }
-    if missing_pairs.is_empty() {
-        return Ok(results);
-    }
-    let modules = probe_modules_for(workspace);
-    let call = reporter.measure("worker.probe", |_| {
-        WorkerClient::with_timeout(Duration::from_secs(5 * 60)).probe_batch(ProbeBatch {
-            workspace_root: workspace.root.clone(),
-            modules,
-            pairs: missing_pairs.clone(),
-            max_pairs: Some(missing_pairs.len() as u64),
-        })
-    })?;
-    let pairs_by_id = missing_pairs
-        .into_iter()
-        .map(|pair| (pair.pair_id.clone(), pair))
-        .collect::<std::collections::BTreeMap<_, _>>();
-    let entries = call
-        .rows
-        .iter()
-        .filter_map(|result| {
-            pairs_by_id.get(&result.pair_id).cloned().map(|pair| ProbeCacheEntry {
-                pair,
-                result: result.clone(),
-            })
-        })
-        .collect::<Vec<_>>();
-    local_index.cache_probe_results(&entries)?;
-    for result in call.rows {
-        results.insert(result.pair_id.clone(), result);
-    }
-    Ok(results)
-}
-
-fn probe_modules_for(workspace: &ResolvedWorkspace) -> Vec<ModuleDescriptor> {
-    workspace
-        .source_files
-        .iter()
-        .map(|source| ModuleDescriptor {
-            module: source.module.clone(),
-            origin: "workspace".to_owned(),
-            source_root: None,
-        })
-        .collect()
+    selected.into_values().collect()
 }
 
 fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<EvaluationReport> {
@@ -670,7 +677,7 @@ fn profile_filter(
         ReviewProfile::Mathlib => ReviewFilter {
             include_generated: false,
             show_noise: false,
-            min_priority: RankedPriority::High,
+            min_priority: RankedPriority::Medium,
         },
         ReviewProfile::Internal => ReviewFilter {
             include_generated: false,
@@ -747,6 +754,9 @@ fn default_audit_args(workspace: PathBuf, module_root: Option<String>) -> AuditA
         review_profile: ReviewProfile::Mathlib,
         save_baseline: None,
         semantic_probes: true,
+        probe_budget: 500,
+        probe_policy: crate::cli::ProbePolicy::Actionable,
+        probe_chunk_size: 16,
         replacement_hints: true,
     }
 }
@@ -758,44 +768,4 @@ fn missing_oleans(workspace: &ResolvedWorkspace) -> Vec<String> {
         .filter(|source| !workspace::olean_exists(&workspace.root, &source.module))
         .map(|source| source.module.clone())
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::workspace::SourceFile;
-
-    #[test]
-    fn probe_modules_use_resolved_source_files_not_selected_roots() {
-        let workspace = ResolvedWorkspace {
-            requested_root: PathBuf::from("/tmp/project"),
-            root: PathBuf::from("/tmp/project"),
-            lakefile: PathBuf::from("/tmp/project/lakefile.toml"),
-            module_roots: vec!["KanProofs".to_owned()],
-            selected_roots: vec!["KanProofs.Mathlib4Backports".to_owned()],
-            source_files: vec![
-                SourceFile {
-                    module: "KanProofs.Mathlib4Backports.CategoryTheory.Adhesive.Basic".to_owned(),
-                    path: PathBuf::from("/tmp/project/KanProofs/Mathlib4Backports/CategoryTheory/Adhesive/Basic.lean"),
-                },
-                SourceFile {
-                    module: "KanProofs.Mathlib4Backports.CategoryTheory.Monoidal.Arrow".to_owned(),
-                    path: PathBuf::from("/tmp/project/KanProofs/Mathlib4Backports/CategoryTheory/Monoidal/Arrow.lean"),
-                },
-            ],
-        };
-
-        let modules = probe_modules_for(&workspace);
-
-        assert_eq!(modules.len(), 2);
-        assert_eq!(
-            modules[0].module,
-            "KanProofs.Mathlib4Backports.CategoryTheory.Adhesive.Basic"
-        );
-        assert!(
-            !modules
-                .iter()
-                .any(|module| module.module == "KanProofs.Mathlib4Backports")
-        );
-    }
 }

@@ -232,13 +232,15 @@ fn rank_pair(anchor: &HydratedDeclaration, candidate: &RetrievedCandidate, input
     let mut blockers = BTreeSet::new();
     let source_clone = same_source_fingerprint(anchor, &candidate.declaration, input.source_facts);
     let has_mathlib = candidate.declaration.origin == "mathlib" || anchor.origin == "mathlib";
-    let exact = has_contribution(candidate, "statement-fingerprint")
+    let theorem_pair = theorem_like(anchor) && theorem_like(&candidate.declaration);
+    let exact = (theorem_pair && has_contribution(candidate, "statement-fingerprint"))
         || probe.is_some_and(|probe| probe.same_statement || probe.same_reducible_definition);
-    let specialization = probe.is_some_and(|probe| probe.specializes_left_to_right || probe.specializes_right_to_left);
-    let permuted = has_contribution(candidate, "safe-permutation-fingerprint")
+    let specialization =
+        theorem_pair && probe.is_some_and(|probe| probe.specializes_left_to_right || probe.specializes_right_to_left);
+    let permuted = (theorem_pair && has_contribution(candidate, "safe-permutation-fingerprint"))
         || probe.is_some_and(|probe| probe.same_up_to_safe_reordering);
-    let connective =
-        has_contribution(candidate, "connective-fingerprint") || probe.is_some_and(|probe| probe.connective_equivalent);
+    let connective = (theorem_pair && has_contribution(candidate, "connective-fingerprint"))
+        || probe.is_some_and(|probe| probe.connective_equivalent);
     let near = candidate.score >= input.profile.min_near_score || has_contribution(candidate, "conclusion-fingerprint");
 
     if let Some(probe) = probe {
@@ -402,6 +404,7 @@ fn priority_for(
         ReviewRelation::PermutedStatement | ReviewRelation::ConnectiveEquivalent => ReviewPriority::Medium,
         ReviewRelation::Specialization => ReviewPriority::Medium,
         ReviewRelation::SourceClone => ReviewPriority::Low,
+        ReviewRelation::SubsumptionCandidate if has_mathlib => ReviewPriority::Low,
         ReviewRelation::SubsumptionCandidate => ReviewPriority::Medium,
         ReviewRelation::NearStatement => ReviewPriority::Low,
     }
@@ -476,6 +479,10 @@ fn is_generated(declaration: &HydratedDeclaration) -> bool {
 
 fn typeclass_instance_noise(declaration: &HydratedDeclaration) -> bool {
     declaration.kind == "instance" || declaration.display_name.starts_with("inst")
+}
+
+fn theorem_like(declaration: &HydratedDeclaration) -> bool {
+    matches!(declaration.kind.as_str(), "theorem" | "axiom")
 }
 
 fn broad_head_only(left: &HydratedDeclaration, right: &HydratedDeclaration, contributions: &[KeyContribution]) -> bool {
@@ -633,6 +640,22 @@ mod tests {
         assert_eq!(group.review_priority, ReviewPriority::High);
         assert_eq!(group.recommended_action, ReviewAction::AlreadyInMathlib);
         assert_eq!(group.relation, ReviewRelation::ExactStatement);
+    }
+
+    #[test]
+    fn non_theorem_statement_fingerprint_is_not_exact_without_probe() {
+        let mut workspace = declaration("workspace:Tiny:Tiny.Shape", "workspace", "Tiny.Shape");
+        workspace.kind = "inductive".to_owned();
+        let mut mathlib = declaration("mathlib:Mathlib:Mathlib.OtherShape", "mathlib", "Mathlib.OtherShape");
+        mathlib.kind = "inductive".to_owned();
+        let review = rank_candidates(input(vec![candidate_set(
+            workspace,
+            candidate(mathlib, "statement-fingerprint", 100.0),
+        )]));
+
+        let group = &review.groups[0];
+        assert_ne!(group.relation, ReviewRelation::ExactStatement);
+        assert_ne!(group.recommended_action, ReviewAction::AlreadyInMathlib);
     }
 
     #[test]

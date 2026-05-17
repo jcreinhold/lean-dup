@@ -187,6 +187,13 @@ fn render_audit(report: &AuditReport) -> String {
         format!("review profile: {}", review_profile_label(report.review_profile)),
         format!("threshold: {}", report.threshold),
         format!("candidates: {}", report.retrieval.candidate_count),
+        format!(
+            "semantic probes: planned={} cached={} worker={} unavailable={}",
+            report.semantic_verification.planned_pairs,
+            report.semantic_verification.cached_hits,
+            report.semantic_verification.worker_pairs,
+            report.semantic_verification.unavailable_results
+        ),
         format!("review groups: {}", report.review.groups.len()),
         format!("visible groups: {}", report.visible_group_count),
         format!(

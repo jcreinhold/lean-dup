@@ -480,11 +480,12 @@ private def probeRows
     let row ←
       try
         probePair declarationById pair
-      catch _error =>
+      catch error =>
+        let message ← error.toMessageData.toString
         pure <|
           unavailableResult
             pair
-            "probe failed for this pair"
+            s!"probe failed for this pair: {message}"
     rows := rows.push row
   pure rows
 
