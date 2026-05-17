@@ -49,14 +49,8 @@ fn getrusage_peak_rss() -> Option<u64> {
 
     const RUSAGE_SELF: i32 = 0;
     let mut usage = RUsage {
-        ru_utime: TimeVal {
-            tv_sec: 0,
-            tv_usec: 0,
-        },
-        ru_stime: TimeVal {
-            tv_sec: 0,
-            tv_usec: 0,
-        },
+        ru_utime: TimeVal { tv_sec: 0, tv_usec: 0 },
+        ru_stime: TimeVal { tv_sec: 0, tv_usec: 0 },
         ru_maxrss: 0,
         ru_ixrss: 0,
         ru_idrss: 0,

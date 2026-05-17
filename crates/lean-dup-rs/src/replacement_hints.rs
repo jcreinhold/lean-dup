@@ -86,9 +86,7 @@ fn hint_for_group(
     let mut blockers = Vec::new();
     if import_status == ImportStatus::Missing {
         blockers.push("missing-import".to_owned());
-        notes.push(format!(
-            "add `import {target_module}` before replacing local uses"
-        ));
+        notes.push(format!("add `import {target_module}` before replacing local uses"));
     }
     if callers.len() >= profile.transitional_alias_callers {
         notes.push("many local callers; keep a transitional alias during cleanup".to_owned());
@@ -102,20 +100,14 @@ fn hint_for_group(
         target_module,
         import_status,
         caller_count: callers.len(),
-        displayed_callers: callers
-            .into_iter()
-            .take(profile.max_displayed_callers)
-            .collect(),
+        displayed_callers: callers.into_iter().take(profile.max_displayed_callers).collect(),
         notes,
         blockers,
     })
 }
 
 fn eligible(group: &crate::ranking::RankedGroup) -> bool {
-    if matches!(
-        group.confidence,
-        ConfidenceTier::Low | ConfidenceTier::Noise
-    ) {
+    if matches!(group.confidence, ConfidenceTier::Low | ConfidenceTier::Noise) {
         return false;
     }
     if group.blockers.iter().any(|blocker| {
@@ -136,10 +128,7 @@ fn aggregate_import_status(statuses: impl Iterator<Item = ImportStatus>) -> Impo
     let statuses = statuses.collect::<Vec<_>>();
     if statuses.is_empty() {
         ImportStatus::Unknown
-    } else if statuses
-        .iter()
-        .all(|status| *status == ImportStatus::Direct)
-    {
+    } else if statuses.iter().all(|status| *status == ImportStatus::Direct) {
         ImportStatus::Direct
     } else if statuses.contains(&ImportStatus::Missing) {
         ImportStatus::Missing
@@ -155,8 +144,8 @@ mod tests {
     use super::{ReplacementHintProfile, attach_replacement_hints};
     use crate::index::{DeclarationHandle, HydratedDeclaration};
     use crate::ranking::{
-        ConfidenceTier, RankedGroup, RankedReview, RankingDiagnostics, ReviewAction, ReviewMember,
-        ReviewPriority, ReviewRelation,
+        ConfidenceTier, RankedGroup, RankedReview, RankingDiagnostics, ReviewAction, ReviewMember, ReviewPriority,
+        ReviewRelation,
     };
     use crate::source_refs::{ImportStatus, SourceFactInput, collect_source_facts};
     use crate::worker::{Fingerprints, SourcePoint, SourceSpan};
@@ -231,10 +220,7 @@ end Tiny
             source_span: Some(SourceSpan {
                 file: path.display().to_string(),
                 start: SourcePoint { line: 4, column: 1 },
-                end: SourcePoint {
-                    line: 4,
-                    column: 35,
-                },
+                end: SourcePoint { line: 4, column: 35 },
             }),
             statement_text: "theorem local : True".to_owned(),
             status_flags: Vec::new(),

@@ -87,11 +87,7 @@ pub(crate) struct CountMetric {
 /// The scorer knows only unordered pairs, candidate ranks, and whether a pair
 /// would enter the shown queue. Corpus paths, retrieval weights, probe policy,
 /// and report layout belong to callers.
-pub(crate) fn score_run(
-    labels: &GoldLabels,
-    observed: &ObservedRun,
-    k_values: &[usize],
-) -> EvaluationMetrics {
+pub(crate) fn score_run(labels: &GoldLabels, observed: &ObservedRun, k_values: &[usize]) -> EvaluationMetrics {
     let best_rank_by_pair = best_rank_by_pair(&observed.pairs);
     let shown_pairs = observed
         .pairs
@@ -165,11 +161,7 @@ mod tests {
     #[test]
     fn recall_at_k_reports_raw_counts() {
         let labels = labels(["A:B", "C:D"], []);
-        let observed = observed([
-            ("B", "A", 1, true),
-            ("C", "D", 6, false),
-            ("X", "Y", 1, true),
-        ]);
+        let observed = observed([("B", "A", 1, true), ("C", "D", 6, false), ("X", "Y", 1, true)]);
 
         let metrics = score_run(&labels, &observed, &[1, 5, 10]);
 
@@ -183,11 +175,7 @@ mod tests {
     #[test]
     fn shown_queue_precision_reports_raw_counts() {
         let labels = labels(["A:B"], ["A:C"]);
-        let observed = observed([
-            ("B", "A", 1, true),
-            ("C", "A", 2, true),
-            ("D", "E", 3, false),
-        ]);
+        let observed = observed([("B", "A", 1, true), ("C", "A", 2, true), ("D", "E", 3, false)]);
 
         let metrics = score_run(&labels, &observed, &[5]);
 
@@ -210,10 +198,7 @@ mod tests {
         assert_eq!(metrics.hard_negative_hits.total, 1);
     }
 
-    fn labels<const P: usize, const N: usize>(
-        positives: [&str; P],
-        negatives: [&str; N],
-    ) -> GoldLabels {
+    fn labels<const P: usize, const N: usize>(positives: [&str; P], negatives: [&str; N]) -> GoldLabels {
         let positives = positives.into_iter().map(pair).collect::<BTreeSet<_>>();
         let hard_negatives = negatives
             .into_iter()

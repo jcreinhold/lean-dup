@@ -22,19 +22,8 @@ fn help_lists_foundation_commands() {
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
 
-    for command in [
-        "doctor",
-        "index",
-        "index-mathlib",
-        "audit",
-        "eval",
-        "show",
-        "diff",
-    ] {
-        assert!(
-            stdout.contains(command),
-            "missing {command} in help:\n{stdout}"
-        );
+    for command in ["doctor", "index", "index-mathlib", "audit", "eval", "show", "diff"] {
+        assert!(stdout.contains(command), "missing {command} in help:\n{stdout}");
     }
 }
 
@@ -77,8 +66,7 @@ fn eval_default_json_contains_raw_metric_counts() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|recall| recall["k"] == 10
-                && recall["found"].as_u64() == recall["total"].as_u64())
+            .any(|recall| recall["k"] == 10 && recall["found"].as_u64() == recall["total"].as_u64())
     );
     assert_eq!(payload["metrics"]["hard_negative_hits"]["found"], 0);
 }
@@ -105,9 +93,7 @@ fn doctor_reports_workspace_facts_from_repo_root() {
         .stdout(predicate::str::contains("source files:"))
         .stdout(predicate::str::contains("cache root:"))
         .stdout(predicate::str::contains("lean:"))
-        .stdout(predicate::str::contains(
-            "cache fingerprint: rust-cli-cache.v1:",
-        ));
+        .stdout(predicate::str::contains("cache fingerprint: rust-cli-cache.v1:"));
 }
 
 #[test]
@@ -193,10 +179,7 @@ fn audit_fixture_mathlib_label_produces_actionable_hints() {
         .expect("mathlib exact duplicate group");
 
     assert_eq!(exact["review_priority"], "high");
-    assert_eq!(
-        exact["replacement_hint"]["target_decl"],
-        "External.same_as_tiny"
-    );
+    assert_eq!(exact["replacement_hint"]["target_decl"], "External.same_as_tiny");
     assert_eq!(exact["replacement_hint"]["import_status"], "missing");
     assert!(exact["replacement_hint"]["caller_count"].as_u64().unwrap() > 0);
     assert!(
@@ -232,13 +215,7 @@ fn audit_default_text_hides_noise_blockers() {
 fn skeleton_commands_return_stub_status_without_worker_rows() {
     let root = repo_root();
     for args in [
-        vec![
-            "show",
-            "--workspace",
-            root.to_str().unwrap(),
-            "--group",
-            "g1",
-        ],
+        vec!["show", "--workspace", root.to_str().unwrap(), "--group", "g1"],
         vec![
             "diff",
             "--workspace",
@@ -283,21 +260,10 @@ fn index_builds_canonical_sqlite_and_reuses_cache() {
 
     assert!(PathBuf::from(&index_path).ends_with("index.sqlite"));
     assert!(PathBuf::from(&index_path).exists());
-    assert_eq!(
-        PathBuf::from(&index_path).parent().unwrap(),
-        PathBuf::from(&index_dir)
-    );
-    assert!(
-        !PathBuf::from(&index_dir)
-            .join("declarations.jsonl.gz")
-            .exists()
-    );
+    assert_eq!(PathBuf::from(&index_path).parent().unwrap(), PathBuf::from(&index_dir));
+    assert!(!PathBuf::from(&index_dir).join("declarations.jsonl.gz").exists());
     assert!(!PathBuf::from(&index_dir).join("buckets.sqlite").exists());
-    assert!(
-        !PathBuf::from(&index_dir)
-            .join("fixture.metadata.json")
-            .exists()
-    );
+    assert!(!PathBuf::from(&index_dir).join("fixture.metadata.json").exists());
 
     let latest = fs::read_to_string(cache.path().join("indexes/fixture/latest.json")).unwrap();
     assert!(latest.contains(&index_dir));
@@ -312,9 +278,7 @@ fn index_builds_canonical_sqlite_and_reuses_cache() {
         .success()
         .stdout(predicate::str::contains("status: ok"))
         .stdout(predicate::str::contains("cache: hit"))
-        .stdout(predicate::str::contains(format!(
-            "index path: {index_path}"
-        )));
+        .stdout(predicate::str::contains(format!("index path: {index_path}")));
 }
 
 fn line_value(text: &str, prefix: &str) -> String {

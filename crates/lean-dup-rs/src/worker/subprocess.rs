@@ -73,23 +73,12 @@ impl SubprocessTransport {
         Ok(self.worker_root.join(".lake/build/bin/lean_dup_worker"))
     }
 
-    fn invoke_worker(
-        &self,
-        request: &Request,
-        control: &CallControl,
-    ) -> Result<ProcessOutput, WorkerError> {
-        let input =
-            serde_json::to_string(&request.to_json()).map_err(|source| WorkerError::Protocol {
-                message: source.to_string(),
-            })?;
+    fn invoke_worker(&self, request: &Request, control: &CallControl) -> Result<ProcessOutput, WorkerError> {
+        let input = serde_json::to_string(&request.to_json()).map_err(|source| WorkerError::Protocol {
+            message: source.to_string(),
+        })?;
         if let Some(command) = &self.command_override {
-            return run_process(
-                &command.cwd,
-                &command.program,
-                &command.args,
-                &input,
-                control,
-            );
+            return run_process(&command.cwd, &command.program, &command.args, &input, control);
         }
         let worker_path = self.build_worker(control)?;
         let worker = worker_path.to_string_lossy().into_owned();
@@ -123,11 +112,7 @@ impl WorkerTransport for SubprocessTransport {
 }
 
 fn request_workspace(request: &Request) -> Result<PathBuf, WorkerError> {
-    match request
-        .to_json()
-        .get("workspace_root")
-        .and_then(|value| value.as_str())
-    {
+    match request.to_json().get("workspace_root").and_then(|value| value.as_str()) {
         Some(root) if !root.is_empty() => Ok(PathBuf::from(root)),
         _ => Ok(repo_root().join("lean")),
     }
@@ -314,11 +299,8 @@ exit 7"#,
 
     #[test]
     fn stderr_is_bounded() {
-        let (_temp, transport) =
-            script("python3 - <<'PY'\nimport sys\nsys.stderr.write('x' * 12000)\nsys.exit(3)\nPY");
-        let error = transport
-            .call(request(Command::Version), control())
-            .unwrap_err();
+        let (_temp, transport) = script("python3 - <<'PY'\nimport sys\nsys.stderr.write('x' * 12000)\nsys.exit(3)\nPY");
+        let error = transport.call(request(Command::Version), control()).unwrap_err();
         match error {
             WorkerError::NonZeroExit { stderr, .. } => assert!(stderr.len() <= 8192),
             other => panic!("unexpected error: {other:?}"),
@@ -361,9 +343,7 @@ exit 7"#,
             r#"printf '%s\n' '{"schema_version":"lean-dup.worker.v1","request_id":"r1","command":"version","kind":"version_result","payload":{"protocol_version":"lean-dup.worker.v1","worker_version":"0.1.0","lean_version":null,"semantic_versions":{"extract":"e","features":"f","probe":"p"},"supported_commands":["version"],"supported_capabilities":[]}}'
 printf '%s\n' '{"schema_version":"lean-dup.worker.v1","request_id":"r1","command":"version","kind":"complete","payload":{"row_counts":{"version_result":1},"elapsed_ms":null}}'"#,
         );
-        let output = transport
-            .call(request(Command::Version), control())
-            .unwrap();
+        let output = transport.call(request(Command::Version), control()).unwrap();
         assert_eq!(output.rows.len(), 1);
     }
 }

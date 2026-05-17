@@ -6,11 +6,7 @@ use crate::error::Result;
 use crate::progress::Reporter;
 use crate::ranking::{ReviewAction, ReviewFilter, ReviewPriority, ReviewRelation};
 
-pub(crate) fn write_outcome<O: Write, E: Write>(
-    outcome: Outcome,
-    stdout: &mut O,
-    stderr: &mut E,
-) -> Result<()> {
+pub(crate) fn write_outcome<O: Write, E: Write>(outcome: Outcome, stdout: &mut O, stderr: &mut E) -> Result<()> {
     write_report(&outcome.reporter, stderr)?;
     match outcome.output_format {
         OutputFormat::Json => {
@@ -64,10 +60,7 @@ fn render_doctor(report: &DoctorReport) -> String {
     let mut lines = vec![
         "command: doctor".to_owned(),
         format!("status: {}", report.status),
-        format!(
-            "requested workspace: {}",
-            report.requested_workspace.display()
-        ),
+        format!("requested workspace: {}", report.requested_workspace.display()),
         format!("resolved Lake root: {}", report.lake_root.display()),
         format!("lakefile: {}", report.lakefile.display()),
         format!("module roots: {}", report.module_roots.join(", ")),
@@ -100,10 +93,7 @@ fn render_doctor(report: &DoctorReport) -> String {
 fn render_skeleton(report: &SkeletonReport) -> String {
     let mut lines = vec![
         format!("status: {}", report.status),
-        format!(
-            "requested workspace: {}",
-            report.requested_workspace.display()
-        ),
+        format!("requested workspace: {}", report.requested_workspace.display()),
         format!("resolved Lake root: {}", report.lake_root.display()),
         format!("selected roots: {}", report.selected_roots.join(", ")),
         format!("source files: {}", report.source_count),
@@ -130,10 +120,7 @@ fn render_index(command: &str, report: &IndexReport) -> String {
     let mut lines = vec![
         format!("command: {command}"),
         format!("status: {}", report.status),
-        format!(
-            "requested workspace: {}",
-            report.requested_workspace.display()
-        ),
+        format!("requested workspace: {}", report.requested_workspace.display()),
         format!("resolved Lake root: {}", report.lake_root.display()),
         format!("selected roots: {}", report.selected_roots.join(", ")),
         format!("source files: {}", report.source_count),
@@ -158,10 +145,7 @@ fn render_audit(report: &AuditReport) -> String {
     let mut lines = vec![
         "command: audit".to_owned(),
         format!("status: {}", report.status),
-        format!(
-            "requested workspace: {}",
-            report.requested_workspace.display()
-        ),
+        format!("requested workspace: {}", report.requested_workspace.display()),
         format!("resolved Lake root: {}", report.lake_root.display()),
         format!("selected roots: {}", report.selected_roots.join(", ")),
         format!("source files: {}", report.source_count),

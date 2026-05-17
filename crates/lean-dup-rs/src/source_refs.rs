@@ -45,11 +45,7 @@ impl SourceFacts {
             .and_then(|fact| fact.source_fingerprint.as_deref())
     }
 
-    pub(crate) fn import_status_for(
-        &self,
-        declaration_id: &str,
-        target_module: &str,
-    ) -> ImportStatus {
+    pub(crate) fn import_status_for(&self, declaration_id: &str, target_module: &str) -> ImportStatus {
         let Some(declaration) = self.declaration(declaration_id) else {
             return ImportStatus::Unknown;
         };
@@ -162,28 +158,14 @@ pub(crate) fn collect_source_facts(input: SourceFactInput<'_>) -> SourceFacts {
     }
 
     for declaration in input.declarations {
-        let source_file = declaration
-            .source_span
-            .as_ref()
-            .map(|span| PathBuf::from(&span.file));
+        let source_file = declaration.source_span.as_ref().map(|span| PathBuf::from(&span.file));
         let source_fingerprint = source_file.as_ref().and_then(|path| {
             let source = loaded.get(path)?;
             let span = declaration.source_span.as_ref()?;
-            source.fingerprint_for(
-                declaration,
-                span.start.line as usize,
-                span.end.line as usize,
-            )
+            source.fingerprint_for(declaration, span.start.line as usize, span.end.line as usize)
         });
         let references = reference_tokens(declaration)
-            .map(|tokens| {
-                references_to(
-                    declaration,
-                    &tokens,
-                    &loaded,
-                    input.max_references_per_declaration,
-                )
-            })
+            .map(|tokens| references_to(declaration, &tokens, &loaded, input.max_references_per_declaration))
             .unwrap_or_default();
         facts.declarations.insert(
             declaration.declaration_id.clone(),
@@ -210,8 +192,8 @@ struct SourceFile {
 
 impl SourceFile {
     fn read(path: &Path, max_file_bytes: u64) -> Result<Self, String> {
-        let metadata = std::fs::metadata(path)
-            .map_err(|source| format!("{}: source unavailable ({source})", path.display()))?;
+        let metadata =
+            std::fs::metadata(path).map_err(|source| format!("{}: source unavailable ({source})", path.display()))?;
         if metadata.len() > max_file_bytes {
             return Err(format!(
                 "{}: source skipped because it exceeds {} bytes",
@@ -232,12 +214,7 @@ impl SourceFile {
         })
     }
 
-    fn fingerprint_for(
-        &self,
-        declaration: &HydratedDeclaration,
-        start_line: usize,
-        end_line: usize,
-    ) -> Option<String> {
+    fn fingerprint_for(&self, declaration: &HydratedDeclaration, start_line: usize, end_line: usize) -> Option<String> {
         if start_line == 0 || end_line < start_line || end_line > self.stripped_lines.len() {
             return None;
         }
@@ -282,13 +259,7 @@ impl SourceFile {
                 file: self.path.clone(),
                 line,
                 column,
-                text: self
-                    .lines
-                    .get(index)
-                    .cloned()
-                    .unwrap_or_default()
-                    .trim()
-                    .to_owned(),
+                text: self.lines.get(index).cloned().unwrap_or_default().trim().to_owned(),
             });
             if references.len() >= remaining {
                 break;
@@ -302,12 +273,7 @@ fn source_files(declarations: &[HydratedDeclaration]) -> BTreeSet<PathBuf> {
     declarations
         .iter()
         .filter(|declaration| declaration.origin == "workspace")
-        .filter_map(|declaration| {
-            declaration
-                .source_span
-                .as_ref()
-                .map(|span| PathBuf::from(&span.file))
-        })
+        .filter_map(|declaration| declaration.source_span.as_ref().map(|span| PathBuf::from(&span.file)))
         .collect()
 }
 
@@ -320,18 +286,9 @@ fn references_to(
     if declaration.origin != "workspace" {
         return Vec::new();
     }
-    let declaration_file = declaration
-        .source_span
-        .as_ref()
-        .map(|span| PathBuf::from(&span.file));
-    let declaration_start = declaration
-        .source_span
-        .as_ref()
-        .map(|span| span.start.line as usize);
-    let declaration_end = declaration
-        .source_span
-        .as_ref()
-        .map(|span| span.end.line as usize);
+    let declaration_file = declaration.source_span.as_ref().map(|span| PathBuf::from(&span.file));
+    let declaration_start = declaration.source_span.as_ref().map(|span| span.start.line as usize);
+    let declaration_end = declaration.source_span.as_ref().map(|span| span.end.line as usize);
     let mut references = Vec::new();
     for source in files.values() {
         let remaining = max_references.saturating_sub(references.len());
@@ -492,13 +449,7 @@ end Tiny
         );
     }
 
-    fn declaration(
-        id: &str,
-        name: &str,
-        path: &std::path::Path,
-        start: u64,
-        end: u64,
-    ) -> HydratedDeclaration {
+    fn declaration(id: &str, name: &str, path: &std::path::Path, start: u64, end: u64) -> HydratedDeclaration {
         HydratedDeclaration {
             handle: DeclarationHandle::for_test("h"),
             declaration_id: id.to_owned(),
@@ -511,14 +462,8 @@ end Tiny
             modifiers: Vec::new(),
             source_span: Some(SourceSpan {
                 file: path.display().to_string(),
-                start: SourcePoint {
-                    line: start,
-                    column: 1,
-                },
-                end: SourcePoint {
-                    line: end,
-                    column: 20,
-                },
+                start: SourcePoint { line: start, column: 1 },
+                end: SourcePoint { line: end, column: 20 },
             }),
             statement_text: "theorem target : True".to_owned(),
             status_flags: Vec::new(),

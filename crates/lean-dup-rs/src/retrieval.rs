@@ -5,8 +5,8 @@ use serde::Serialize;
 
 use crate::error::Result;
 use crate::index::{
-    DeclarationHandle, FingerprintKind, FingerprintQuery, HydratedDeclaration, OpenedIndex,
-    PostingKey, RoleFeatureQuery,
+    DeclarationHandle, FingerprintKind, FingerprintQuery, HydratedDeclaration, OpenedIndex, PostingKey,
+    RoleFeatureQuery,
 };
 
 const TOP_K_PER_WORKSPACE_DECLARATION: usize = 80;
@@ -127,10 +127,7 @@ pub(crate) fn retrieve_candidates(
     let workspace_plans = workspace.iter().map(planned_keys).collect::<Vec<_>>();
     let local_postings = local_postings(&workspace_plans);
     let local_counts = local_counts(&local_postings);
-    let index_facts = indexes
-        .iter()
-        .map(OpenedIndex::facts)
-        .collect::<Result<Vec<_>>>()?;
+    let index_facts = indexes.iter().map(OpenedIndex::facts).collect::<Result<Vec<_>>>()?;
     let external_counts = external_counts(indexes, &workspace_plans)?;
     let external_postings = external_postings(indexes, &workspace_plans, &external_counts)?;
 
@@ -163,17 +160,10 @@ pub(crate) fn retrieve_candidates(
             );
         }
 
-        let selected = select_top(
-            &workspace[anchor_index].declaration_id,
-            accumulators,
-            &mut diagnostics,
-        );
+        let selected = select_top(&workspace[anchor_index].declaration_id, accumulators, &mut diagnostics);
         for candidate in &selected {
             if let CandidateId::External { index, handle } = &candidate.id {
-                external_needed
-                    .entry(*index)
-                    .or_default()
-                    .push(handle.clone());
+                external_needed.entry(*index).or_default().push(handle.clone());
             }
         }
         selected_by_anchor.push(selected);
@@ -208,10 +198,7 @@ pub(crate) fn retrieve_candidates(
             });
         }
     }
-    diagnostics.candidate_count = candidate_sets
-        .iter()
-        .map(|set| set.candidates.len())
-        .sum::<usize>();
+    diagnostics.candidate_count = candidate_sets.iter().map(|set| set.candidates.len()).sum::<usize>();
 
     Ok(RetrievalOutput {
         candidate_sets,
@@ -231,10 +218,7 @@ struct PlannedKey {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 enum CandidateId {
     Workspace(usize),
-    External {
-        index: usize,
-        handle: DeclarationHandle,
-    },
+    External { index: usize, handle: DeclarationHandle },
 }
 
 #[derive(Debug, Clone)]
@@ -335,12 +319,7 @@ fn planned_keys(declaration: &HydratedDeclaration) -> Vec<PlannedKey> {
     plans
 }
 
-fn fingerprint_plan(
-    kind: FingerprintKind,
-    key: &str,
-    label: &'static str,
-    base_weight: f64,
-) -> PlannedKey {
+fn fingerprint_plan(kind: FingerprintKind, key: &str, label: &'static str, base_weight: f64) -> PlannedKey {
     PlannedKey {
         key: PostingKey::Fingerprint(FingerprintQuery {
             kind,
@@ -395,10 +374,7 @@ fn sorted_plans(plans: &[PlannedKey]) -> Vec<&PlannedKey> {
                     .partial_cmp(&left.base_weight)
                     .unwrap_or(Ordering::Equal)
             })
-            .then_with(|| {
-                contribution_sort_key(&left.contribution)
-                    .cmp(&contribution_sort_key(&right.contribution))
-            })
+            .then_with(|| contribution_sort_key(&left.contribution).cmp(&contribution_sort_key(&right.contribution)))
     });
     sorted
 }
@@ -448,10 +424,7 @@ fn external_postings(
         let selected = keys
             .iter()
             .filter(|key| {
-                let count = external_counts
-                    .get(&(index, (*key).clone()))
-                    .copied()
-                    .unwrap_or(0);
+                let count = external_counts.get(&(index, (*key).clone())).copied().unwrap_or(0);
                 count > 0 && count <= posting_limit_for_key(workspace_plans, key)
             })
             .cloned()
@@ -489,10 +462,7 @@ fn add_local_matches(
     let Some(matches) = local_postings.get(&plan.key) else {
         return;
     };
-    let count = local_counts
-        .get(&plan.key)
-        .copied()
-        .unwrap_or(matches.len());
+    let count = local_counts.get(&plan.key).copied().unwrap_or(matches.len());
     if count > posting_limit(plan) {
         diagnostics.pruned_postings.push(PrunedPosting {
             anchor_declaration_id: workspace[anchor_index].declaration_id.clone(),
@@ -510,12 +480,7 @@ fn add_local_matches(
             continue;
         }
         let score = plan.base_weight * rarity_weight(workspace.len(), count);
-        add_contribution(
-            CandidateId::Workspace(*candidate_index),
-            plan,
-            score,
-            accumulators,
-        );
+        add_contribution(CandidateId::Workspace(*candidate_index), plan, score, accumulators);
     }
 }
 
@@ -531,10 +496,7 @@ fn add_external_matches(
     diagnostics: &mut RetrievalDiagnostics,
 ) {
     for index in 0..indexes.len() {
-        let count = external_counts
-            .get(&(index, plan.key.clone()))
-            .copied()
-            .unwrap_or(0);
+        let count = external_counts.get(&(index, plan.key.clone())).copied().unwrap_or(0);
         if count == 0 {
             continue;
         }
@@ -554,8 +516,7 @@ fn add_external_matches(
             continue;
         };
         for handle in handles {
-            let score =
-                plan.base_weight * rarity_weight(index_facts[index].declaration_count, count);
+            let score = plan.base_weight * rarity_weight(index_facts[index].declaration_count, count);
             add_contribution(
                 CandidateId::External {
                     index,
@@ -578,14 +539,12 @@ fn add_contribution(
     if !plan.admits_candidate && !accumulators.contains_key(&id) {
         return;
     }
-    let accumulator = accumulators
-        .entry(id.clone())
-        .or_insert_with(|| CandidateAccumulator {
-            id,
-            score: 0.0,
-            admitted: false,
-            contributions: BTreeMap::new(),
-        });
+    let accumulator = accumulators.entry(id.clone()).or_insert_with(|| CandidateAccumulator {
+        id,
+        score: 0.0,
+        admitted: false,
+        contributions: BTreeMap::new(),
+    });
     accumulator.score += score;
     accumulator.admitted |= plan.admits_candidate;
     let mut contribution = plan.contribution.clone();
@@ -622,10 +581,10 @@ fn select_top(
         };
         if heap.len() < TOP_K_PER_WORKSPACE_DECLARATION {
             heap.push(Reverse(entry));
-        } else if let Some(mut smallest) = heap.peek_mut() {
-            if entry > smallest.0 {
-                *smallest = Reverse(entry);
-            }
+        } else if let Some(mut smallest) = heap.peek_mut()
+            && entry > smallest.0
+        {
+            *smallest = Reverse(entry);
         }
     }
 
@@ -794,21 +753,12 @@ mod tests {
                 &mut Reporter::new(false, false),
             )
             .unwrap();
-        let opened = store
-            .resolve(IndexReference::Label(label.to_owned()))
-            .unwrap();
+        let opened = store.resolve(IndexReference::Label(label.to_owned())).unwrap();
         (store, opened)
     }
 
     fn hydrated_workspace(cache: &TempDir) -> Vec<crate::index::HydratedDeclaration> {
-        let (_store, opened) = build_index(
-            cache,
-            "tiny",
-            "Tiny",
-            "workspace",
-            "workspace",
-            IndexBuildKind::Local,
-        );
+        let (_store, opened) = build_index(cache, "tiny", "Tiny", "workspace", "workspace", IndexBuildKind::Local);
         let handles = opened.all_handles().unwrap();
         opened.hydrate(&handles).unwrap()
     }
@@ -819,24 +769,15 @@ mod tests {
         let workspace = hydrated_workspace(&cache);
         let output = retrieve_candidates(&workspace, &[]).unwrap();
 
-        let same = candidate(&output, "Tiny.same_left", "Tiny.same_right")
-            .expect("same statement candidate");
+        let same = candidate(&output, "Tiny.same_left", "Tiny.same_right").expect("same statement candidate");
         assert!(has_contribution(same, "statement-fingerprint"));
 
-        let permuted = candidate(
-            &output,
-            "Tiny.independent_arrow_left",
-            "Tiny.independent_arrow_right",
-        )
-        .expect("safe permutation candidate");
+        let permuted = candidate(&output, "Tiny.independent_arrow_left", "Tiny.independent_arrow_right")
+            .expect("safe permutation candidate");
         assert!(has_contribution(permuted, "safe-permutation-fingerprint"));
 
-        let connective = candidate(
-            &output,
-            "Tiny.connective_and_left",
-            "Tiny.connective_and_right",
-        )
-        .expect("connective candidate");
+        let connective =
+            candidate(&output, "Tiny.connective_and_left", "Tiny.connective_and_right").expect("connective candidate");
         assert!(has_contribution(connective, "connective-fingerprint"));
     }
 
@@ -860,9 +801,8 @@ mod tests {
                 connective_shape: format!("synthetic.connective.{index}"),
                 conclusion_shape: format!("synthetic.conclusion.{index}"),
             };
-            row.role_features.retain(|feature| {
-                feature.role == "conclusion_head" && feature.display.as_deref() == Some("Eq")
-            });
+            row.role_features
+                .retain(|feature| feature.role == "conclusion_head" && feature.display.as_deref() == Some("Eq"));
             row.low_signal_markers = vec!["broad_head:Eq".to_owned()];
             rows.push(row);
         }
@@ -875,8 +815,7 @@ mod tests {
                 .diagnostics
                 .pruned_postings
                 .iter()
-                .any(|posting| posting.reason == "broad-posting"
-                    && posting.display.as_deref() == Some("Eq"))
+                .any(|posting| posting.reason == "broad-posting" && posting.display.as_deref() == Some("Eq"))
         );
     }
 
@@ -896,21 +835,16 @@ mod tests {
 
         let output = retrieve_candidates(&workspace, &[external]).unwrap();
 
-        let external_match = candidate(&output, "Tiny.same_left", "External.same_as_tiny")
-            .expect("workspace/external exact candidate");
+        let external_match =
+            candidate(&output, "Tiny.same_left", "External.same_as_tiny").expect("workspace/external exact candidate");
         assert!(has_contribution(external_match, "statement-fingerprint"));
         assert!(output.diagnostics.hydrated_external_count > 0);
         assert!(output.diagnostics.hydrated_external_count < external_count);
-        assert!(
-            output
-                .candidate_sets
-                .iter()
-                .all(|set| set.anchor.origin == "workspace")
-        );
+        assert!(output.candidate_sets.iter().all(|set| set.anchor.origin == "workspace"));
         assert!(output.candidate_sets.iter().all(|set| {
-            set.candidates.iter().all(|candidate| {
-                !(set.anchor.origin != "workspace" && candidate.declaration.origin != "workspace")
-            })
+            set.candidates
+                .iter()
+                .all(|candidate| !(set.anchor.origin != "workspace" && candidate.declaration.origin != "workspace"))
         }));
     }
 

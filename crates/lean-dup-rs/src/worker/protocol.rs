@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use super::{
-    DeclarationRow, FeatureRow, Fingerprints, ModuleDescriptor, ProbeResult, RoleFeature,
-    SourceSpan, WorkerDiagnostic, WorkerError, WorkerEvent, WorkerVersion,
+    DeclarationRow, FeatureRow, Fingerprints, ModuleDescriptor, ProbeResult, RoleFeature, SourceSpan, WorkerDiagnostic,
+    WorkerError, WorkerEvent, WorkerVersion,
 };
 
 pub(super) const SCHEMA_VERSION: &str = "lean-dup.worker.v1";
@@ -214,11 +214,10 @@ pub(super) fn parse_output(
         if line.trim().is_empty() {
             continue;
         }
-        let envelope: Envelope =
-            serde_json::from_str(line).map_err(|source| WorkerError::InvalidJsonLine {
-                line: index + 1,
-                source,
-            })?;
+        let envelope: Envelope = serde_json::from_str(line).map_err(|source| WorkerError::InvalidJsonLine {
+            line: index + 1,
+            source,
+        })?;
         validate_envelope_context(&envelope, expected_request_id, expected_command)?;
         match envelope.kind {
             ResponseKind::VersionResult => {
@@ -324,27 +323,19 @@ fn validate_row_counts(
     let expected = [
         (
             "version_result",
-            rows.iter()
-                .filter(|row| matches!(row, Row::Version(_)))
-                .count(),
+            rows.iter().filter(|row| matches!(row, Row::Version(_))).count(),
         ),
         (
             "declaration_row",
-            rows.iter()
-                .filter(|row| matches!(row, Row::Declaration(_)))
-                .count(),
+            rows.iter().filter(|row| matches!(row, Row::Declaration(_))).count(),
         ),
         (
             "feature_row",
-            rows.iter()
-                .filter(|row| matches!(row, Row::Feature(_)))
-                .count(),
+            rows.iter().filter(|row| matches!(row, Row::Feature(_))).count(),
         ),
         (
             "probe_result",
-            rows.iter()
-                .filter(|row| matches!(row, Row::Probe(_)))
-                .count(),
+            rows.iter().filter(|row| matches!(row, Row::Probe(_))).count(),
         ),
         ("progress", events.len()),
         ("error", diagnostics.len()),
@@ -464,10 +455,7 @@ mod tests {
     #[test]
     fn malformed_json_line_is_structured_error() {
         let error = parse_output("{", "r1", Command::Version).unwrap_err();
-        assert!(matches!(
-            error,
-            WorkerError::InvalidJsonLine { line: 1, .. }
-        ));
+        assert!(matches!(error, WorkerError::InvalidJsonLine { line: 1, .. }));
     }
 
     #[test]
@@ -505,10 +493,7 @@ mod tests {
         let stdout = format!(
             "{}\n{}",
             line("version_result", "{}"),
-            line(
-                "complete",
-                r#"{"row_counts":{"version_result":1},"elapsed_ms":null}"#
-            )
+            line("complete", r#"{"row_counts":{"version_result":1},"elapsed_ms":null}"#)
         );
         assert!(matches!(
             parse_output(&stdout, "r1", Command::Version),
@@ -524,10 +509,7 @@ mod tests {
                 "version_result",
                 r#"{"protocol_version":"lean-dup.worker.v1","worker_version":"0.1.0","lean_version":null,"semantic_versions":{"extract":"e","features":"f","probe":"p"},"supported_commands":["version","raw"],"supported_capabilities":[]}"#
             ),
-            line(
-                "complete",
-                r#"{"row_counts":{"version_result":1},"elapsed_ms":null}"#
-            )
+            line("complete", r#"{"row_counts":{"version_result":1},"elapsed_ms":null}"#)
         );
         assert!(matches!(
             parse_output(&stdout, "r1", Command::Version),
@@ -543,10 +525,7 @@ mod tests {
                 "version_result",
                 r#"{"protocol_version":"lean-dup.worker.v1","worker_version":"0.1.0","lean_version":null,"semantic_versions":{"extract":"e","features":"f","probe":"p"},"supported_commands":["version"],"supported_capabilities":[]}"#
             ),
-            line(
-                "error",
-                r#"{"code":"internal_error","fatal":true,"message":"failed"}"#
-            )
+            line("error", r#"{"code":"internal_error","fatal":true,"message":"failed"}"#)
         );
         assert!(matches!(
             parse_output(&stdout, "r1", Command::Version),

@@ -39,10 +39,7 @@ impl ResolvedWorkspace {
     }
 }
 
-pub(crate) fn resolve(
-    request: WorkspaceRequest,
-    reporter: &mut Reporter,
-) -> Result<ResolvedWorkspace> {
+pub(crate) fn resolve(request: WorkspaceRequest, reporter: &mut Reporter) -> Result<ResolvedWorkspace> {
     reporter.event(
         "workspace",
         None,
@@ -171,8 +168,7 @@ fn lakefile_path(root: &Path) -> Option<PathBuf> {
 }
 
 fn discover_module_roots(root: &Path, lakefile: &Path) -> Result<Vec<String>> {
-    let mut roots = if lakefile.file_name().and_then(|name| name.to_str()) == Some("lakefile.toml")
-    {
+    let mut roots = if lakefile.file_name().and_then(|name| name.to_str()) == Some("lakefile.toml") {
         discover_toml_roots(lakefile)?
     } else {
         discover_lean_lakefile_roots(lakefile)?

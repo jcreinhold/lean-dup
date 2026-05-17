@@ -5,19 +5,18 @@ use serde::Serialize;
 
 use crate::cache::{self, CacheFacts};
 use crate::cli::{
-    AuditArgs, Cli, Command, DiffArgs, DoctorArgs, EvalArgs, EvalFormat, IndexArgs,
-    IndexMathlibArgs, OutputFormat, ShowArgs,
+    AuditArgs, Cli, Command, DiffArgs, DoctorArgs, EvalArgs, EvalFormat, IndexArgs, IndexMathlibArgs, OutputFormat,
+    ShowArgs,
 };
 use crate::error::Result;
 use crate::eval::{EvalRequest, EvaluationReport};
 use crate::index::{
-    CacheStatus, IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, IndexSummary,
-    OpenedIndex, ProbeCacheEntry,
+    CacheStatus, IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, IndexSummary, OpenedIndex,
+    ProbeCacheEntry,
 };
 use crate::progress::Reporter;
 use crate::ranking::{
-    RankedReview, RankingInput, RankingProfile, ReviewFilter, ReviewPriority as RankedPriority,
-    rank_candidates,
+    RankedReview, RankingInput, RankingProfile, ReviewFilter, ReviewPriority as RankedPriority, rank_candidates,
 };
 use crate::replacement_hints::{ReplacementHintProfile, attach_replacement_hints};
 use crate::retrieval::{RetrievalDiagnostics, RetrievalOutput, retrieve_candidates};
@@ -129,14 +128,8 @@ const INDEX_WORKER_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 pub(crate) fn run(cli: Cli) -> Result<Outcome> {
     let mut reporter = Reporter::new(cli.progress, cli.profile);
     let (report, output_format) = match cli.command {
-        Command::Doctor(args) => (
-            Report::Doctor(doctor(args, &mut reporter)?),
-            OutputFormat::Text,
-        ),
-        Command::Index(args) => (
-            Report::Index(index(args, &mut reporter)?),
-            OutputFormat::Text,
-        ),
+        Command::Doctor(args) => (Report::Doctor(doctor(args, &mut reporter)?), OutputFormat::Text),
+        Command::Index(args) => (Report::Index(index(args, &mut reporter)?), OutputFormat::Text),
         Command::IndexMathlib(args) => (
             Report::IndexMathlib(index_mathlib(args, &mut reporter)?),
             OutputFormat::Text,
@@ -167,8 +160,7 @@ pub(crate) fn run(cli: Cli) -> Result<Outcome> {
 fn doctor(args: DoctorArgs, reporter: &mut Reporter) -> Result<DoctorReport> {
     let foundation = foundation(args.workspace, args.module_root, reporter)?;
     let worker_version = reporter.measure("worker.version", |_| {
-        WorkerClient::with_timeout(Duration::from_secs(60))
-            .version(foundation.workspace.root.clone())
+        WorkerClient::with_timeout(Duration::from_secs(60)).version(foundation.workspace.root.clone())
     })?;
     let worker_version = worker_version
         .rows
@@ -182,11 +174,7 @@ fn doctor(args: DoctorArgs, reporter: &mut Reporter) -> Result<DoctorReport> {
     };
 
     Ok(DoctorReport {
-        status: if missing_oleans.is_empty() {
-            "ok"
-        } else {
-            "warning"
-        },
+        status: if missing_oleans.is_empty() { "ok" } else { "warning" },
         requested_workspace: foundation.workspace.requested_root,
         lake_root: foundation.workspace.root,
         lakefile: foundation.workspace.lakefile,
@@ -285,9 +273,7 @@ fn audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditReport> {
     let local_handles = local_index.all_handles()?;
     let workspace_rows = local_index.hydrate(&local_handles)?;
     let compare_indexes = open_compare_indexes(&args, &store, reporter)?;
-    let retrieval_output = reporter.measure("retrieval", |_| {
-        retrieve_candidates(&workspace_rows, &compare_indexes)
-    })?;
+    let retrieval_output = reporter.measure("retrieval", |_| retrieve_candidates(&workspace_rows, &compare_indexes))?;
     let probe_results = collect_probe_results(
         &retrieval_output,
         &local_index,
@@ -334,11 +320,7 @@ fn audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditReport> {
     })
 }
 
-fn open_compare_indexes(
-    args: &AuditArgs,
-    store: &IndexStore,
-    reporter: &mut Reporter,
-) -> Result<Vec<OpenedIndex>> {
+fn open_compare_indexes(args: &AuditArgs, store: &IndexStore, reporter: &mut Reporter) -> Result<Vec<OpenedIndex>> {
     let mut indexes = Vec::new();
     for label in &args.compare_indexes {
         indexes.push(store.resolve(IndexReference::Label(label.clone()))?);
@@ -429,13 +411,10 @@ fn collect_probe_results(
         .rows
         .iter()
         .filter_map(|result| {
-            pairs_by_id
-                .get(&result.pair_id)
-                .cloned()
-                .map(|pair| ProbeCacheEntry {
-                    pair,
-                    result: result.clone(),
-                })
+            pairs_by_id.get(&result.pair_id).cloned().map(|pair| ProbeCacheEntry {
+                pair,
+                result: result.clone(),
+            })
         })
         .collect::<Vec<_>>();
     local_index.cache_probe_results(&entries)?;
@@ -481,11 +460,7 @@ fn diff(args: DiffArgs, reporter: &mut Reporter) -> Result<SkeletonReport> {
     ))
 }
 
-fn foundation(
-    requested_root: PathBuf,
-    module_root: Option<String>,
-    reporter: &mut Reporter,
-) -> Result<Foundation> {
+fn foundation(requested_root: PathBuf, module_root: Option<String>, reporter: &mut Reporter) -> Result<Foundation> {
     reporter.measure("workspace.resolve", |reporter| {
         let workspace = workspace::resolve(
             WorkspaceRequest {
@@ -495,12 +470,7 @@ fn foundation(
             reporter,
         )?;
         let cache = cache::resolve_cache(&workspace)?;
-        reporter.event(
-            "cache",
-            None,
-            None,
-            format!("cache root {}", cache.root.display()),
-        );
+        reporter.event("cache", None, None, format!("cache root {}", cache.root.display()));
         Ok(Foundation { workspace, cache })
     })
 }

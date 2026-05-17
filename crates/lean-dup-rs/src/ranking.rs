@@ -48,10 +48,7 @@ pub(crate) struct RankedReview {
 
 impl RankedReview {
     pub(crate) fn visible_groups(&self, filter: ReviewFilter) -> Vec<&RankedGroup> {
-        self.groups
-            .iter()
-            .filter(|group| filter.includes(group))
-            .collect()
+        self.groups.iter().filter(|group| filter.includes(group)).collect()
     }
 }
 
@@ -68,12 +65,7 @@ impl ReviewFilter {
         if group.review_priority == ReviewPriority::Noise && !self.show_noise {
             return false;
         }
-        if !self.include_generated
-            && group
-                .blockers
-                .iter()
-                .any(|blocker| blocker == "generated-declaration")
-        {
+        if !self.include_generated && group.blockers.iter().any(|blocker| blocker == "generated-declaration") {
             return false;
         }
         group.review_priority <= self.min_priority
@@ -198,11 +190,7 @@ pub(crate) fn rank_candidates(input: RankingInput<'_>) -> RankedReview {
     });
 
     let diagnostics = RankingDiagnostics {
-        candidate_pairs: input
-            .candidate_sets
-            .iter()
-            .map(|set| set.candidates.len())
-            .sum(),
+        candidate_pairs: input.candidate_sets.iter().map(|set| set.candidates.len()).sum(),
         emitted_groups: groups.len(),
         suppressed_groups: suppressed.len(),
     };
@@ -214,11 +202,7 @@ pub(crate) fn rank_candidates(input: RankingInput<'_>) -> RankedReview {
     }
 }
 
-fn rank_pair(
-    anchor: &HydratedDeclaration,
-    candidate: &RetrievedCandidate,
-    input: &RankingInput<'_>,
-) -> RankedGroup {
+fn rank_pair(anchor: &HydratedDeclaration, candidate: &RetrievedCandidate, input: &RankingInput<'_>) -> RankedGroup {
     let probe = input.probe_results.get(&candidate.pair_id);
     let mut signals = contribution_signals(&candidate.explanation.contributions);
     let mut blockers = BTreeSet::new();
@@ -226,14 +210,12 @@ fn rank_pair(
     let has_mathlib = candidate.declaration.origin == "mathlib" || anchor.origin == "mathlib";
     let exact = has_contribution(candidate, "statement-fingerprint")
         || probe.is_some_and(|probe| probe.same_statement || probe.same_reducible_definition);
-    let specialization = probe
-        .is_some_and(|probe| probe.specializes_left_to_right || probe.specializes_right_to_left);
+    let specialization = probe.is_some_and(|probe| probe.specializes_left_to_right || probe.specializes_right_to_left);
     let permuted = has_contribution(candidate, "safe-permutation-fingerprint")
         || probe.is_some_and(|probe| probe.same_up_to_safe_reordering);
-    let connective = has_contribution(candidate, "connective-fingerprint")
-        || probe.is_some_and(|probe| probe.connective_equivalent);
-    let near = candidate.score >= input.profile.min_near_score
-        || has_contribution(candidate, "conclusion-fingerprint");
+    let connective =
+        has_contribution(candidate, "connective-fingerprint") || probe.is_some_and(|probe| probe.connective_equivalent);
+    let near = candidate.score >= input.profile.min_near_score || has_contribution(candidate, "conclusion-fingerprint");
 
     if let Some(probe) = probe {
         signals.extend(probe_signals(probe));
@@ -247,11 +229,7 @@ fn rank_pair(
     if is_generated(anchor) || is_generated(&candidate.declaration) {
         blockers.insert("generated-declaration".to_owned());
     }
-    if broad_head_only(
-        anchor,
-        &candidate.declaration,
-        &candidate.explanation.contributions,
-    ) {
+    if broad_head_only(anchor, &candidate.declaration, &candidate.explanation.contributions) {
         blockers.insert("broad-head-only".to_owned());
     }
     if typeclass_instance_noise(anchor) || typeclass_instance_noise(&candidate.declaration) {
@@ -281,14 +259,7 @@ fn rank_pair(
     let import_status = target
         .as_ref()
         .and_then(|target| target_module(target))
-        .map(|target_module| {
-            local_import_status(
-                anchor,
-                &candidate.declaration,
-                target_module,
-                input.source_facts,
-            )
-        });
+        .map(|target_module| local_import_status(anchor, &candidate.declaration, target_module, input.source_facts));
     let mut priority = priority_for(
         relation,
         has_mathlib,
@@ -319,12 +290,8 @@ fn rank_pair(
         confidence,
         review_priority: priority,
         recommended_action,
-        target_decl: target
-            .as_ref()
-            .map(|declaration| declaration.qualified_name.clone()),
-        target_module: target
-            .as_ref()
-            .map(|declaration| declaration.module.clone()),
+        target_decl: target.as_ref().map(|declaration| declaration.qualified_name.clone()),
+        target_module: target.as_ref().map(|declaration| declaration.module.clone()),
         probe_summary: probe.and_then(probe_summary),
         local_caller_count,
         replacement_hint: None,
@@ -350,9 +317,7 @@ fn action_for(
                 ReviewAction::LocalAlias
             }
         }
-        ReviewRelation::PermutedStatement | ReviewRelation::ConnectiveEquivalent => {
-            ReviewAction::LocalAlias
-        }
+        ReviewRelation::PermutedStatement | ReviewRelation::ConnectiveEquivalent => ReviewAction::LocalAlias,
         ReviewRelation::Specialization => ReviewAction::SpecializationOf,
         ReviewRelation::SourceClone => ReviewAction::ProbableSourceClone,
         ReviewRelation::SubsumptionCandidate => ReviewAction::MergeGeneralization,
@@ -373,9 +338,7 @@ fn priority_for(
     match relation {
         ReviewRelation::ExactStatement if has_mathlib => ReviewPriority::High,
         ReviewRelation::ExactStatement => ReviewPriority::High,
-        ReviewRelation::PermutedStatement | ReviewRelation::ConnectiveEquivalent => {
-            ReviewPriority::Medium
-        }
+        ReviewRelation::PermutedStatement | ReviewRelation::ConnectiveEquivalent => ReviewPriority::Medium,
         ReviewRelation::Specialization => ReviewPriority::Medium,
         ReviewRelation::SourceClone => ReviewPriority::Low,
         ReviewRelation::SubsumptionCandidate => ReviewPriority::Medium,
@@ -436,11 +399,7 @@ fn has_contribution(candidate: &RetrievedCandidate, kind: &str) -> bool {
         .any(|contribution| contribution.kind == kind)
 }
 
-fn same_source_fingerprint(
-    left: &HydratedDeclaration,
-    right: &HydratedDeclaration,
-    facts: &SourceFacts,
-) -> bool {
+fn same_source_fingerprint(left: &HydratedDeclaration, right: &HydratedDeclaration, facts: &SourceFacts) -> bool {
     let Some(left) = facts.source_fingerprint(&left.declaration_id) else {
         return false;
     };
@@ -451,21 +410,14 @@ fn same_source_fingerprint(
 }
 
 fn is_generated(declaration: &HydratedDeclaration) -> bool {
-    declaration
-        .status_flags
-        .iter()
-        .any(|flag| flag == "generated")
+    declaration.status_flags.iter().any(|flag| flag == "generated")
 }
 
 fn typeclass_instance_noise(declaration: &HydratedDeclaration) -> bool {
     declaration.kind == "instance" || declaration.display_name.starts_with("inst")
 }
 
-fn broad_head_only(
-    left: &HydratedDeclaration,
-    right: &HydratedDeclaration,
-    contributions: &[KeyContribution],
-) -> bool {
+fn broad_head_only(left: &HydratedDeclaration, right: &HydratedDeclaration, contributions: &[KeyContribution]) -> bool {
     if contributions.is_empty() {
         return false;
     }
@@ -510,11 +462,7 @@ fn target_module(declaration: &HydratedDeclaration) -> Option<&str> {
     }
 }
 
-fn local_caller_count(
-    anchor: &HydratedDeclaration,
-    candidate: &HydratedDeclaration,
-    facts: &SourceFacts,
-) -> usize {
+fn local_caller_count(anchor: &HydratedDeclaration, candidate: &HydratedDeclaration, facts: &SourceFacts) -> usize {
     [anchor, candidate]
         .into_iter()
         .filter(|declaration| declaration.origin == "workspace")
@@ -535,10 +483,7 @@ fn local_import_status(
         .collect::<Vec<_>>();
     if statuses.is_empty() {
         ImportStatus::Unknown
-    } else if statuses
-        .iter()
-        .all(|status| *status == ImportStatus::Direct)
-    {
+    } else if statuses.iter().all(|status| *status == ImportStatus::Direct) {
         ImportStatus::Direct
     } else if statuses.contains(&ImportStatus::Missing) {
         ImportStatus::Missing
@@ -571,10 +516,7 @@ fn probe_summary(probe: &ProbeResult) -> Option<String> {
     })
 }
 
-fn suppressed_relations(
-    group: &RankedGroup,
-    candidate: &RetrievedCandidate,
-) -> Vec<SuppressedGroup> {
+fn suppressed_relations(group: &RankedGroup, candidate: &RetrievedCandidate) -> Vec<SuppressedGroup> {
     if !matches!(
         group.relation,
         ReviewRelation::ExactStatement | ReviewRelation::Specialization
@@ -611,13 +553,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::{
-        RankingInput, RankingProfile, ReviewAction, ReviewFilter, ReviewPriority, ReviewRelation,
-        rank_candidates,
+        RankingInput, RankingProfile, ReviewAction, ReviewFilter, ReviewPriority, ReviewRelation, rank_candidates,
     };
     use crate::index::{DeclarationHandle, HydratedDeclaration};
-    use crate::retrieval::{
-        CandidateExplanation, CandidateSet, KeyContribution, RetrievedCandidate,
-    };
+    use crate::retrieval::{CandidateExplanation, CandidateSet, KeyContribution, RetrievedCandidate};
     use crate::source_refs::SourceFacts;
     use crate::worker::{Fingerprints, ProbeResult};
 
@@ -668,20 +607,13 @@ mod tests {
             profile: RankingProfile::default(),
         });
 
-        assert_eq!(
-            review.groups[0].recommended_action,
-            ReviewAction::SpecializationOf
-        );
+        assert_eq!(review.groups[0].recommended_action, ReviewAction::SpecializationOf);
         assert_eq!(review.groups[0].relation, ReviewRelation::Specialization);
     }
 
     #[test]
     fn generated_and_broad_head_only_groups_are_hidden_by_default() {
-        let mut left = declaration(
-            "workspace:Tiny:Tiny.generated",
-            "workspace",
-            "Tiny.generated",
-        );
+        let mut left = declaration("workspace:Tiny:Tiny.generated", "workspace", "Tiny.generated");
         left.status_flags.push("generated".to_owned());
         left.low_signal_markers.push("broad_head:Eq".to_owned());
         let mut right = declaration("workspace:Tiny:Tiny.other", "workspace", "Tiny.other");
@@ -696,16 +628,8 @@ mod tests {
             min_priority: ReviewPriority::Low,
         };
 
-        assert!(
-            review.groups[0]
-                .blockers
-                .contains(&"generated-declaration".to_owned())
-        );
-        assert!(
-            review.groups[0]
-                .blockers
-                .contains(&"broad-head-only".to_owned())
-        );
+        assert!(review.groups[0].blockers.contains(&"generated-declaration".to_owned()));
+        assert!(review.groups[0].blockers.contains(&"broad-head-only".to_owned()));
         assert!(review.visible_groups(filter).is_empty());
     }
 
@@ -715,11 +639,7 @@ mod tests {
             declaration("workspace:Tiny:Tiny.same", "workspace", "Tiny.same"),
             candidate_with_many(
                 declaration("workspace:Tiny:Tiny.same2", "workspace", "Tiny.same2"),
-                vec![
-                    "statement-fingerprint",
-                    "connective-fingerprint",
-                    "role-feature",
-                ],
+                vec!["statement-fingerprint", "connective-fingerprint", "role-feature"],
             ),
         )]));
 
@@ -743,11 +663,7 @@ mod tests {
         }
     }
 
-    fn candidate(
-        declaration: HydratedDeclaration,
-        contribution_kind: &str,
-        score: f64,
-    ) -> RetrievedCandidate {
+    fn candidate(declaration: HydratedDeclaration, contribution_kind: &str, score: f64) -> RetrievedCandidate {
         candidate_with_display(declaration, contribution_kind, None, score)
     }
 
@@ -774,10 +690,7 @@ mod tests {
         }
     }
 
-    fn candidate_with_many(
-        declaration: HydratedDeclaration,
-        contribution_kinds: Vec<&str>,
-    ) -> RetrievedCandidate {
+    fn candidate_with_many(declaration: HydratedDeclaration, contribution_kinds: Vec<&str>) -> RetrievedCandidate {
         let pair_id = format!("workspace:Tiny:Tiny.same::{}", declaration.declaration_id);
         RetrievedCandidate {
             pair_id,
@@ -803,11 +716,7 @@ mod tests {
             handle: DeclarationHandle::for_test(id),
             declaration_id: id.to_owned(),
             origin: origin.to_owned(),
-            module: name
-                .rsplit_once('.')
-                .map(|(module, _)| module)
-                .unwrap_or("")
-                .to_owned(),
+            module: name.rsplit_once('.').map(|(module, _)| module).unwrap_or("").to_owned(),
             qualified_name: name.to_owned(),
             display_name: name.rsplit('.').next().unwrap().to_owned(),
             kind: "theorem".to_owned(),

@@ -10,9 +10,8 @@ use walkdir::WalkDir;
 use crate::error::{Error, Result, read, read_to_string};
 use crate::progress::Reporter;
 use crate::worker::{
-    DeclarationRow, ExtractBatch, FeatureRow, FeaturesBatch, Fingerprints, ModuleDescriptor,
-    ProbePair, ProbeResult, RoleFeature, SourceSpan, WorkerClient, WorkerDiagnostic, WorkerEvent,
-    WorkerVersion,
+    DeclarationRow, ExtractBatch, FeatureRow, FeaturesBatch, Fingerprints, ModuleDescriptor, ProbePair, ProbeResult,
+    RoleFeature, SourceSpan, WorkerClient, WorkerDiagnostic, WorkerEvent, WorkerVersion,
 };
 use crate::workspace::{self, ResolvedWorkspace};
 
@@ -301,17 +300,11 @@ impl IndexStore {
     ) -> Result<IndexSummary> {
         require_oleans_if_requested(&request)?;
 
-        let version_call = reporter.measure("worker.version", |_| {
-            worker.version(request.workspace.root.clone())
-        })?;
+        let version_call = reporter.measure("worker.version", |_| worker.version(request.workspace.root.clone()))?;
         record_worker_events(reporter, &version_call.events);
-        let version = version_call
-            .rows
-            .into_iter()
-            .next()
-            .ok_or_else(|| Error::Index {
-                message: "worker version returned no rows".to_owned(),
-            })?;
+        let version = version_call.rows.into_iter().next().ok_or_else(|| Error::Index {
+            message: "worker version returned no rows".to_owned(),
+        })?;
 
         let cache_key = index_cache_key(&request, &version)?;
         let cache_key_json = serde_json::to_string(&cache_key)?;
@@ -319,10 +312,7 @@ impl IndexStore {
         let index_dir = self.label_dir(&request.label).join(cache_id);
         let index_path = index_dir.join("index.sqlite");
 
-        if index_path.exists()
-            && !request.force
-            && sqlite_cache_is_current(&index_path, &cache_key_json)?
-        {
+        if index_path.exists() && !request.force && sqlite_cache_is_current(&index_path, &cache_key_json)? {
             let declaration_count = declaration_count(&index_path)?;
             self.write_latest(&request.label, &index_dir)?;
             reporter.event(
@@ -363,13 +353,7 @@ impl IndexStore {
         })?;
         record_worker_events(reporter, &features.events);
 
-        write_sqlite_index(
-            &index_path,
-            &cache_key_json,
-            &request,
-            declarations.rows,
-            features.rows,
-        )?;
+        write_sqlite_index(&index_path, &cache_key_json, &request, declarations.rows, features.rows)?;
         self.write_latest(&request.label, &index_dir)?;
 
         let declaration_count = declaration_count(&index_path)?;
@@ -399,8 +383,7 @@ impl IndexStore {
         let path = match reference {
             IndexReference::Label(label) => {
                 let pointer_path = self.label_dir(&label).join("latest.json");
-                let pointer: LatestPointer =
-                    serde_json::from_str(&read_to_string(pointer_path.clone())?)?;
+                let pointer: LatestPointer = serde_json::from_str(&read_to_string(pointer_path.clone())?)?;
                 pointer.index_dir.join("index.sqlite")
             }
             IndexReference::Path(path) => {
@@ -414,10 +397,7 @@ impl IndexStore {
         };
         if path.file_name().and_then(|name| name.to_str()) != Some("index.sqlite") {
             return Err(Error::Index {
-                message: format!(
-                    "index path must resolve to index.sqlite: {}",
-                    path.display()
-                ),
+                message: format!("index path must resolve to index.sqlite: {}", path.display()),
             });
         }
         validate_index_schema(&path)?;
@@ -505,8 +485,8 @@ impl OpenedIndex {
     /// Return every declaration handle in deterministic order.
     pub(crate) fn all_handles(&self) -> Result<Vec<DeclarationHandle>> {
         let connection = open_readonly(&self.path)?;
-        let mut statement = connection
-            .prepare("SELECT handle FROM declarations ORDER BY qualified_name, declaration_id")?;
+        let mut statement =
+            connection.prepare("SELECT handle FROM declarations ORDER BY qualified_name, declaration_id")?;
         let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
         let mut handles = Vec::new();
         for row in rows {
@@ -522,13 +502,11 @@ impl OpenedIndex {
             if fingerprint.key.is_empty() {
                 continue;
             }
-            let mut statement = connection.prepare(
-                "SELECT declaration_handle FROM fingerprint_postings WHERE kind = ?1 AND key = ?2",
-            )?;
-            let rows = statement
-                .query_map(params![fingerprint.kind.as_str(), fingerprint.key], |row| {
-                    row.get::<_, String>(0)
-                })?;
+            let mut statement = connection
+                .prepare("SELECT declaration_handle FROM fingerprint_postings WHERE kind = ?1 AND key = ?2")?;
+            let rows = statement.query_map(params![fingerprint.kind.as_str(), fingerprint.key], |row| {
+                row.get::<_, String>(0)
+            })?;
             for row in rows {
                 handles.insert(DeclarationHandle(row?));
             }
@@ -537,13 +515,11 @@ impl OpenedIndex {
             if role_feature.key.is_empty() {
                 continue;
             }
-            let mut statement = connection.prepare(
-                "SELECT declaration_handle FROM role_feature_postings WHERE role = ?1 AND key = ?2",
-            )?;
-            let rows = statement
-                .query_map(params![role_feature.role, role_feature.key], |row| {
-                    row.get::<_, String>(0)
-                })?;
+            let mut statement = connection
+                .prepare("SELECT declaration_handle FROM role_feature_postings WHERE role = ?1 AND key = ?2")?;
+            let rows = statement.query_map(params![role_feature.role, role_feature.key], |row| {
+                row.get::<_, String>(0)
+            })?;
             for row in rows {
                 handles.insert(DeclarationHandle(row?));
             }
@@ -551,10 +527,7 @@ impl OpenedIndex {
         Ok(handles.into_iter().collect())
     }
 
-    pub(crate) fn hydrate(
-        &self,
-        handles: &[DeclarationHandle],
-    ) -> Result<Vec<HydratedDeclaration>> {
+    pub(crate) fn hydrate(&self, handles: &[DeclarationHandle]) -> Result<Vec<HydratedDeclaration>> {
         if handles.is_empty() {
             return Ok(Vec::new());
         }
@@ -576,10 +549,7 @@ impl OpenedIndex {
         for entry in entries {
             transaction.execute(
                 "INSERT OR REPLACE INTO probe_cache VALUES (?1, ?2)",
-                params![
-                    probe_cache_key(&entry.pair),
-                    probe_cache_payload(&entry.result)
-                ],
+                params![probe_cache_key(&entry.pair), probe_cache_payload(&entry.result)],
             )?;
         }
         transaction.commit()?;
@@ -635,12 +605,7 @@ fn require_oleans_if_requested(request: &IndexBuildRequest) -> Result<()> {
     if missing.is_empty() {
         Ok(())
     } else {
-        let sample = missing
-            .iter()
-            .take(5)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join(", ");
+        let sample = missing.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
         Err(Error::Index {
             message: format!(
                 "missing compiled oleans for index ({} missing; sample: {sample})",
@@ -804,11 +769,7 @@ fn initialize_schema(connection: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn write_metadata(
-    connection: &Connection,
-    cache_key_json: &str,
-    request: &IndexBuildRequest,
-) -> Result<()> {
+fn write_metadata(connection: &Connection, cache_key_json: &str, request: &IndexBuildRequest) -> Result<()> {
     let values = [
         ("schema_version", INDEX_SCHEMA_VERSION.to_owned()),
         ("cache_key", cache_key_json.to_owned()),
@@ -818,19 +779,12 @@ fn write_metadata(
         ("kind", serde_json::to_string(&request.kind)?),
     ];
     for (key, value) in values {
-        connection.execute(
-            "INSERT INTO metadata (key, value) VALUES (?1, ?2)",
-            params![key, value],
-        )?;
+        connection.execute("INSERT INTO metadata (key, value) VALUES (?1, ?2)", params![key, value])?;
     }
     Ok(())
 }
 
-fn insert_declaration(
-    connection: &Connection,
-    declaration: &DeclarationRow,
-    feature: &FeatureRow,
-) -> Result<()> {
+fn insert_declaration(connection: &Connection, declaration: &DeclarationRow, feature: &FeatureRow) -> Result<()> {
     let handle = DeclarationHandle(handle_for(&declaration.declaration_id));
     connection.execute(
         "INSERT INTO declarations VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
@@ -887,12 +841,7 @@ fn insert_declaration(
     for role_feature in &feature.role_features {
         connection.execute(
             "INSERT INTO role_feature_postings VALUES (?1, ?2, ?3, ?4)",
-            params![
-                role_feature.role,
-                role_feature.key,
-                role_feature.display,
-                handle.0,
-            ],
+            params![role_feature.role, role_feature.key, role_feature.display, handle.0,],
         )?;
     }
     Ok(())
@@ -934,8 +883,7 @@ fn sqlite_cache_is_current(index_path: &Path, cache_key_json: &str) -> Result<bo
         Ok(value) => value,
         Err(_) => return Ok(false),
     };
-    Ok(schema_version.as_deref() == Some(INDEX_SCHEMA_VERSION)
-        && cache_key.as_deref() == Some(cache_key_json))
+    Ok(schema_version.as_deref() == Some(INDEX_SCHEMA_VERSION) && cache_key.as_deref() == Some(cache_key_json))
 }
 
 #[allow(dead_code)]
@@ -952,11 +900,9 @@ fn validate_index_schema(index_path: &Path) -> Result<()> {
 
 fn metadata_value(connection: &Connection, key: &str) -> Result<Option<String>> {
     Ok(connection
-        .query_row(
-            "SELECT value FROM metadata WHERE key = ?1",
-            params![key],
-            |row| row.get(0),
-        )
+        .query_row("SELECT value FROM metadata WHERE key = ?1", params![key], |row| {
+            row.get(0)
+        })
         .optional()?)
 }
 
@@ -980,23 +926,17 @@ fn posting_handles(connection: &Connection, key: &PostingKey) -> Result<Vec<Decl
     let mut handles = Vec::new();
     match key {
         PostingKey::Fingerprint(query) => {
-            let mut statement = connection.prepare(
-                "SELECT declaration_handle FROM fingerprint_postings WHERE kind = ?1 AND key = ?2",
-            )?;
-            let rows = statement.query_map(params![query.kind.as_str(), query.key], |row| {
-                row.get::<_, String>(0)
-            })?;
+            let mut statement = connection
+                .prepare("SELECT declaration_handle FROM fingerprint_postings WHERE kind = ?1 AND key = ?2")?;
+            let rows = statement.query_map(params![query.kind.as_str(), query.key], |row| row.get::<_, String>(0))?;
             for row in rows {
                 handles.push(DeclarationHandle(row?));
             }
         }
         PostingKey::RoleFeature(query) => {
-            let mut statement = connection.prepare(
-                "SELECT declaration_handle FROM role_feature_postings WHERE role = ?1 AND key = ?2",
-            )?;
-            let rows = statement.query_map(params![query.role, query.key], |row| {
-                row.get::<_, String>(0)
-            })?;
+            let mut statement = connection
+                .prepare("SELECT declaration_handle FROM role_feature_postings WHERE role = ?1 AND key = ?2")?;
+            let rows = statement.query_map(params![query.role, query.key], |row| row.get::<_, String>(0))?;
             for row in rows {
                 handles.push(DeclarationHandle(row?));
             }
@@ -1007,17 +947,12 @@ fn posting_handles(connection: &Connection, key: &PostingKey) -> Result<Vec<Decl
 
 fn declaration_count(index_path: &Path) -> Result<usize> {
     let connection = open_readonly(index_path)?;
-    let count = connection.query_row("SELECT COUNT(*) FROM declarations", [], |row| {
-        row.get::<_, i64>(0)
-    })?;
+    let count = connection.query_row("SELECT COUNT(*) FROM declarations", [], |row| row.get::<_, i64>(0))?;
     Ok(count as usize)
 }
 
 #[allow(dead_code)]
-fn load_declaration(
-    connection: &Connection,
-    handle: &DeclarationHandle,
-) -> Result<HydratedDeclaration> {
+fn load_declaration(connection: &Connection, handle: &DeclarationHandle) -> Result<HydratedDeclaration> {
     let row = connection
         .query_row(
             "
@@ -1180,12 +1115,7 @@ fn repo_root() -> PathBuf {
 }
 
 fn git_output(root: &Path, args: &[&str]) -> Option<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .output()
-        .ok()?;
+    let output = Command::new("git").arg("-C").arg(root).args(args).output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -1284,9 +1214,8 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        CacheStatus, FingerprintKind, FingerprintQuery, IndexBuildKind, IndexBuildRequest,
-        IndexQuery, IndexReference, IndexStore, RoleFeatureQuery, index_cache_key, safe_label,
-        sqlite_cache_is_current,
+        CacheStatus, FingerprintKind, FingerprintQuery, IndexBuildKind, IndexBuildRequest, IndexQuery, IndexReference,
+        IndexStore, RoleFeatureQuery, index_cache_key, safe_label, sqlite_cache_is_current,
     };
     use crate::progress::Reporter;
     use crate::worker::{ProbePair, ProbeResult, WorkerClient, WorkerVersion};
@@ -1350,12 +1279,8 @@ mod tests {
         assert_eq!(second.cache_status, CacheStatus::Hit);
         assert_eq!(first.path, second.path);
 
-        let by_label = store
-            .resolve(IndexReference::Label("fixture".to_owned()))
-            .unwrap();
-        let by_path = store
-            .resolve(IndexReference::Path(first.index_dir.clone()))
-            .unwrap();
+        let by_label = store.resolve(IndexReference::Label("fixture".to_owned())).unwrap();
+        let by_path = store.resolve(IndexReference::Path(first.index_dir.clone())).unwrap();
 
         let handles = by_label
             .matching_handles(IndexQuery {
@@ -1421,11 +1346,7 @@ mod tests {
         .unwrap();
 
         let store = IndexStore::new(cache.path().to_path_buf());
-        assert!(
-            store
-                .resolve(IndexReference::Label("fixture".to_owned()))
-                .is_err()
-        );
+        assert!(store.resolve(IndexReference::Label("fixture".to_owned())).is_err());
     }
 
     #[test]
@@ -1441,11 +1362,7 @@ name = "B"
 "#,
         )
         .unwrap();
-        fs::write(
-            temp.path().join("lean-toolchain"),
-            "leanprover/lean4:v4.30.0-rc2\n",
-        )
-        .unwrap();
+        fs::write(temp.path().join("lean-toolchain"), "leanprover/lean4:v4.30.0-rc2\n").unwrap();
         fs::write(temp.path().join("A.lean"), "#check Nat\n").unwrap();
         fs::write(temp.path().join("B.lean"), "#check Bool\n").unwrap();
 
@@ -1461,10 +1378,8 @@ name = "B"
         let version = fake_version("features.v1");
         let first = serde_json::to_string(&index_cache_key(&request_a, &version).unwrap()).unwrap();
 
-        let changed_version = serde_json::to_string(
-            &index_cache_key(&request_a, &fake_version("features.v2")).unwrap(),
-        )
-        .unwrap();
+        let changed_version =
+            serde_json::to_string(&index_cache_key(&request_a, &fake_version("features.v2")).unwrap()).unwrap();
         assert_ne!(first, changed_version);
 
         let workspace_b = resolve(
@@ -1475,10 +1390,8 @@ name = "B"
             &mut Reporter::new(false, false),
         )
         .unwrap();
-        let changed_root = serde_json::to_string(
-            &index_cache_key(&request_for(workspace_b, "B"), &version).unwrap(),
-        )
-        .unwrap();
+        let changed_root =
+            serde_json::to_string(&index_cache_key(&request_for(workspace_b, "B"), &version).unwrap()).unwrap();
         assert_ne!(first, changed_root);
 
         fs::write(temp.path().join("A.lean"), "#check String\n").unwrap();
@@ -1490,10 +1403,8 @@ name = "B"
             &mut Reporter::new(false, false),
         )
         .unwrap();
-        let changed_source = serde_json::to_string(
-            &index_cache_key(&request_for(workspace_a, "A"), &version).unwrap(),
-        )
-        .unwrap();
+        let changed_source =
+            serde_json::to_string(&index_cache_key(&request_for(workspace_a, "A"), &version).unwrap()).unwrap();
         assert_ne!(first, changed_source);
     }
 

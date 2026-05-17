@@ -46,10 +46,7 @@ pub(crate) fn resolve_cache(workspace: &ResolvedWorkspace) -> Result<CacheFacts>
 }
 
 pub(crate) fn cache_root() -> PathBuf {
-    cache_root_from(
-        |key| std::env::var_os(key),
-        std::env::var_os("HOME").map(PathBuf::from),
-    )
+    cache_root_from(|key| std::env::var_os(key), std::env::var_os("HOME").map(PathBuf::from))
 }
 
 fn cache_root_from(env: impl Fn(&str) -> Option<OsString>, home: Option<PathBuf>) -> PathBuf {
@@ -149,16 +146,8 @@ mod tests {
     #[test]
     fn workspace_fingerprint_changes_with_source_content() {
         let temp = TempDir::new().unwrap();
-        fs::write(
-            temp.path().join("lakefile.toml"),
-            "[[lean_lib]]\nname = \"Demo\"\n",
-        )
-        .unwrap();
-        fs::write(
-            temp.path().join("lean-toolchain"),
-            "leanprover/lean4:v4.25.0\n",
-        )
-        .unwrap();
+        fs::write(temp.path().join("lakefile.toml"), "[[lean_lib]]\nname = \"Demo\"\n").unwrap();
+        fs::write(temp.path().join("lean-toolchain"), "leanprover/lean4:v4.25.0\n").unwrap();
         fs::write(temp.path().join("Demo.lean"), "#check Nat\n").unwrap();
 
         let workspace = resolve(

@@ -9,9 +9,7 @@ use crate::cli::EvalSuite;
 use crate::error::{Error, Result};
 use crate::eval::labels::{GoldLabels, load_builtin};
 use crate::eval::memory;
-use crate::eval::scoring::{
-    EvaluationMetrics, GoldPair, ObservedPair, ObservedRun, TimingMetrics, score_run,
-};
+use crate::eval::scoring::{EvaluationMetrics, GoldPair, ObservedPair, ObservedRun, TimingMetrics, score_run};
 use crate::index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
 use crate::progress::Reporter;
 use crate::retrieval::{CandidateExplanation, RetrievalOutput, retrieve_candidates};
@@ -282,11 +280,7 @@ fn is_shown_queue_candidate(explanation: &CandidateExplanation) -> bool {
     })
 }
 
-fn enforce_suite_gates(
-    definition: &SuiteDefinition,
-    labels: &GoldLabels,
-    metrics: &EvaluationMetrics,
-) -> Result<()> {
+fn enforce_suite_gates(definition: &SuiteDefinition, labels: &GoldLabels, metrics: &EvaluationMetrics) -> Result<()> {
     if definition.suite != EvalSuite::Default {
         return Ok(());
     }

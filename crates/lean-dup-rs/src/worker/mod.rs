@@ -74,19 +74,13 @@ impl WorkerClient {
     }
 
     /// Return the worker and semantic algorithm versions for a Lake workspace.
-    pub fn version(
-        &self,
-        workspace_root: PathBuf,
-    ) -> Result<WorkerCall<WorkerVersion>, WorkerError> {
+    pub fn version(&self, workspace_root: PathBuf) -> Result<WorkerCall<WorkerVersion>, WorkerError> {
         let payload = serde_json::json!({ "workspace_root": workspace_root });
         self.call(Request::new(request_id(), Command::Version, payload))
     }
 
     /// Extract typed declaration rows for a batch of Lean modules.
-    pub fn extract_batch(
-        &self,
-        batch: ExtractBatch,
-    ) -> Result<WorkerCall<DeclarationRow>, WorkerError> {
+    pub fn extract_batch(&self, batch: ExtractBatch) -> Result<WorkerCall<DeclarationRow>, WorkerError> {
         let mut payload = protocol::modules_payload(&batch.workspace_root_string(), &batch.modules);
         payload["include_private"] = Value::Bool(batch.include_private);
         payload["include_generated"] = Value::Bool(batch.include_generated);
@@ -94,10 +88,7 @@ impl WorkerClient {
     }
 
     /// Compute Lean-owned semantic feature rows for a module batch.
-    pub fn features_batch(
-        &self,
-        batch: FeaturesBatch,
-    ) -> Result<WorkerCall<FeatureRow>, WorkerError> {
+    pub fn features_batch(&self, batch: FeaturesBatch) -> Result<WorkerCall<FeatureRow>, WorkerError> {
         let mut payload = protocol::modules_payload(&batch.workspace_root_string(), &batch.modules);
         payload["include_private"] = Value::Bool(batch.include_private);
         payload["include_generated"] = Value::Bool(batch.include_generated);
@@ -175,10 +166,7 @@ impl WorkerVersion {
             Ok(())
         } else {
             Err(WorkerError::Protocol {
-                message: format!(
-                    "worker is missing required capabilities: {}",
-                    missing.join(", ")
-                ),
+                message: format!("worker is missing required capabilities: {}", missing.join(", ")),
             })
         }
     }
@@ -451,9 +439,7 @@ fn request_id() -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{
-        ExtractBatch, FeaturesBatch, ModuleDescriptor, ProbeBatch, ProbePair, WorkerClient,
-    };
+    use super::{ExtractBatch, FeaturesBatch, ModuleDescriptor, ProbeBatch, ProbePair, WorkerClient};
 
     fn repo_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -481,12 +467,7 @@ mod tests {
         let version = call.rows.first().unwrap();
         assert_eq!(version.protocol_version, "lean-dup.worker.v1");
         for command in ["extract", "features", "probe", "doctor", "version"] {
-            assert!(
-                version
-                    .supported_commands
-                    .iter()
-                    .any(|value| value == command)
-            );
+            assert!(version.supported_commands.iter().any(|value| value == command));
         }
     }
 
@@ -520,11 +501,7 @@ mod tests {
                 include_generated: false,
             })
             .unwrap();
-        assert!(
-            call.rows
-                .iter()
-                .any(|row| row.qualified_name == "Tiny.same_left")
-        );
+        assert!(call.rows.iter().any(|row| row.qualified_name == "Tiny.same_left"));
     }
 
     #[test]
