@@ -13,7 +13,7 @@ Rust callers may rely on:
 
 - the five public commands: `extract`, `features`, `probe`, `doctor`, and `version`;
 - the eight response kinds: `version_result`, `doctor_result`, `declaration_row`, `feature_row`, `probe_result`,
-  `progress`, `complete`, and `error`;
+    `progress`, `complete`, and `error`;
 - stable schema-version and compatibility rules;
 - opaque declaration ids, semantic keys, and probe pair ids as values to store and compare;
 - machine-readable completion, progress, and structured error envelopes.
@@ -77,8 +77,8 @@ information leakage between the Lean worker, index builder, retrieval, and repor
 **Chosen: capability-first worker protocol.** Lean imports modules, emits semantic declaration rows and feature rows,
 and answers bounded probe requests. Rust stores opaque ids and keys, builds cache keys, persists indexes, retrieves
 candidates, ranks them, and renders reports. This design is deeper because the caller-facing interface is small,
-semantic facts remain Lean-owned, storage remains Rust-owned, and later prompts can change either implementation
-without changing the other side's abstraction.
+semantic facts remain Lean-owned, storage remains Rust-owned, and later prompts can change either implementation without
+changing the other side's abstraction.
 
 ## Transport Model
 
@@ -87,8 +87,8 @@ Each worker run receives exactly one UTF-8 JSON request object on stdin. The req
 - `schema_version`: required string. For this document, `lean-dup.worker.v1`.
 - `request_id`: required nonempty string chosen by Rust for correlation.
 - `command`: required string, one of `extract`, `features`, `probe`, `doctor`, or `version`.
-- `capabilities`: optional array of required capability names. The worker must reject a request if it cannot satisfy
-  any required capability.
+- `capabilities`: optional array of required capability names. The worker must reject a request if it cannot satisfy any
+    required capability.
 - `extensions`: optional object for optional, non-required v1 data.
 
 The worker writes UTF-8 JSONL response envelopes to stdout. Each line is a complete JSON object with these common
@@ -182,8 +182,8 @@ Request payload fields:
 Callers may rely on:
 
 - one `declaration_row` per declaration accepted by the request filters;
-- every emitted declaration id being stable within the command and suitable as the key for later feature/probe
-  requests under the same schema and cache context;
+- every emitted declaration id being stable within the command and suitable as the key for later feature/probe requests
+    under the same schema and cache context;
 - source spans being 1-based when Lean can supply them;
 - `statement_text` being human-facing display text only.
 
@@ -308,8 +308,8 @@ Payload fields:
 - `statement_text`: pretty-printed statement text for humans only.
 - `status_flags`: array of Lean-owned labels, such as generated or source-range-unavailable.
 
-`source_span.start` and `source_span.end` use 1-based `line` and `column` fields. A caller may show
-`statement_text`, but must not hash, parse, normalize, or compare it to derive semantic facts.
+`source_span.start` and `source_span.end` use 1-based `line` and `column` fields. A caller may show `statement_text`,
+but must not hash, parse, normalize, or compare it to derive semantic facts.
 
 ### `feature_row`
 
@@ -317,10 +317,10 @@ Payload fields:
 
 - `declaration_id`: opaque declaration id from the same schema and cache context.
 - `feature_version`: semantic feature algorithm version.
-- `fingerprints`: object with opaque string values for `statement`, `safe_binder_permutation`, `connective_shape`,
-  and `conclusion_shape`.
+- `fingerprints`: object with opaque string values for `statement`, `safe_binder_permutation`, `connective_shape`, and
+    `conclusion_shape`.
 - `role_features`: array of objects with `role`, `key`, and optional `display`. The `key` is opaque; `display` is
-  human-facing only.
+    human-facing only.
 - `binder_count`: nonnegative integer.
 - `low_signal_markers`: array of Lean-owned marker labels.
 
@@ -377,7 +377,7 @@ before `complete`.
 Payload fields:
 
 - `code`: one of `malformed_json`, `unsupported_schema`, `unsupported_command`, `invalid_request`, `import_failed`,
-  `missing_olean`, `probe_unavailable`, `worker_panic`, or `internal_error`.
+    `missing_olean`, `probe_unavailable`, `worker_panic`, or `internal_error`.
 - `fatal`: boolean.
 - `message`: short human-readable message.
 - `details`: optional bounded object or array.
@@ -461,35 +461,35 @@ that the worker supports every command and required capability before using it f
 ## Failure Behavior
 
 - **Import failure:** emit fatal `import_failed` when possible and exit nonzero. Rust discards partial rows and does not
-  update indexes.
+    update indexes.
 - **Missing compiled artifact:** emit `missing_olean`. `doctor` may report this as a failed or warning check depending
-  on `require_oleans`; index-building commands treat it as fatal when compiled artifacts are required.
-- **Malformed request JSON:** emit fatal `malformed_json` if enough of the request can be parsed to produce an
-  envelope. If not, exit nonzero and let Rust map the failure to worker startup/protocol failure.
+    on `require_oleans`; index-building commands treat it as fatal when compiled artifacts are required.
+- **Malformed request JSON:** emit fatal `malformed_json` if enough of the request can be parsed to produce an envelope.
+    If not, exit nonzero and let Rust map the failure to worker startup/protocol failure.
 - **Unsupported schema or command:** emit fatal `unsupported_schema` or `unsupported_command` before importing modules
-  or producing result rows.
+    or producing result rows.
 - **Worker panic or nonzero exit without `complete`:** Rust reports `worker_panic`, includes bounded stderr, and
-  discards partial stdout rows.
-- **Probe declaration unavailable:** emit nonfatal `probe_result` with `status = "unavailable"` unless the module
-  import failed. Missing declarations inside an imported environment do not invalidate other pair results.
+    discards partial stdout rows.
+- **Probe declaration unavailable:** emit nonfatal `probe_result` with `status = "unavailable"` unless the module import
+    failed. Missing declarations inside an imported environment do not invalidate other pair results.
 - **Internal worker error after partial output:** emit fatal `internal_error` when possible and exit nonzero. Rust
-  discards the command output because `complete` was not reached.
+    discards the command output because `complete` was not reached.
 
 ## Red Flag Review
 
 - **Shallow module:** avoided by specifying behavior-rich worker capabilities instead of a pass-through copy of current
-  Python rows or future index storage.
+    Python rows or future index storage.
 - **Pass-through wrapper:** avoided by keeping subprocess setup and framing inside the Rust worker runtime and exposing
-  semantic commands to callers.
+    semantic commands to callers.
 - **Temporal decomposition:** avoided by organizing commands around capabilities, not around build, insert, query, or
-  report phases.
+    report phases.
 - **Information leakage:** avoided by opaque declaration ids, opaque feature keys, human-only display text, and no
-  persistence layout in the protocol.
+    persistence layout in the protocol.
 - **Special-general mixture:** avoided by keeping KanProofs cleanup policy, ranking policy, report policy, and storage
-  policy outside the worker schema.
+    policy outside the worker schema.
 - **Conjoined methods:** avoided because each command has a standalone request/response contract and does not require a
-  caller to understand another command's implementation.
+    caller to understand another command's implementation.
 - **Hard-to-describe public API:** mitigated by one request shape, one envelope shape, five commands, and eight response
-  kinds.
+    kinds.
 - **Implementation details contaminating interface comments:** avoided by documenting caller guarantees and hidden
-  decisions rather than Lean traversal algorithms, storage layout, or migration internals.
+    decisions rather than Lean traversal algorithms, storage layout, or migration internals.

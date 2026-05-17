@@ -47,8 +47,7 @@ calculation, and future audit outputs can reuse the same metric definitions.
 
 `eval --suite default` runs the small fixture suite. It builds the local and external fixture workspaces, reuses
 canonical indexes through the normal cache layer, runs retrieval, and prints a compact table by default. The default
-suite is a quality gate: all gold positives must appear within recall@10 and no hard negative may enter the shown
-queue.
+suite is a quality gate: all gold positives must appear within recall@10 and no hard negative may enter the shown queue.
 
 `kanproofs-internal` and `kanproofs-mathlib` are explicit slow suites. They use built-in labels from the confirmed
 KanProofs reports and require existing compiled artifacts; they are not part of the default test suite.
@@ -58,17 +57,16 @@ All percentage-like metrics are reported as raw counts, such as `5/7`, so reader
 ## Red Flag Review
 
 - **Shallow module:** avoided by giving scoring one narrow operation with nontrivial label normalization and metric
-  policy hidden behind it.
+    policy hidden behind it.
 - **Pass-through wrapper:** avoided; the suite runner adds label loading, index orchestration, observation extraction,
-  timing, memory sampling, and quality gates.
+    timing, memory sampling, and quality gates.
 - **Temporal decomposition:** avoided by splitting modules around hidden knowledge: labels, scoring, suites, table
-  rendering, and memory.
+    rendering, and memory.
 - **Information leakage:** avoided because fixture and KanProofs paths live in suite definitions and label files, not
-  the scorer.
+    the scorer.
 - **Special-general mixture:** avoided because KanProofs labels are named slow suites; the scorer has no KanProofs
-  branches.
+    branches.
 - **Conjoined methods:** avoided because scoring accepts a complete observed run and does not share retrieval state.
 - **Hard-to-describe public API:** avoided; users run one named suite and get metrics.
 - **Implementation details contaminating interface comments:** avoided by documenting caller-visible metric contracts,
-  not SQLite layout, Lean traversal, or temporary migration details.
-
+    not SQLite layout, Lean traversal, or temporary migration details.

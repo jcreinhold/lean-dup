@@ -6,9 +6,9 @@ production audit engine.
 ## Design Note
 
 This layer owns Lake workspace discovery, module-root and source-file enumeration, Lake command invocation, cache-root
-and cache-key policy, CLI rendering, and progress/profile plumbing. Its smallest public interface is the
-`lean-dup-rs` binary plus one crate-level `run` entrypoint; all workspace, Lake, cache, progress, and rendering modules
-remain internal.
+and cache-key policy, CLI rendering, and progress/profile plumbing. Its smallest public interface is the `lean-dup-rs`
+binary plus one crate-level `run` entrypoint; all workspace, Lake, cache, progress, and rendering modules remain
+internal.
 
 These decisions must not leak upward or sideways:
 
@@ -57,8 +57,8 @@ are printed, so JSON stdout remains machine-clean.
 - **Temporal decomposition:** avoided by organizing modules around hidden decisions, not command execution steps.
 - **Information leakage:** avoided by keeping Lakefile parsing, cache-key ingredients, and rendering policy private.
 - **Special-general mixture:** avoided by keeping production ranking, protocol handling, and KanProofs policy out of
-  this foundation.
+    this foundation.
 - **Conjoined methods:** avoided by passing typed workspace and report values between modules.
 - **Hard-to-describe public API:** avoided; the public API is "run the CLI".
 - **Implementation details contaminating interface comments:** avoided by documenting caller guarantees rather than
-  parsing or hashing mechanics.
+    parsing or hashing mechanics.

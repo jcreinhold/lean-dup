@@ -39,7 +39,7 @@ Lean owns:
 - exact, permutation, connective, and conclusion fingerprints;
 - role-aware statement features, including generated/private visibility facts where Lean can supply them;
 - bounded semantic probes such as same-statement, safe binder reordering, structural specialization, and guarded
-  reducible-definition equality.
+    reducible-definition equality.
 
 Rust owns:
 
@@ -99,60 +99,55 @@ current Python mistake in a faster language.
 **Chosen: Lean semantic worker plus Rust audit engine.** Lean imports modules, extracts semantic rows, computes opaque
 fingerprints and role-aware features, and answers bounded probe requests. Rust stores and combines those facts through
 typed domain structs and index handles. This design is deeper because Rust has a smaller semantic interface, Lean
-expression traversal is hidden, cache/index choices stay out of Lean, and ordinary audits do not depend on a
-Lean/Rust FFI boundary. FFI remains an optional measured spike after batching and caching, not the production starting
-point.
+expression traversal is hidden, cache/index choices stay out of Lean, and ordinary audits do not depend on a Lean/Rust
+FFI boundary. FFI remains an optional measured spike after batching and caching, not the production starting point.
 
 ## Public Architecture
 
 The public architecture has five layers, each with a different abstraction.
 
-1. **Lean worker package.**
-   The worker exposes `extract`, `features`, `probe`, `doctor`, and `version`. These are semantic capabilities, not
-   storage phases. The worker may report structured progress and diagnostics, but callers must not depend on Lean
-   internal names, expression constructors, or traversal algorithms.
+1. **Lean worker package.** The worker exposes `extract`, `features`, `probe`, `doctor`, and `version`. These are
+    semantic capabilities, not storage phases. The worker may report structured progress and diagnostics, but callers
+    must not depend on Lean internal names, expression constructors, or traversal algorithms.
 
-2. **Versioned worker protocol.**
-   The protocol carries schema-versioned requests, responses, progress events, and structured errors. Declaration rows,
-   feature rows, and probe results are caller-facing facts. Lean types and Rust domain structs are the semantic model;
-   JSON and JSONL are transport encodings private to the worker runtime. Cache layout, SQLite tables, and report
-   formatting are not protocol facts. Prompt 02 owns the executable schema.
+1. **Versioned worker protocol.** The protocol carries schema-versioned requests, responses, progress events, and
+    structured errors. Declaration rows, feature rows, and probe results are caller-facing facts. Lean types and Rust
+    domain structs are the semantic model; JSON and JSONL are transport encodings private to the worker runtime. Cache
+    layout, SQLite tables, and report formatting are not protocol facts. Prompt 02 owns the executable schema.
 
-3. **Rust CLI engine.**
-   Rust discovers workspaces, resolves module roots, invokes Lake, locates and validates the worker, batches worker
-   requests, tracks progress/profile events, and coordinates audit workflows. Command-line parsing must not leak into
-   workspace discovery, Lake orchestration, indexing, ranking, or rendering modules.
+1. **Rust CLI engine.** Rust discovers workspaces, resolves module roots, invokes Lake, locates and validates the
+    worker, batches worker requests, tracks progress/profile events, and coordinates audit workflows. Command-line
+    parsing must not leak into workspace discovery, Lake orchestration, indexing, ranking, or rendering modules.
 
-4. **SQLite indexes.**
-   The index layer is the persisted source of truth for local and external indexes. It exposes operations such as
-   "build or reuse this index", "query postings for these semantic keys", and "hydrate these declaration handles".
-   Callers do not know table names, row IDs as semantic identity, insertion order, or transaction sequencing.
+1. **SQLite indexes.** The index layer is the persisted source of truth for local and external indexes. It exposes
+    operations such as "build or reuse this index", "query postings for these semantic keys", and "hydrate these
+    declaration handles". Callers do not know table names, row IDs as semantic identity, insertion order, or
+    transaction sequencing.
 
-5. **Retrieval, ranking, and reporting.**
-   Retrieval uses exact/permutation/connective/conclusion fingerprints and role-weighted postings to return bounded
-   candidate sets. Ranking consumes candidates, Lean probe results, source-reference facts, and review profiles to
-   produce signals, blockers, priorities, actions, and replacement hints. Renderers consume a stable audit model to
-   produce text, JSON, `show`, and baseline diff output.
+1. **Retrieval, ranking, and reporting.** Retrieval uses exact/permutation/connective/conclusion fingerprints and
+    role-weighted postings to return bounded candidate sets. Ranking consumes candidates, Lean probe results,
+    source-reference facts, and review profiles to produce signals, blockers, priorities, actions, and replacement
+    hints. Renderers consume a stable audit model to produce text, JSON, `show`, and baseline diff output.
 
 ## Information-Hiding Boundaries
 
 The rewrite is organized around decisions that are likely to change.
 
 - **Lean expression semantics.** Lean hides expression traversal, binder dependency, universe-sensitive
-  canonicalization, generated declaration detection, and reducibility guards.
+    canonicalization, generated declaration detection, and reducibility guards.
 - **Worker protocol.** The protocol hides transport encoding, process framing, schema compatibility, stderr policy,
-  progress delivery, structured error mapping, and worker-version validation from audit logic.
+    progress delivery, structured error mapping, and worker-version validation from audit logic.
 - **Index persistence.** The index layer hides SQLite schema, cache-key storage, posting tables, declaration hydration,
-  and cache invalidation mechanics.
+    and cache invalidation mechanics.
 - **Retrieval strategy.** Retrieval hides rare-key weighting, broad-key suppression, top-k heap maintenance, pruning
-  diagnostics, and origin-aware pairing.
+    diagnostics, and origin-aware pairing.
 - **Ranking policy.** Ranking hides confidence adjustment, blockers, suppression of weaker groups, review profiles, and
-  recommended action selection.
+    recommended action selection.
 - **Report rendering.** Rendering hides terminal layout, JSON shaping, `show` detail expansion, and baseline diff
-  presentation.
+    presentation.
 
-Each boundary should have a capability-oriented interface. A caller should ask for the result it needs, not assemble
-the lower-level steps itself.
+Each boundary should have a capability-oriented interface. A caller should ask for the result it needs, not assemble the
+lower-level steps itself.
 
 ## POSD Doctrine And Red Flags
 
@@ -190,26 +185,26 @@ prompt 19 proves, with measurements, that an FFI migration is worth the safety a
 The prompt sequence is the migration plan. The current Python implementation supplies lessons and regression examples
 until switchover; it is not a parity target or the target architecture.
 
-| Prompt | Responsibility |
-| --- | --- |
-| 02 | Specify the versioned worker protocol/schema, cache keys, and worker error model. |
-| 03 | Create the Lean package foundation and worker command skeleton. |
-| 04 | Move declaration extraction into Lean. |
-| 05 | Implement Lean canonical fingerprints. |
-| 06 | Emit Lean role-aware features and low-signal markers. |
-| 07 | Implement batched Lean semantic probes. |
-| 08 | Create the Rust CLI and workspace foundation. |
-| 09 | Connect Rust to the Lean worker runtime. |
-| 10 | Build canonical local and external SQLite indexes. |
-| 11 | Implement weighted top-k retrieval over index postings. |
-| 12 | Add evaluation harnesses, gold positives, hard negatives, and metrics. |
-| 13 | Implement ranking, review actions, and replacement hints. |
-| 14 | Implement reporting, `show`, review profiles, baselines, and diff mode. |
-| 15 | Profile realistic workloads and optimize measured bottlenecks. |
-| 16 | Prove capability parity through regression validation, switch docs/install to the production binary, and remove superseded Python only when safe. |
-| 17 | Validate full KanProofs and mathlib audits and update cleanup findings. |
-| 18 | Harden CI, packaging, versioning, reproducibility, and release docs. |
-| 19 | Optional FFI spike only after measured subprocess overhead dominates. |
+| Prompt | Responsibility                                                                                                                                    |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 02     | Specify the versioned worker protocol/schema, cache keys, and worker error model.                                                                 |
+| 03     | Create the Lean package foundation and worker command skeleton.                                                                                   |
+| 04     | Move declaration extraction into Lean.                                                                                                            |
+| 05     | Implement Lean canonical fingerprints.                                                                                                            |
+| 06     | Emit Lean role-aware features and low-signal markers.                                                                                             |
+| 07     | Implement batched Lean semantic probes.                                                                                                           |
+| 08     | Create the Rust CLI and workspace foundation.                                                                                                     |
+| 09     | Connect Rust to the Lean worker runtime.                                                                                                          |
+| 10     | Build canonical local and external SQLite indexes.                                                                                                |
+| 11     | Implement weighted top-k retrieval over index postings.                                                                                           |
+| 12     | Add evaluation harnesses, gold positives, hard negatives, and metrics.                                                                            |
+| 13     | Implement ranking, review actions, and replacement hints.                                                                                         |
+| 14     | Implement reporting, `show`, review profiles, baselines, and diff mode.                                                                           |
+| 15     | Profile realistic workloads and optimize measured bottlenecks.                                                                                    |
+| 16     | Prove capability parity through regression validation, switch docs/install to the production binary, and remove superseded Python only when safe. |
+| 17     | Validate full KanProofs and mathlib audits and update cleanup findings.                                                                           |
+| 18     | Harden CI, packaging, versioning, reproducibility, and release docs.                                                                              |
+| 19     | Optional FFI spike only after measured subprocess overhead dominates.                                                                             |
 
 ## Success Criteria
 
@@ -232,13 +227,13 @@ explain common workflows and the architecture boundaries; and the auditor remain
 
 - **Shallow module:** avoided by making this document a boundary charter rather than a file-by-file wrapper list.
 - **Pass-through wrapper:** avoided by requiring capability-oriented Lean, worker, index, retrieval, ranking, and
-  rendering interfaces.
+    rendering interfaces.
 - **Temporal decomposition:** avoided by organizing around hidden decisions, not audit execution order.
 - **Information leakage:** explicitly guarded at Lean semantics, worker protocol, SQLite, retrieval, ranking, and
-  rendering boundaries.
+    rendering boundaries.
 - **Special-general mixture:** avoided by keeping Lean semantic facts and core ranking general while KanProofs-specific
-  expectations live in fixtures, reports, or review profiles.
+    expectations live in fixtures, reports, or review profiles.
 - **Conjoined methods:** avoided by requiring typed outputs between subsystems rather than shared mutable phase state.
 - **Hard-to-describe public API:** kept small at this level; prompt 02 owns detailed protocol names and schema fields.
 - **Implementation details contaminating interface comments:** avoided by stating what callers may rely on, not how
-  tables, caches, Lean traversals, or temporary migration scaffolding work.
+    tables, caches, Lean traversals, or temporary migration scaffolding work.
