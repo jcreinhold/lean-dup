@@ -11,7 +11,7 @@ version = "0.1.0"
 lean-dup = "lean_dup.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8,<9", "ruff"]
+dev = ["pytest>=9.0.3,<10", "ruff"]
 
 [build-system]
 build-backend = "uv_build"
