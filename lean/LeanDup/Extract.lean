@@ -21,6 +21,7 @@ def version : String := "extract.declarations.v1"
 structure ModuleSpec where
   module : String
   origin : String
+  sourceRoot? : Option String := none
   deriving Repr
 
 /-- Extract errors are mapped by the worker into protocol error envelopes. -/
@@ -144,13 +145,17 @@ private def pointJson (line column : Nat) : Json :=
 private def moduleFile (workspaceRoot moduleName : String) : String :=
   s!"{workspaceRoot}/{moduleName.replace "." "/"}.lean"
 
-private def sourceSpanJson? (options : Options) (moduleName : String)
+private def sourceSpanJson? (options : Options) (moduleSpec : ModuleSpec)
     (range? : Option DeclarationRanges) : Option Json :=
-  match options.workspaceRoot?, range? with
+  let sourceRoot? :=
+    match moduleSpec.sourceRoot? with
+    | some root => some root
+    | none => options.workspaceRoot?
+  match sourceRoot?, range? with
   | some workspaceRoot, some ranges =>
       some <|
         Json.mkObj
-          [ ("file", Json.str (moduleFile workspaceRoot moduleName))
+          [ ("file", Json.str (moduleFile workspaceRoot moduleSpec.module))
           , ("start", pointJson ranges.range.pos.line ranges.range.pos.column)
           , ("end", pointJson ranges.range.endPos.line ranges.range.endPos.column)
           ]
@@ -230,7 +235,7 @@ private def rowPayload (options : Options) (moduleSpec : ModuleSpec) (declName :
     (typeText : String) : Json :=
   let kind := declarationKind constInfo
   let vis := visibility declName
-  let sourceSpan? := sourceSpanJson? options moduleSpec.module range?
+  let sourceSpan? := sourceSpanJson? options moduleSpec range?
   Json.mkObj
     [ ("declaration_id", Json.str (declarationId moduleSpec declName))
     , ("origin", Json.str moduleSpec.origin)

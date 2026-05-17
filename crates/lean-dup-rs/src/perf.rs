@@ -300,10 +300,6 @@ fn workload_command(args: &PerfArgs) -> Vec<String> {
         .kanproofs_workspace
         .clone()
         .unwrap_or_else(|| PathBuf::from("/Users/jcreinhold/Code/kan-proofs"));
-    let mathlib = args
-        .mathlib_workspace
-        .clone()
-        .unwrap_or_else(|| PathBuf::from("/Users/jcreinhold/Code/mathlib4"));
     let repo = repo_root();
     let mut command = vec!["lean-dup-rs".to_owned(), "--profile".to_owned()];
     match args.workload {
@@ -311,8 +307,11 @@ fn workload_command(args: &PerfArgs) -> Vec<String> {
             command.extend([
                 "index-mathlib".to_owned(),
                 "--workspace".to_owned(),
-                mathlib.display().to_string(),
+                kanproofs.display().to_string(),
             ]);
+            if let Some(mathlib) = &args.mathlib_workspace {
+                command.extend(["--mathlib-workspace".to_owned(), mathlib.display().to_string()]);
+            }
             if args.workload == PerfWorkload::ColdMathlibIndex {
                 command.push("--force".to_owned());
             }
@@ -325,11 +324,12 @@ fn workload_command(args: &PerfArgs) -> Vec<String> {
                 "--module".to_owned(),
                 "KanProofs.Mathlib4Backports".to_owned(),
                 "--compare-mathlib".to_owned(),
-                "--mathlib-workspace".to_owned(),
-                mathlib.display().to_string(),
                 "--format".to_owned(),
                 "json".to_owned(),
             ]);
+            if let Some(mathlib) = &args.mathlib_workspace {
+                command.extend(["--mathlib-workspace".to_owned(), mathlib.display().to_string()]);
+            }
         }
         PerfWorkload::KanproofsFullNoMathlib => {
             command.extend([
@@ -350,11 +350,12 @@ fn workload_command(args: &PerfArgs) -> Vec<String> {
                 "--module".to_owned(),
                 "KanProofs".to_owned(),
                 "--compare-mathlib".to_owned(),
-                "--mathlib-workspace".to_owned(),
-                mathlib.display().to_string(),
                 "--format".to_owned(),
                 "json".to_owned(),
             ]);
+            if let Some(mathlib) = &args.mathlib_workspace {
+                command.extend(["--mathlib-workspace".to_owned(), mathlib.display().to_string()]);
+            }
         }
         PerfWorkload::FixtureAudit => {
             command.extend([

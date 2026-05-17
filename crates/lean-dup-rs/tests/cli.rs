@@ -32,6 +32,19 @@ fn help_lists_foundation_commands() {
 }
 
 #[test]
+fn index_mathlib_help_has_no_standalone_mathlib_default() {
+    let assert = Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .args(["index-mathlib", "--help"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+
+    assert!(stdout.contains("--workspace"));
+    assert!(!stdout.contains("/Users/jcreinhold/Code/mathlib4"));
+}
+
+#[test]
 fn hidden_perf_fixture_workload_emits_json_metrics() {
     let cache = tempfile::TempDir::new().unwrap();
     let output = tempfile::NamedTempFile::new().unwrap();

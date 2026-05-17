@@ -12,11 +12,12 @@ use crate::perf::{self, CostClass};
 use crate::progress::Reporter;
 use crate::worker::{
     DeclarationRow, ExtractBatch, FeatureRow, FeaturesBatch, Fingerprints, ModuleDescriptor, ProbePair, ProbeResult,
-    RoleFeature, SourceSpan, WorkerClient, WorkerDiagnostic, WorkerEvent, WorkerVersion,
+    RoleFeature, SourceSpan, WorkerClient, WorkerDiagnostic, WorkerError, WorkerEvent, WorkerVersion,
 };
 use crate::workspace::{self, ResolvedWorkspace};
 
 const INDEX_SCHEMA_VERSION: &str = "lean-dup.index.sqlite.v1";
+const MATHLIB_MODULE_BATCH_SIZE: usize = 20;
 
 /// Builds, resolves, and opens persisted declaration indexes.
 ///
@@ -37,6 +38,7 @@ pub(crate) struct IndexStore {
 #[derive(Debug, Clone)]
 pub(crate) struct IndexBuildRequest {
     pub(crate) workspace: ResolvedWorkspace,
+    pub(crate) execution_root: Option<PathBuf>,
     pub(crate) label: String,
     pub(crate) module_root: String,
     pub(crate) origin: String,
@@ -47,6 +49,14 @@ pub(crate) struct IndexBuildRequest {
     pub(crate) kind: IndexBuildKind,
 }
 
+impl IndexBuildRequest {
+    fn execution_root(&self) -> PathBuf {
+        self.execution_root
+            .clone()
+            .unwrap_or_else(|| self.workspace.root.clone())
+    }
+}
+
 /// Distinguishes local and external cache-key policy without changing the
 /// storage interface used by retrieval and audit callers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -55,6 +65,7 @@ pub(crate) struct IndexBuildRequest {
 pub(crate) enum IndexBuildKind {
     Local,
     External,
+    ProjectMathlib,
 }
 
 /// Result of building or reusing a persisted index.
@@ -301,7 +312,7 @@ impl IndexStore {
     ) -> Result<IndexSummary> {
         require_oleans_if_requested(&request)?;
 
-        let version_call = reporter.measure("worker.version", |_| worker.version(request.workspace.root.clone()))?;
+        let version_call = reporter.measure("worker.version", |_| worker.version(request.execution_root()))?;
         record_worker_events(reporter, &version_call.events);
         let version = version_call.rows.into_iter().next().ok_or_else(|| Error::Index {
             message: "worker version returned no rows".to_owned(),
@@ -332,29 +343,37 @@ impl IndexStore {
             });
         }
 
-        let modules = modules_for(&request);
-        let declarations = reporter.measure("worker.extract", |_| {
-            worker.extract_batch(ExtractBatch {
-                workspace_root: request.workspace.root.clone(),
-                modules: modules.clone(),
-                include_private: request.include_private,
-                include_generated: request.include_generated,
-            })
-        })?;
-        record_worker_events(reporter, &declarations.events);
+        let mut diagnostics = diagnostics_to_strings(version_call.diagnostics);
+        if request.kind == IndexBuildKind::ProjectMathlib {
+            let build = write_batched_sqlite_index(&index_path, &cache_key_json, &request, worker, reporter)?;
+            diagnostics.extend(build.diagnostics);
+        } else {
+            let modules = modules_for(&request);
+            let declarations = reporter.measure("worker.extract", |_| {
+                worker.extract_batch(ExtractBatch {
+                    workspace_root: request.execution_root(),
+                    modules: modules.clone(),
+                    include_private: request.include_private,
+                    include_generated: request.include_generated,
+                })
+            })?;
+            record_worker_events(reporter, &declarations.events);
 
-        let features = reporter.measure("worker.features", |_| {
-            worker.features_batch(FeaturesBatch {
-                workspace_root: request.workspace.root.clone(),
-                modules,
-                declaration_ids: None,
-                include_private: request.include_private,
-                include_generated: request.include_generated,
-            })
-        })?;
-        record_worker_events(reporter, &features.events);
+            let features = reporter.measure("worker.features", |_| {
+                worker.features_batch(FeaturesBatch {
+                    workspace_root: request.execution_root(),
+                    modules,
+                    declaration_ids: None,
+                    include_private: request.include_private,
+                    include_generated: request.include_generated,
+                })
+            })?;
+            record_worker_events(reporter, &features.events);
 
-        write_sqlite_index(&index_path, &cache_key_json, &request, declarations.rows, features.rows)?;
+            write_sqlite_index(&index_path, &cache_key_json, &request, declarations.rows, features.rows)?;
+            diagnostics.extend(diagnostics_to_strings(declarations.diagnostics));
+            diagnostics.extend(diagnostics_to_strings(features.diagnostics));
+        }
         self.write_latest(&request.label, &index_dir)?;
 
         let declaration_count = declaration_count(&index_path)?;
@@ -364,10 +383,6 @@ impl IndexStore {
             Some(declaration_count as u64),
             format!("built index {}", index_path.display()),
         );
-
-        let mut diagnostics = diagnostics_to_strings(version_call.diagnostics);
-        diagnostics.extend(diagnostics_to_strings(declarations.diagnostics));
-        diagnostics.extend(diagnostics_to_strings(features.diagnostics));
 
         Ok(IndexSummary {
             label: request.label,
@@ -617,11 +632,16 @@ fn require_oleans_if_requested(request: &IndexBuildRequest) -> Result<()> {
     if !request.require_oleans {
         return Ok(());
     }
+    let olean_root = if request.kind == IndexBuildKind::ProjectMathlib {
+        request.workspace.root.clone()
+    } else {
+        request.execution_root()
+    };
     let missing = request
         .workspace
         .source_files
         .iter()
-        .filter(|source| !workspace::olean_exists(&request.workspace.root, &source.module))
+        .filter(|source| !workspace::olean_exists(&olean_root, &source.module))
         .map(|source| source.module.clone())
         .collect::<Vec<_>>();
     if missing.is_empty() {
@@ -638,6 +658,8 @@ fn require_oleans_if_requested(request: &IndexBuildRequest) -> Result<()> {
 }
 
 fn modules_for(request: &IndexBuildRequest) -> Vec<ModuleDescriptor> {
+    let source_root = (request.execution_root().as_path() != request.workspace.root.as_path())
+        .then(|| request.workspace.root.clone());
     request
         .workspace
         .source_files
@@ -645,6 +667,7 @@ fn modules_for(request: &IndexBuildRequest) -> Vec<ModuleDescriptor> {
         .map(|source| ModuleDescriptor {
             module: source.module.clone(),
             origin: request.origin.clone(),
+            source_root: source_root.clone(),
         })
         .collect()
 }
@@ -736,6 +759,202 @@ fn write_sqlite_index(
         replace_file(&temp_path, index_path)?;
         Ok(())
     })
+}
+
+#[derive(Debug)]
+struct BatchedIndexBuild {
+    diagnostics: Vec<String>,
+}
+
+struct BatchInsertContext<'a> {
+    request: &'a IndexBuildRequest,
+    worker: &'a WorkerClient,
+    total: usize,
+    written: usize,
+    diagnostics: Vec<String>,
+}
+
+fn write_batched_sqlite_index(
+    index_path: &Path,
+    cache_key_json: &str,
+    request: &IndexBuildRequest,
+    worker: &WorkerClient,
+    reporter: &mut Reporter,
+) -> Result<BatchedIndexBuild> {
+    let Some(index_dir) = index_path.parent() else {
+        return Err(Error::Index {
+            message: format!("index path has no parent: {}", index_path.display()),
+        });
+    };
+    create_dir_all(index_dir)?;
+    let temp_path = index_path.with_extension("tmp.sqlite");
+    if temp_path.exists() {
+        remove_file(&temp_path)?;
+    }
+    let mut connection = Connection::open(&temp_path)?;
+    initialize_schema(&connection)?;
+    write_metadata(&connection, cache_key_json, request)?;
+
+    let modules = modules_for(request);
+    let total = modules.len();
+    let mut context = BatchInsertContext {
+        request,
+        worker,
+        total,
+        written: 0,
+        diagnostics: Vec::new(),
+    };
+    reporter.event(
+        "index.mathlib",
+        Some(0),
+        Some(total as u64),
+        format!("building mathlib index in batches of {MATHLIB_MODULE_BATCH_SIZE} modules"),
+    );
+    for batch in modules.chunks(MATHLIB_MODULE_BATCH_SIZE) {
+        context.insert_module_batch(&mut connection, reporter, batch.to_vec())?;
+    }
+    replace_file(&temp_path, index_path)?;
+    Ok(BatchedIndexBuild {
+        diagnostics: context.diagnostics,
+    })
+}
+
+impl<'a> BatchInsertContext<'a> {
+    fn insert_module_batch(
+        &mut self,
+        connection: &mut Connection,
+        reporter: &mut Reporter,
+        modules: Vec<ModuleDescriptor>,
+    ) -> Result<()> {
+        let label = module_batch_label(&modules);
+        reporter.event(
+            "index.mathlib.batch",
+            Some(self.written as u64),
+            Some(self.total as u64),
+            format!("starting {label}"),
+        );
+        match extract_and_insert_batch(connection, self.request, self.worker, reporter, modules.clone()) {
+            Ok(batch_diagnostics) => {
+                self.diagnostics.extend(batch_diagnostics);
+                self.written += modules.len();
+                reporter.event(
+                    "index.mathlib.batch",
+                    Some(self.written as u64),
+                    Some(self.total as u64),
+                    format!("finished {label}"),
+                );
+                Ok(())
+            }
+            Err(Error::Worker(error)) if is_heartbeat_error(&error) && modules.len() > 1 => {
+                reporter.event(
+                    "index.mathlib.batch",
+                    Some(self.written as u64),
+                    Some(self.total as u64),
+                    format!("splitting heartbeat-limited batch {label}"),
+                );
+                let mid = modules.len() / 2;
+                let right = modules[mid..].to_vec();
+                let left = modules[..mid].to_vec();
+                self.insert_module_batch(connection, reporter, left)?;
+                self.insert_module_batch(connection, reporter, right)
+            }
+            Err(Error::Worker(error)) if is_heartbeat_error(&error) => Err(Error::Index {
+                message: format!("mathlib module batch failed after splitting to {label}: {error}"),
+            }),
+            Err(error) => Err(error),
+        }
+    }
+}
+
+fn extract_and_insert_batch(
+    connection: &mut Connection,
+    request: &IndexBuildRequest,
+    worker: &WorkerClient,
+    reporter: &mut Reporter,
+    modules: Vec<ModuleDescriptor>,
+) -> Result<Vec<String>> {
+    let declarations = reporter.measure("worker.extract", |_| {
+        worker.extract_batch(ExtractBatch {
+            workspace_root: request.execution_root(),
+            modules: modules.clone(),
+            include_private: request.include_private,
+            include_generated: request.include_generated,
+        })
+    })?;
+    record_worker_events(reporter, &declarations.events);
+    let declaration_ids = declarations
+        .rows
+        .iter()
+        .map(|row| row.declaration_id.clone())
+        .collect::<Vec<_>>();
+    let features = reporter.measure("worker.features", |_| {
+        worker.features_batch(FeaturesBatch {
+            workspace_root: request.execution_root(),
+            modules,
+            declaration_ids: Some(declaration_ids),
+            include_private: request.include_private,
+            include_generated: request.include_generated,
+        })
+    })?;
+    record_worker_events(reporter, &features.events);
+    let mut diagnostics = diagnostics_to_strings(declarations.diagnostics);
+    diagnostics.extend(diagnostics_to_strings(features.diagnostics));
+    perf::record_count(
+        CostClass::SqliteIndex,
+        "sqlite.index.declarations",
+        declarations.rows.len() as u64,
+    );
+    perf::record_count(
+        CostClass::SqliteIndex,
+        "sqlite.index.features",
+        features.rows.len() as u64,
+    );
+    perf::measure_result(CostClass::SqliteIndex, "sqlite.index.write_batch", || {
+        insert_declaration_rows(connection, declarations.rows, features.rows)
+    })?;
+    Ok(diagnostics)
+}
+
+fn insert_declaration_rows(
+    connection: &mut Connection,
+    declarations: Vec<DeclarationRow>,
+    features: Vec<FeatureRow>,
+) -> Result<()> {
+    let features_by_id = features
+        .into_iter()
+        .map(|feature| (feature.declaration_id.clone(), feature))
+        .collect::<HashMap<_, _>>();
+    let transaction = connection.transaction()?;
+    for declaration in declarations {
+        let Some(feature) = features_by_id.get(&declaration.declaration_id) else {
+            return Err(Error::Index {
+                message: format!(
+                    "worker emitted declaration without feature row: {}",
+                    declaration.qualified_name
+                ),
+            });
+        };
+        insert_declaration(&transaction, &declaration, feature)?;
+    }
+    transaction.commit()?;
+    Ok(())
+}
+
+fn module_batch_label(modules: &[ModuleDescriptor]) -> String {
+    match (modules.first(), modules.last()) {
+        (Some(first), Some(last)) if first.module == last.module => first.module.clone(),
+        (Some(first), Some(last)) => format!("{}..{}", first.module, last.module),
+        _ => "empty batch".to_owned(),
+    }
+}
+
+fn is_heartbeat_error(error: &WorkerError) -> bool {
+    match error {
+        WorkerError::WorkerDiagnostic { diagnostics } => diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("maximum number of heartbeats") || diagnostic.message.contains("timeout at")
+        }),
+        _ => false,
+    }
 }
 
 fn initialize_schema(connection: &Connection) -> Result<()> {
@@ -1290,6 +1509,7 @@ mod tests {
 
         let request = super::IndexBuildRequest {
             workspace,
+            execution_root: None,
             label: "fixture".to_owned(),
             module_root: "External".to_owned(),
             origin: "external:fixture".to_owned(),
@@ -1467,6 +1687,7 @@ name = "B"
     fn request_for(workspace: ResolvedWorkspace, module_root: &str) -> IndexBuildRequest {
         IndexBuildRequest {
             workspace,
+            execution_root: None,
             label: "fixture".to_owned(),
             module_root: module_root.to_owned(),
             origin: "external:fixture".to_owned(),

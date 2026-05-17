@@ -21,6 +21,7 @@ pub(crate) struct ProfileTiming {
 pub(crate) struct Reporter {
     progress_enabled: bool,
     profile_enabled: bool,
+    live_progress: bool,
     started: Instant,
     events: Vec<ProgressEvent>,
     timings: Vec<ProfileTiming>,
@@ -31,9 +32,17 @@ impl Reporter {
         Self {
             progress_enabled,
             profile_enabled,
+            live_progress: false,
             started: Instant::now(),
             events: Vec::new(),
             timings: Vec::new(),
+        }
+    }
+
+    pub(crate) fn new_live(progress_enabled: bool, profile_enabled: bool) -> Self {
+        Self {
+            live_progress: true,
+            ..Self::new(progress_enabled, profile_enabled)
         }
     }
 
@@ -47,13 +56,18 @@ impl Reporter {
         if !self.progress_enabled {
             return;
         }
-        self.events.push(ProgressEvent {
+        let event = ProgressEvent {
             phase: phase.into(),
             current,
             total,
             message: message.into(),
             elapsed_ms: self.started.elapsed().as_millis(),
-        });
+        };
+        if self.live_progress {
+            eprintln!("{}", format_progress_event(&event));
+        } else {
+            self.events.push(event);
+        }
     }
 
     pub(crate) fn timing(&mut self, phase: impl Into<String>, duration: Duration) {
@@ -86,6 +100,20 @@ impl Reporter {
     }
 }
 
+pub(crate) fn format_progress_event(event: &ProgressEvent) -> String {
+    let count = match (event.current, event.total) {
+        (Some(current), Some(total)) => format!(" {current}/{total}"),
+        (Some(current), None) => format!(" {current}"),
+        _ => String::new(),
+    };
+    format!(
+        "progress.{phase}{count}: {message} ({elapsed_ms}ms)",
+        phase = event.phase,
+        message = event.message,
+        elapsed_ms = event.elapsed_ms
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::Reporter;
@@ -100,5 +128,13 @@ mod tests {
         assert_eq!(reporter.events()[0].current, Some(1));
         assert_eq!(reporter.timings()[0].phase, "workspace");
         assert_eq!(reporter.timings()[0].elapsed_ms, 7);
+    }
+
+    #[test]
+    fn live_progress_does_not_buffer_duplicate_events() {
+        let mut reporter = Reporter::new_live(true, false);
+        reporter.event("workspace", Some(1), Some(1), "resolved");
+
+        assert!(reporter.events().is_empty());
     }
 }

@@ -32,9 +32,9 @@ cargo run -q -p lean-dup-rs -- perf --workload kanproofs-targeted-mathlib --cach
 cargo run -q -p lean-dup-rs -- perf --workload kanproofs-full-no-mathlib --cache-root target/lean-dup-perf/kanproofs-full-no-mathlib-cache --output target/lean-dup-perf/reports/kanproofs-full-no-mathlib.json
 ```
 
-The harness defaults to `/Users/jcreinhold/Code/kan-proofs`, `/Users/jcreinhold/Code/mathlib4`, and
-`target/lean-dup-perf/cache`. Normal commands still default to the common cache root `~/.cache/lean-dup` unless
-`LEAN_DUP_CACHE_DIR` is set.
+The harness defaults to `/Users/jcreinhold/Code/kan-proofs` and `target/lean-dup-perf/cache`. Mathlib workloads now use
+the audited project's pinned `.lake/packages/mathlib` by default; `--mathlib-workspace` is only an explicit source-root
+override. Normal commands still default to the common cache root `~/.cache/lean-dup` unless `LEAN_DUP_CACHE_DIR` is set.
 
 After the first baseline pass, `lake update` was run in all three relevant Lake workspaces:
 
@@ -48,6 +48,22 @@ The lean-dup worker workspace was already up to date. KanProofs updated its math
 matching cache. The concrete KanProofs backport modules then built successfully. A full `lake build Mathlib` in
 `/Users/jcreinhold/Code/mathlib4` was intentionally stopped at 1254/8435 targets because it was broader than this pass
 and not required to validate the lean-dup worker.
+
+## Project-Centered Mathlib Correction
+
+The root-cause follow-up changed the `index-mathlib` boundary from standalone mathlib-workspace indexing to
+project-centered dependency indexing. The module now owns Lake package discovery, the pinned mathlib source root, the
+worker execution root, source-span attribution, module batching, and SQLite finalization. The public command surface is
+still one request: build the mathlib comparison index for this project.
+
+Rejected: running `lean-dup` inside `/Users/jcreinhold/Code/mathlib4` or requiring shell scripts to assemble the right
+Lake/cache state. That leaks transport, package-layout, and cache policy to the operator.
+
+Chosen: resolve the local project's `.lake/packages/mathlib`, run the worker through the local project's `lake env`, and
+attribute rows to the pinned mathlib source files. This is deeper because audit and index callers do not learn whether
+the implementation uses JSONL, module batches, SQLite temp files, or source-root overrides. The Python-era behavior
+intentionally discarded here is treating mathlib as a separate global workspace that callers must manually point at for
+every project.
 
 ## Accepted Optimization
 

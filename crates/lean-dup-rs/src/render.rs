@@ -4,7 +4,7 @@ use crate::cli::{OutputFormat, ReviewProfile};
 use crate::commands::{AuditReport, DiffReport, DoctorReport, IndexReport, Outcome, Report, ShowReport};
 use crate::error::Result;
 use crate::perf::{self, CostClass};
-use crate::progress::Reporter;
+use crate::progress::{Reporter, format_progress_event};
 use crate::ranking::{RankedGroup, ReviewAction, ReviewPriority, ReviewRelation};
 
 pub(crate) fn write_outcome<O: Write, E: Write>(outcome: Outcome, stdout: &mut O, stderr: &mut E) -> Result<()> {
@@ -24,18 +24,7 @@ pub(crate) fn write_outcome<O: Write, E: Write>(outcome: Outcome, stdout: &mut O
 
 fn write_report<E: Write>(reporter: &Reporter, stderr: &mut E) -> Result<()> {
     for event in reporter.events() {
-        let count = match (event.current, event.total) {
-            (Some(current), Some(total)) => format!(" {current}/{total}"),
-            (Some(current), None) => format!(" {current}"),
-            _ => String::new(),
-        };
-        writeln!(
-            stderr,
-            "progress.{phase}{count}: {message} ({elapsed_ms}ms)",
-            phase = event.phase,
-            message = event.message,
-            elapsed_ms = event.elapsed_ms
-        )?;
+        writeln!(stderr, "{}", format_progress_event(event))?;
     }
     for timing in reporter.timings() {
         writeln!(

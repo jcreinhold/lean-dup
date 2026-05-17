@@ -274,6 +274,8 @@ pub struct WorkerDiagnostic {
 pub struct ModuleDescriptor {
     pub module: String,
     pub origin: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_root: Option<PathBuf>,
 }
 
 /// Input for declaration extraction.
@@ -464,6 +466,7 @@ mod tests {
         vec![ModuleDescriptor {
             module: "Tiny.Basic".to_owned(),
             origin: "workspace".to_owned(),
+            source_root: None,
         }]
     }
 

@@ -92,7 +92,8 @@ private unsafe def handleDoctor (request : Request) : IO (Except ProtocolError (
 private def toExtractModules (modules : Array ModuleDescriptor) : Array LeanDup.Extract.ModuleSpec :=
   modules.map fun descriptor =>
     { module := descriptor.module
-      origin := descriptor.origin }
+      origin := descriptor.origin
+      sourceRoot? := descriptor.sourceRoot? }
 
 private def extractErrorCode : LeanDup.Extract.ErrorKind → ErrorCode
   | .invalidRequest => .invalidRequest

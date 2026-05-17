@@ -131,6 +131,7 @@ end CheckStatus
 structure ModuleDescriptor where
   module : String
   origin : String
+  sourceRoot? : Option String := none
   deriving Repr
 
 /-- A parsed worker request with command-specific payload left opaque. -/
@@ -484,7 +485,14 @@ private def parseModuleDescriptor
         | .ok origin =>
             if origin.isEmpty then pure "workspace" else pure origin
         | .error _ => pure "workspace"
-      pure { module := moduleName, origin := origin }
+      let sourceRoot? ←
+        match optionalJsonField json "source_root" with
+        | none | some Json.null => pure none
+        | some (Json.str value) =>
+            if value.isEmpty then pure none else pure (some value)
+        | some _ =>
+            throw <| invalidRequest (some request.requestId) (some request.command) "`source_root` must be a string or null"
+      pure { module := moduleName, origin := origin, sourceRoot? := sourceRoot? }
   | _ =>
       throw <| invalidRequest (some request.requestId) (some request.command) "module descriptors must be JSON objects"
 

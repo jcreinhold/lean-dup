@@ -63,8 +63,11 @@ pub(crate) struct IndexArgs {
 
 #[derive(Debug, Clone, clap::Args)]
 pub(crate) struct IndexMathlibArgs {
-    #[arg(long, default_value = "/Users/jcreinhold/Code/mathlib4")]
-    pub(crate) workspace: PathBuf,
+    #[arg(long)]
+    pub(crate) workspace: Option<PathBuf>,
+
+    #[arg(long)]
+    pub(crate) mathlib_workspace: Option<PathBuf>,
 
     #[arg(long)]
     pub(crate) force: bool,

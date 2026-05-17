@@ -166,7 +166,7 @@ struct AuditComputation {
 const INDEX_WORKER_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 pub(crate) fn run(cli: Cli) -> Result<Outcome> {
-    let mut reporter = Reporter::new(cli.progress, cli.profile);
+    let mut reporter = Reporter::new_live(cli.progress, cli.profile);
     let (report, output_format) = match cli.command {
         Command::Doctor(args) => (Report::Doctor(doctor(args, &mut reporter)?), OutputFormat::Text),
         Command::Index(args) => (Report::Index(index(args, &mut reporter)?), OutputFormat::Text),
@@ -246,6 +246,7 @@ fn index(args: IndexArgs, reporter: &mut Reporter) -> Result<IndexReport> {
         store.build_or_reuse(
             IndexBuildRequest {
                 workspace: foundation.workspace.clone(),
+                execution_root: None,
                 label,
                 module_root,
                 origin: origin_for_label(&args.label),
@@ -264,12 +265,23 @@ fn index(args: IndexArgs, reporter: &mut Reporter) -> Result<IndexReport> {
 
 fn index_mathlib(args: IndexMathlibArgs, reporter: &mut Reporter) -> Result<IndexReport> {
     let force = args.force;
-    let foundation = foundation(args.workspace, Some("Mathlib".to_owned()), reporter)?;
+    let requested_workspace = args
+        .workspace
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let project_mathlib = crate::mathlib::resolve_project(requested_workspace, args.mathlib_workspace, reporter)?;
+    let project_workspace = project_mathlib.project.clone();
+    let mathlib_source = project_mathlib.source.clone();
+    let cache = cache::resolve_cache(&project_workspace)?;
+    let foundation = Foundation {
+        workspace: project_workspace.clone(),
+        cache,
+    };
     let store = IndexStore::new(foundation.cache.root.clone());
     let summary = reporter.measure("index.build_or_reuse", |reporter| {
         store.build_or_reuse(
             IndexBuildRequest {
-                workspace: foundation.workspace.clone(),
+                workspace: mathlib_source.clone(),
+                execution_root: Some(project_mathlib.execution_root()),
                 label: "mathlib".to_owned(),
                 module_root: "Mathlib".to_owned(),
                 origin: "mathlib".to_owned(),
@@ -277,13 +289,13 @@ fn index_mathlib(args: IndexMathlibArgs, reporter: &mut Reporter) -> Result<Inde
                 include_generated: false,
                 require_oleans: true,
                 force,
-                kind: IndexBuildKind::External,
+                kind: IndexBuildKind::ProjectMathlib,
             },
             &WorkerClient::with_timeout(INDEX_WORKER_TIMEOUT),
             reporter,
         )
     })?;
-    Ok(index_report(foundation, summary, force))
+    Ok(mathlib_index_report(foundation, &mathlib_source, summary, force))
 }
 
 fn audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditReport> {
@@ -351,6 +363,7 @@ fn compute_audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditComput
         store.build_or_reuse(
             IndexBuildRequest {
                 workspace: foundation.workspace.clone(),
+                execution_root: None,
                 label: local_label.clone(),
                 module_root: local_module_root,
                 origin: "workspace".to_owned(),
@@ -367,7 +380,7 @@ fn compute_audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditComput
     let local_index = store.resolve(IndexReference::Label(local_label))?;
     let local_handles = local_index.all_handles()?;
     let workspace_rows = local_index.hydrate(&local_handles)?;
-    let compare_indexes = open_compare_indexes(&args, &store, reporter)?;
+    let compare_indexes = open_compare_indexes(&args, &store, &foundation.workspace, reporter)?;
     let retrieval_output = reporter.measure("retrieval", |_| retrieve_candidates(&workspace_rows, &compare_indexes))?;
     let probe_results = collect_probe_results(
         &retrieval_output,
@@ -407,36 +420,36 @@ fn compute_audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditComput
     })
 }
 
-fn open_compare_indexes(args: &AuditArgs, store: &IndexStore, reporter: &mut Reporter) -> Result<Vec<OpenedIndex>> {
+fn open_compare_indexes(
+    args: &AuditArgs,
+    store: &IndexStore,
+    project_workspace: &ResolvedWorkspace,
+    reporter: &mut Reporter,
+) -> Result<Vec<OpenedIndex>> {
     let mut indexes = Vec::new();
     for label in &args.compare_indexes {
         indexes.push(store.resolve(IndexReference::Label(label.clone()))?);
     }
     if args.compare_mathlib {
-        if let Some(mathlib_workspace) = &args.mathlib_workspace {
-            let mathlib = workspace::resolve(
-                WorkspaceRequest {
-                    requested_root: mathlib_workspace.clone(),
-                    module_root: Some("Mathlib".to_owned()),
-                },
-                reporter,
-            )?;
-            store.build_or_reuse(
-                IndexBuildRequest {
-                    workspace: mathlib,
-                    label: "mathlib".to_owned(),
-                    module_root: "Mathlib".to_owned(),
-                    origin: "mathlib".to_owned(),
-                    include_private: true,
-                    include_generated: false,
-                    require_oleans: true,
-                    force: false,
-                    kind: IndexBuildKind::External,
-                },
-                &WorkerClient::with_timeout(INDEX_WORKER_TIMEOUT),
-                reporter,
-            )?;
-        }
+        let mathlib =
+            crate::mathlib::resolve_for_workspace(project_workspace.clone(), args.mathlib_workspace.clone(), reporter)?;
+        let execution_root = mathlib.execution_root();
+        store.build_or_reuse(
+            IndexBuildRequest {
+                workspace: mathlib.source,
+                execution_root: Some(execution_root),
+                label: "mathlib".to_owned(),
+                module_root: "Mathlib".to_owned(),
+                origin: "mathlib".to_owned(),
+                include_private: true,
+                include_generated: false,
+                require_oleans: true,
+                force: false,
+                kind: IndexBuildKind::ProjectMathlib,
+            },
+            &WorkerClient::with_timeout(INDEX_WORKER_TIMEOUT),
+            reporter,
+        )?;
         indexes.push(store.resolve(IndexReference::Label("mathlib".to_owned()))?);
     }
     Ok(indexes)
@@ -480,6 +493,7 @@ fn collect_probe_results(
         .map(|module| ModuleDescriptor {
             module: module.clone(),
             origin: "workspace".to_owned(),
+            source_root: None,
         })
         .collect::<Vec<_>>();
     let call = reporter.measure("worker.probe", |_| {
@@ -587,6 +601,30 @@ fn index_report(foundation: Foundation, summary: IndexSummary, force: bool) -> I
         lake_root: foundation.workspace.root,
         selected_roots: foundation.workspace.selected_roots,
         source_count: foundation.workspace.source_files.len(),
+        cache_root: foundation.cache.root,
+        cache_fingerprint: foundation.cache.fingerprint,
+        label: summary.label,
+        cache_status: summary.cache_status,
+        index_path: summary.path,
+        index_dir: summary.index_dir,
+        declaration_count: summary.declaration_count,
+        diagnostics: summary.diagnostics,
+        force,
+    }
+}
+
+fn mathlib_index_report(
+    foundation: Foundation,
+    mathlib_source: &ResolvedWorkspace,
+    summary: IndexSummary,
+    force: bool,
+) -> IndexReport {
+    IndexReport {
+        status: "ok",
+        requested_workspace: foundation.workspace.requested_root,
+        lake_root: foundation.workspace.root,
+        selected_roots: mathlib_source.selected_roots.clone(),
+        source_count: mathlib_source.source_files.len(),
         cache_root: foundation.cache.root,
         cache_fingerprint: foundation.cache.fingerprint,
         label: summary.label,

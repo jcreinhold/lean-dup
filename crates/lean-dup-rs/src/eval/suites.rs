@@ -37,6 +37,7 @@ struct SuiteDefinition {
     module_root: String,
     origin: String,
     external: Option<ExternalSuiteIndex>,
+    mathlib_source_override: Option<PathBuf>,
     build_before_index: bool,
     require_oleans: bool,
 }
@@ -83,22 +84,26 @@ pub(crate) fn run(request: EvalRequest, reporter: &mut Reporter) -> Result<Evalu
     )?;
     let handles = local.all_handles()?;
     let workspace_rows = local.hydrate(&handles)?;
-    let external = match &definition.external {
-        Some(external) => Some(build_or_load_index(
-            SuiteIndexRequest {
-                workspace_root: &external.workspace,
-                module_root: &external.module_root,
-                label: &external.label,
-                origin: &external.origin,
-                require_oleans: external.require_oleans,
-                build_before_index: definition.build_before_index && !external.require_oleans,
-                kind: IndexBuildKind::External,
-            },
-            &cache_root,
-            reporter,
-        )?),
-        None => None,
-    };
+    let external =
+        match &definition.external {
+            Some(external) if definition.suite == EvalSuite::KanproofsMathlib => Some(
+                build_or_load_project_mathlib_index(&definition, external, &cache_root, reporter)?,
+            ),
+            Some(external) => Some(build_or_load_index(
+                SuiteIndexRequest {
+                    workspace_root: &external.workspace,
+                    module_root: &external.module_root,
+                    label: &external.label,
+                    origin: &external.origin,
+                    require_oleans: external.require_oleans,
+                    build_before_index: definition.build_before_index && !external.require_oleans,
+                    kind: IndexBuildKind::External,
+                },
+                &cache_root,
+                reporter,
+            )?),
+            None => None,
+        };
     let index_load_ms = index_started.elapsed().as_millis();
 
     let retrieval_started = Instant::now();
@@ -155,6 +160,7 @@ fn suite_definition(request: &EvalRequest) -> SuiteDefinition {
                 origin: "external:fixture".to_owned(),
                 require_oleans: false,
             }),
+            mathlib_source_override: None,
             build_before_index: true,
             require_oleans: false,
         },
@@ -167,6 +173,7 @@ fn suite_definition(request: &EvalRequest) -> SuiteDefinition {
             module_root: "KanProofs".to_owned(),
             origin: "workspace".to_owned(),
             external: None,
+            mathlib_source_override: None,
             build_before_index: false,
             require_oleans: true,
         },
@@ -180,14 +187,15 @@ fn suite_definition(request: &EvalRequest) -> SuiteDefinition {
             origin: "workspace".to_owned(),
             external: Some(ExternalSuiteIndex {
                 workspace: request
-                    .mathlib_workspace
+                    .workspace
                     .clone()
-                    .unwrap_or_else(|| PathBuf::from("/Users/jcreinhold/Code/mathlib4")),
+                    .unwrap_or_else(|| PathBuf::from("/Users/jcreinhold/Code/kan-proofs")),
                 module_root: "Mathlib".to_owned(),
                 label: "eval-kanproofs-mathlib".to_owned(),
                 origin: "mathlib".to_owned(),
                 require_oleans: true,
             }),
+            mathlib_source_override: request.mathlib_workspace.clone(),
             build_before_index: false,
             require_oleans: true,
         },
@@ -203,6 +211,38 @@ fn cache_root_for(definition: &SuiteDefinition, reporter: &mut Reporter) -> Resu
         reporter,
     )?;
     Ok(cache::resolve_cache(&workspace)?.root)
+}
+
+fn build_or_load_project_mathlib_index(
+    definition: &SuiteDefinition,
+    external: &ExternalSuiteIndex,
+    cache_root: &Path,
+    reporter: &mut Reporter,
+) -> Result<OpenedIndex> {
+    let mathlib = crate::mathlib::resolve_project(
+        definition.workspace.clone(),
+        definition.mathlib_source_override.clone(),
+        reporter,
+    )?;
+    let execution_root = mathlib.execution_root();
+    let store = IndexStore::new(cache_root.to_path_buf());
+    store.build_or_reuse(
+        IndexBuildRequest {
+            workspace: mathlib.source,
+            execution_root: Some(execution_root),
+            label: external.label.clone(),
+            module_root: external.module_root.clone(),
+            origin: external.origin.clone(),
+            include_private: true,
+            include_generated: false,
+            require_oleans: external.require_oleans,
+            force: false,
+            kind: IndexBuildKind::ProjectMathlib,
+        },
+        &WorkerClient::new(),
+        reporter,
+    )?;
+    store.resolve(IndexReference::Label(external.label.clone()))
 }
 
 fn build_or_load_index(
@@ -224,6 +264,7 @@ fn build_or_load_index(
     store.build_or_reuse(
         IndexBuildRequest {
             workspace,
+            execution_root: None,
             label: request.label.to_owned(),
             module_root: request.module_root.to_owned(),
             origin: request.origin.to_owned(),

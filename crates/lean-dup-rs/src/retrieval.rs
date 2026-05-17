@@ -773,6 +773,7 @@ mod tests {
             .build_or_reuse(
                 IndexBuildRequest {
                     workspace,
+                    execution_root: None,
                     label: label.to_owned(),
                     module_root: module_root.to_owned(),
                     origin: origin.to_owned(),

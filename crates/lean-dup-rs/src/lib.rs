@@ -5,6 +5,7 @@ mod commands;
 mod error;
 mod eval;
 mod index;
+mod mathlib;
 mod perf;
 mod progress;
 mod ranking;

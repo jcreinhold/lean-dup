@@ -134,6 +134,9 @@ impl WorkerTransport for SubprocessTransport {
             protocol::parse_output(&output.stdout, &request.request_id, request.command)
         });
         if output.status != 0 {
+            if let Err(error @ WorkerError::WorkerDiagnostic { .. }) = parsed {
+                return Err(error);
+            }
             return Err(WorkerError::NonZeroExit {
                 status: output.status,
                 stderr: output.stderr,
@@ -333,6 +336,22 @@ exit 7"#,
             transport.call(request(Command::Version), control()),
             Err(WorkerError::NonZeroExit { status: 7, .. })
         ));
+    }
+
+    #[test]
+    fn nonzero_exit_preserves_fatal_worker_diagnostic() {
+        let (_temp, transport) = script(
+            r#"printf '%s\n' '{"schema_version":"lean-dup.worker.v1","request_id":"r1","command":"version","kind":"error","payload":{"code":"internal_error","fatal":true,"message":"maximum number of heartbeats has been reached","details":null}}'
+exit 1"#,
+        );
+        let error = transport.call(request(Command::Version), control()).unwrap_err();
+        match error {
+            WorkerError::WorkerDiagnostic { diagnostics } => {
+                assert_eq!(diagnostics[0].code, "internal_error");
+                assert!(diagnostics[0].message.contains("heartbeats"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]
