@@ -579,7 +579,17 @@ mod tests {
     fn script(body: &str) -> (TempDir, SubprocessTransport) {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("worker.sh");
-        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        // Always consume the request line before running the test body so
+        // the child stays alive until the parent has finished writing its
+        // request. Without this, a body that exits quickly (e.g. plain
+        // `printf '{'`) races the parent's stdin write and the call returns
+        // a broken-pipe error instead of the expected protocol error. On
+        // macOS the timing usually lets the write win; on Linux it doesn't.
+        fs::write(
+            &path,
+            format!("#!/bin/sh\nIFS= read -r _request_line || true\n{body}\n"),
+        )
+        .unwrap();
         let transport = SubprocessTransport::for_test(
             temp.path().to_path_buf(),
             "sh".to_owned(),
@@ -601,10 +611,7 @@ mod tests {
 
     #[test]
     fn malformed_json_is_structured_failure() {
-        // Consume the request line before exiting so the transport's stdin
-        // write succeeds; otherwise the child exits first on Linux and the
-        // call returns a write/broken-pipe error before reading stdout.
-        let (_temp, transport) = script("IFS= read -r _line; printf '{'");
+        let (_temp, transport) = script("printf '{'");
         assert!(matches!(
             transport.call(request(Command::Version), control()),
             Err(WorkerError::InvalidJsonLine { .. })
