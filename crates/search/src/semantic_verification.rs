@@ -8,11 +8,11 @@ use sha2::{Digest, Sha256};
 use crate::ranking::{ConfidenceTier, RankedReview, ReviewAction, ReviewPriority, ReviewRelation};
 use crate::retrieval::{CandidateSet, RetrievedCandidate};
 use crate::{ProbePolicy, ReviewProfile};
-use lean_dup_index::external_provenance::ComparisonEvidencePolicy;
-use lean_dup_index::index::{HydratedDeclaration, OpenedIndex, ProbeCacheEntry};
+use lean_dup_diagnostics::Result;
+use lean_dup_diagnostics::progress::Reporter;
+use lean_dup_index::ComparisonEvidencePolicy;
+use lean_dup_index::{HydratedDeclaration, OpenedIndex, ProbeCacheEntry};
 use lean_dup_project::workspace::ResolvedWorkspace;
-use lean_dup_report::Result;
-use lean_dup_report::progress::Reporter;
 use lean_dup_worker::{ModuleDescriptor, ProbeBatch, ProbePair, ProbeResult, WorkerClient, WorkerError};
 
 const PROBE_CACHE_VERSION: &str = "semantic-probe-cache.v3";
@@ -966,8 +966,8 @@ mod tests {
     use crate::retrieval::{CandidateExplanation, CandidateSet, KeyContribution, RetrievedCandidate};
     use crate::source_refs::SourceFacts;
     use crate::{ProbePolicy, ReviewProfile};
-    use lean_dup_index::external_provenance::{ComparisonEvidenceMode, ComparisonEvidencePolicy};
-    use lean_dup_index::index::{DeclarationHandle, HydratedDeclaration};
+    use lean_dup_index::{ComparisonEvidenceMode, ComparisonEvidencePolicy};
+    use lean_dup_index::{DeclarationHandle, HydratedDeclaration};
     use lean_dup_project::workspace::ResolvedWorkspace;
     use lean_dup_worker::Fingerprints;
 
@@ -1208,8 +1208,8 @@ mod tests {
         assert_eq!(diagnostics.unavailable_by_reason.get("unsupported"), Some(&1));
     }
 
-    fn empty_index() -> lean_dup_index::index::OpenedIndex {
-        lean_dup_index::index::OpenedIndex::for_test(std::path::PathBuf::from("/tmp/nonexistent/index.sqlite"))
+    fn empty_index() -> lean_dup_index::OpenedIndex {
+        lean_dup_index::OpenedIndex::for_test(std::path::PathBuf::from("/tmp/nonexistent/index.sqlite"))
     }
 
     fn proof_grade_mathlib_policy() -> ComparisonEvidencePolicy {

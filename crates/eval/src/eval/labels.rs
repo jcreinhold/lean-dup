@@ -3,7 +3,7 @@ use serde::Deserialize;
 
 use crate::EvalSuite;
 use crate::eval::scoring::GoldPair;
-use lean_dup_report::{Error, Result};
+use lean_dup_diagnostics::{Error, Result};
 
 /// Gold duplicate and non-duplicate labels for one evaluation corpus.
 ///
@@ -128,7 +128,7 @@ pub fn load_builtin(suite: EvalSuite) -> Result<GoldLabels> {
         EvalSuite::KanproofsInternal => include_str!("../../eval-data/kanproofs-internal.json"),
         EvalSuite::KanproofsMathlib => include_str!("../../eval-data/kanproofs-mathlib.json"),
         EvalSuite::ProductionGate => {
-            return Err(lean_dup_report::Error::Eval {
+            return Err(lean_dup_diagnostics::Error::Eval {
                 message: "production-gate is an aggregate suite without one label file".to_owned(),
             });
         }

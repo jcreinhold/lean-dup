@@ -5,7 +5,7 @@ name = "lean-dup-project"
 version.workspace = true
 
 [dependencies]
-lean-dup-report = { path = "../report" }
+lean-dup-diagnostics = { path = "../diagnostics" }
 serde = { version = "1", features = ["derive"] }
 toml = "1"
 walkdir = "2"

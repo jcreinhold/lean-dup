@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::workspace::{self, ResolvedWorkspace, WorkspaceRequest};
-use lean_dup_report::progress::Reporter;
-use lean_dup_report::{Error, Result};
+use lean_dup_diagnostics::progress::Reporter;
+use lean_dup_diagnostics::{Error, Result};
 
 const MATHLIB_PACKAGE_PATH: &[&str] = &[".lake", "packages", "mathlib"];
 
@@ -101,7 +101,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::resolve_project;
-    use lean_dup_report::progress::Reporter;
+    use lean_dup_diagnostics::progress::Reporter;
 
     #[test]
     fn project_resolver_uses_pinned_package_mathlib_sources() {

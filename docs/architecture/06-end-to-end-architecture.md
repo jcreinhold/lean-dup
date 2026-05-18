@@ -70,9 +70,10 @@ artifact policy.
 
 ### CLI And Commands
 
-`crates/cli/src/cli.rs` defines the user and hidden developer command surface. `commands.rs` orchestrates
-workflows but does not own Lake layout, worker transport, SQLite schema, ranking policy, probe details, or text/JSON
-formatting. That keeps command handling from becoming a temporal script in Rust.
+`crates/cli/src/cli.rs` defines the user and hidden developer command surface. `commands.rs` routes commands, constructs
+domain requests, and writes stdout/stderr or output files. It does not own Lake layout, worker transport, SQLite schema,
+audit phase ordering, ranking policy, probe details, or text/JSON formatting. That keeps command handling from becoming
+a temporal script in Rust.
 
 The public UX is deliberately small: users ask to inspect, index, audit, show, diff, or evaluate. Hidden commands exist
 only for production engineering: `perf` for named workload artifacts and `cache-cleanup` for protected cache lifecycle
@@ -133,7 +134,7 @@ usable, but it cannot silently claim proof-grade Lean evidence.
 
 ### Retrieval
 
-`retrieval.rs` turns indexed semantic keys into bounded candidate pairs. It combines exact, permutation, connective,
+`lean-dup-search` owns the full audit workflow through `audit::run_audit`. Internally, `retrieval.rs` turns indexed semantic keys into bounded candidate pairs. It combines exact, permutation, connective,
 conclusion, role-aware, and other indexed postings without exposing key shape or posting tables upward. Retrieval is
 where candidate volume is controlled before ranking and semantic verification.
 
@@ -172,13 +173,13 @@ is not a dump of every indexed overlap.
 be shown.
 
 Prompt 25 made this boundary important for throughput: source-reference scanning is scoped to groups that can use the
-facts, rather than scanning every hidden/noise group. Audit coordinates the phases but does not know import parsing or
-caller-token policy.
+facts, rather than scanning every hidden/noise group. The search audit workflow coordinates the phases but does not
+expose import parsing or caller-token policy to CLI callers.
 
 ### Report Contract, Rendering, Show, And Diff
 
-`report_contract.rs` builds stable explanation facts from the audit model before renderers format anything. The contract
-is documented in [report-contract.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/report-contract.md).
+`lean-dup-report` builds stable explanation facts from the audit model before renderers format anything. The contract is
+documented in [report-contract.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/report-contract.md).
 
 Audit JSON is additive and includes `report_schema_version` plus `explanations` for visible queues, hidden groups,
 semantic probes, and comparison provenance. Text output explains empty queues directly. `show` explains one group in

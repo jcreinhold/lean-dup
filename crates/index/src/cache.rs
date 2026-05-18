@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use lean_dup_diagnostics::{Result, read, read_to_string};
 use lean_dup_project::workspace::ResolvedWorkspace;
-use lean_dup_report::{Result, read, read_to_string};
 
 pub const CACHE_KEY_VERSION: &str = "rust-cli-cache.v1";
 
@@ -123,8 +123,8 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{cache_root_from, workspace_fingerprint};
+    use lean_dup_diagnostics::progress::Reporter;
     use lean_dup_project::workspace::{WorkspaceRequest, resolve};
-    use lean_dup_report::progress::Reporter;
 
     #[test]
     fn cache_root_uses_env_override() {

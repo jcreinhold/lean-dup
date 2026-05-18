@@ -4,47 +4,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use serde::{Deserialize, Serialize};
-
 use crate::cli::{PerfArgs, PerfWorkload};
-use lean_dup_eval::eval::memory;
-use lean_dup_report::perf::{PerfEvent, PerfSummary, summarize, with_collection};
-use lean_dup_report::{Error, Result};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PerfWorkloadReport {
-    pub workload: PerfWorkload,
-    pub command: Vec<String>,
-    pub cache_state: String,
-    pub exit_code: i32,
-    pub elapsed_ms: u128,
-    pub peak_memory_bytes: Option<u64>,
-    pub stdout_bytes: usize,
-    pub stderr_bytes: usize,
-    pub stdout_tail: Option<String>,
-    pub stderr_tail: Option<String>,
-    pub candidate_count: Option<u64>,
-    pub hydrated_declarations: Option<u64>,
-    pub review_groups: Option<u64>,
-    pub visible_groups: Option<u64>,
-    pub semantic_planned_pairs: Option<u64>,
-    pub semantic_cached_hits: Option<u64>,
-    pub semantic_worker_pairs: Option<u64>,
-    pub semantic_unavailable_results: Option<u64>,
-    pub probe_batches: Option<u64>,
-    pub probe_pairs: Option<u64>,
-    pub profile_timings_ms: BTreeMap<String, u128>,
-    pub events: Vec<PerfEvent>,
-    pub summary: PerfSummary,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PerfReport {
-    pub status: &'static str,
-    pub workload: PerfWorkload,
-    pub cache_root: PathBuf,
-    pub report: PerfWorkloadReport,
-}
+use lean_dup_diagnostics::perf::{summarize, with_collection};
+use lean_dup_diagnostics::{Error, Result};
+use lean_dup_report::{PerfReport, PerfWorkloadReport};
 
 pub fn run(args: PerfArgs) -> Result<PerfReport> {
     let cache_root = args
@@ -55,7 +18,7 @@ pub fn run(args: PerfArgs) -> Result<PerfReport> {
     let report = run_workload(args, &cache_root)?;
     let response = PerfReport {
         status: "ok",
-        workload: report.workload,
+        workload: report.workload.clone(),
         cache_root,
         report,
     };
@@ -123,12 +86,12 @@ fn run_workload(args: PerfArgs, cache_root: &Path) -> Result<PerfWorkloadReport>
     let profile_timings_ms = profile_timings(&stderr);
 
     Ok(PerfWorkloadReport {
-        workload: args.workload,
+        workload: args.workload.as_str().to_owned(),
         command,
         cache_state,
         exit_code,
         elapsed_ms,
-        peak_memory_bytes: memory::peak_rss_bytes(),
+        peak_memory_bytes: lean_dup_eval::peak_rss_bytes(),
         stdout_bytes: stdout.len(),
         stderr_bytes: stderr.len(),
         stdout_tail: text_tail(&stdout),
@@ -334,7 +297,7 @@ impl Drop for EnvGuard {
 mod tests {
     use crate::cli::{PerfArgs, PerfFormat, PerfWorkload};
 
-    use lean_dup_report::perf::{CostClass, PerfSnapshot, measure, record_count, summarize};
+    use lean_dup_diagnostics::perf::{CostClass, PerfSnapshot, measure, record_count, summarize};
 
     use super::{profile_timings, workload_command};
 

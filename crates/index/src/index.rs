@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
+use lean_dup_diagnostics::perf::{self, CostClass};
+use lean_dup_diagnostics::progress::Reporter;
+use lean_dup_diagnostics::{Error, Result, read, read_to_string};
 use lean_dup_project::workspace::{self, ResolvedWorkspace};
-use lean_dup_report::perf::{self, CostClass};
-use lean_dup_report::progress::Reporter;
-use lean_dup_report::{Error, Result, read, read_to_string};
 use lean_dup_worker::{
     DeclarationRow, ExtractBatch, FeatureRow, FeaturesBatch, Fingerprints, IndexBatch, IndexStreamItem,
     ModuleDescriptor, ProbePair, ProbeResult, RoleFeature, SourceSpan, WorkerClient, WorkerDiagnostic, WorkerError,
@@ -1621,8 +1621,8 @@ mod tests {
         CacheStatus, FingerprintKind, FingerprintQuery, IndexBuildKind, IndexBuildRequest, IndexProvenanceKind,
         IndexQuery, IndexReference, IndexStore, RoleFeatureQuery, index_cache_key, safe_label, sqlite_cache_is_current,
     };
+    use lean_dup_diagnostics::progress::Reporter;
     use lean_dup_project::workspace::{ResolvedWorkspace, WorkspaceRequest, resolve};
-    use lean_dup_report::progress::Reporter;
     use lean_dup_worker::{ProbePair, ProbeResult, WorkerClient, WorkerVersion};
 
     fn repo_root() -> PathBuf {

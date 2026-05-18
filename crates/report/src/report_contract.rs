@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use crate::ranking::{RankedGroup, RankedReview, ReviewEvidenceMode, ReviewFilter, ReviewPriority};
-use crate::semantic_verification::ProbeDiagnostics;
-use lean_dup_index::external_provenance::{ComparisonEvidenceMode, ComparisonProvenanceReport};
+use lean_dup_index::{ComparisonEvidenceMode, ComparisonProvenanceReport};
+use lean_dup_search::ProbeDiagnostics;
+use lean_dup_search::{RankedGroup, RankedReview, ReviewEvidenceMode, ReviewFilter, ReviewPriority};
 
 pub const REPORT_SCHEMA_VERSION: &str = "lean-dup.report.v1";
 
@@ -360,12 +360,12 @@ fn replacement_summary(group: &RankedGroup) -> String {
 #[cfg(test)]
 mod tests {
     use super::{explain_audit, explain_group};
-    use crate::ranking::{
+    use lean_dup_index::{ComparisonEvidenceMode, ComparisonProvenanceReport};
+    use lean_dup_search::ProbeDiagnostics;
+    use lean_dup_search::{
         ConfidenceTier, RankedGroup, RankedReview, RankingDiagnostics, ReviewAction, ReviewEvidenceMode, ReviewFilter,
         ReviewPriority, ReviewRelation,
     };
-    use crate::semantic_verification::ProbeDiagnostics;
-    use lean_dup_index::external_provenance::{ComparisonEvidenceMode, ComparisonProvenanceReport};
 
     #[test]
     fn zero_visible_groups_have_concrete_reason() {

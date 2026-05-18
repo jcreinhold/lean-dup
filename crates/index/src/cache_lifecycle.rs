@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
 use crate::index::{ExpectedIndexEntry, INDEX_SCHEMA_VERSION, IndexProvenance, IndexProvenanceKind, IndexStore};
-use lean_dup_report::{Error, Result, read_to_string};
+use lean_dup_diagnostics::{Error, Result, read_to_string};
 
 /// Cache diagnostics for all known labels under one cache root.
 ///

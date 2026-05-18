@@ -166,7 +166,7 @@ mod tests {
         ReviewPriority, ReviewRelation,
     };
     use crate::source_refs::{ImportStatus, SourceFactInput, collect_source_facts};
-    use lean_dup_index::index::{DeclarationHandle, HydratedDeclaration};
+    use lean_dup_index::{DeclarationHandle, HydratedDeclaration};
     use lean_dup_worker::{Fingerprints, SourcePoint, SourceSpan};
 
     #[test]

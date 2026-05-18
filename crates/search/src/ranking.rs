@@ -6,8 +6,8 @@ use sha2::{Digest, Sha256};
 use crate::retrieval::{CandidateSet, KeyContribution, RetrievedCandidate};
 use crate::semantic_verification::{EvidenceKind, EvidenceStatus, SemanticEvidence};
 use crate::source_refs::{ImportStatus, SourceFacts};
-use lean_dup_index::external_provenance::{ComparisonEvidenceMode, ComparisonEvidencePolicy};
-use lean_dup_index::index::HydratedDeclaration;
+use lean_dup_index::HydratedDeclaration;
+use lean_dup_index::{ComparisonEvidenceMode, ComparisonEvidencePolicy};
 use lean_dup_worker::SourceSpan;
 
 const DEFAULT_MIN_NEAR_SCORE: f64 = 24.0;
@@ -716,8 +716,8 @@ mod tests {
     use crate::retrieval::{CandidateExplanation, CandidateSet, KeyContribution, RetrievedCandidate};
     use crate::semantic_verification::{EvidenceKind, EvidenceStatus, SemanticEvidence};
     use crate::source_refs::SourceFacts;
-    use lean_dup_index::external_provenance::{ComparisonEvidenceMode, ComparisonEvidencePolicy};
-    use lean_dup_index::index::{DeclarationHandle, HydratedDeclaration};
+    use lean_dup_index::{ComparisonEvidenceMode, ComparisonEvidencePolicy};
+    use lean_dup_index::{DeclarationHandle, HydratedDeclaration};
     use lean_dup_worker::Fingerprints;
 
     #[test]

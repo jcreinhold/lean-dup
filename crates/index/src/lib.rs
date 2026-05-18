@@ -4,9 +4,18 @@
 //! pointers, compatibility checks, and safe cleanup. Callers build/open/hydrate
 //! indexes without learning table layouts or cache directory internals.
 
-pub mod cache;
-pub mod cache_lifecycle;
-pub mod external_provenance;
-pub mod index;
+mod cache;
+mod cache_lifecycle;
+mod external_provenance;
+mod index;
 
+pub use cache::{CACHE_KEY_VERSION, CacheFacts, cache_root, resolve_cache, workspace_fingerprint};
+pub use cache_lifecycle::{
+    CacheCleanupEntry, CacheCleanupReport, CacheDiagnostics, CacheEntryDiagnostics, CacheEntryStatus,
+    CacheLabelDiagnostics, CacheLatestDiagnostics, CacheLatestStatus, CleanupPolicy, cleanup_cache, diagnose_cache,
+};
+pub use external_provenance::{
+    ComparisonEvidenceMode, ComparisonEvidencePolicy, ComparisonProvenance, ComparisonProvenanceReport,
+    resolve as resolve_comparison_provenance,
+};
 pub use index::*;

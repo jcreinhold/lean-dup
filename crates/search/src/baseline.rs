@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::ranking::{RankedReview, ReviewAction, ReviewPriority, ReviewRelation};
-use lean_dup_report::{Error, Result, read_to_string};
+use lean_dup_diagnostics::{Error, Result, read_to_string};
 
 const BASELINE_SCHEMA_VERSION: &str = "lean-dup.baseline.v1";
 

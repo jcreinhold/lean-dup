@@ -95,7 +95,7 @@ pub struct ComparisonProvenance {
 pub fn resolve(
     indexes: &[OpenedIndex],
     audit_workspace: &ResolvedWorkspace,
-) -> lean_dup_report::Result<ComparisonProvenance> {
+) -> lean_dup_diagnostics::Result<ComparisonProvenance> {
     let mut policy = ComparisonEvidencePolicy::default();
     let mut reports = Vec::new();
     for index in indexes {

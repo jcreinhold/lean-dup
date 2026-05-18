@@ -4,18 +4,27 @@
 //! ranked review groups. It hides retrieval keys, posting expansion, scoring
 //! constants, semantic obligation planning, and source scan policy.
 
-use clap::ValueEnum;
 use serde::Serialize;
 
-pub mod baseline;
-pub mod ranking;
-pub mod replacement_hints;
-pub mod report_contract;
-pub mod retrieval;
-pub mod semantic_verification;
-pub mod source_refs;
+pub mod audit;
+mod baseline;
+mod ranking;
+mod replacement_hints;
+mod retrieval;
+mod semantic_verification;
+mod source_refs;
 
-#[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]
+pub use baseline::{BaselineChange, BaselineDiff, BaselineGroup, BaselineSnapshot, diff, load, save, snapshot};
+pub use ranking::{
+    ConfidenceTier, RankedGroup, RankedReview, RankingDiagnostics, ReviewAction, ReviewEvidence, ReviewEvidenceMode,
+    ReviewFilter, ReviewMember, ReviewPriority, ReviewRelation, SuppressedGroup,
+};
+pub use retrieval::{
+    CandidateExplanation, KeyContribution, RetrievalDiagnostics, RetrievalOutput, retrieve_candidates,
+};
+pub use semantic_verification::ProbeDiagnostics;
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum ReviewProfile {
     Mathlib,
@@ -24,7 +33,7 @@ pub enum ReviewProfile {
     Noise,
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProbePolicy {
     Actionable,

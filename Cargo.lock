@@ -392,6 +392,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "clap",
+ "lean-dup-diagnostics",
  "lean-dup-eval",
  "lean-dup-index",
  "lean-dup-project",
@@ -407,13 +408,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "lean-dup-diagnostics"
+version = "0.1.0"
+dependencies = [
+ "lean-dup-worker",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
 name = "lean-dup-eval"
 version = "0.1.0"
 dependencies = [
- "clap",
+ "lean-dup-diagnostics",
  "lean-dup-index",
  "lean-dup-project",
- "lean-dup-report",
  "lean-dup-search",
  "lean-dup-worker",
  "rustc-hash",
@@ -427,8 +439,8 @@ dependencies = [
 name = "lean-dup-index"
 version = "0.1.0"
 dependencies = [
+ "lean-dup-diagnostics",
  "lean-dup-project",
- "lean-dup-report",
  "lean-dup-worker",
  "rusqlite",
  "rustc-hash",
@@ -444,7 +456,7 @@ dependencies = [
 name = "lean-dup-project"
 version = "0.1.0"
 dependencies = [
- "lean-dup-report",
+ "lean-dup-diagnostics",
  "serde",
  "tempfile",
  "toml",
@@ -455,22 +467,21 @@ dependencies = [
 name = "lean-dup-report"
 version = "0.1.0"
 dependencies = [
- "lean-dup-worker",
- "rusqlite",
+ "lean-dup-diagnostics",
+ "lean-dup-eval",
+ "lean-dup-index",
+ "lean-dup-search",
  "serde",
  "serde_json",
- "thiserror",
- "toml",
 ]
 
 [[package]]
 name = "lean-dup-search"
 version = "0.1.0"
 dependencies = [
- "clap",
+ "lean-dup-diagnostics",
  "lean-dup-index",
  "lean-dup-project",
- "lean-dup-report",
  "lean-dup-worker",
  "rustc-hash",
  "serde",

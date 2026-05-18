@@ -11,12 +11,11 @@ use crate::eval::scoring::{
     CountMetric, EvaluationMetrics, GoldPair, ObservedPair, ObservedRun, RecallAtK, TimingMetrics, score_run,
 };
 use crate::eval::stage_metrics::{SemanticVerificationStageMetrics, feature_families};
-use lean_dup_index::cache;
-use lean_dup_index::index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
+use lean_dup_diagnostics::progress::Reporter;
+use lean_dup_diagnostics::{Error, Result};
+use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
 use lean_dup_project::workspace::{WorkspaceRequest, resolve};
-use lean_dup_report::progress::Reporter;
-use lean_dup_report::{Error, Result};
-use lean_dup_search::retrieval::{CandidateExplanation, RetrievalOutput, retrieve_candidates};
+use lean_dup_search::{CandidateExplanation, RetrievalOutput, retrieve_candidates};
 use lean_dup_worker::WorkerClient;
 
 #[derive(Debug, Clone)]
@@ -424,7 +423,7 @@ fn cache_root_for(definition: &SuiteDefinition, reporter: &mut Reporter) -> Resu
         },
         reporter,
     )?;
-    Ok(cache::resolve_cache(&workspace)?.root)
+    Ok(lean_dup_index::resolve_cache(&workspace)?.root)
 }
 
 fn build_or_load_project_mathlib_index(
@@ -597,7 +596,7 @@ mod tests {
     use crate::EvalSuite;
     use crate::eval::scoring::{CountMetric, EvaluationMetrics, RecallAtK, TimingMetrics};
     use crate::eval::stage_metrics::{SearchStageMetrics, SemanticVerificationStageMetrics};
-    use lean_dup_report::progress::Reporter;
+    use lean_dup_diagnostics::progress::Reporter;
 
     #[test]
     fn default_suite_computes_metrics_and_enforces_gates() {

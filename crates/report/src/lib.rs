@@ -1,12 +1,15 @@
-//! Shared diagnostics, progress, performance events, and error projection.
+//! Stable report contracts and renderable user-facing output.
 //!
-//! This crate is intentionally low in the dependency graph so the product
-//! crates can report failures and measurements without depending on the CLI.
-//! It must not learn SQLite table layouts, retrieval keys, or worker transport
-//! details beyond typed worker errors.
+//! This crate owns JSON-safe report DTOs, explanation facts, and text wording.
+//! It must not own CLI parsing, worker transport, or storage internals.
 
-mod error;
-pub mod perf;
-pub mod progress;
+pub use lean_dup_diagnostics::{Error, Result};
 
-pub use error::{Error, Result, read, read_to_string};
+pub mod render;
+pub mod report_contract;
+pub mod reports;
+
+pub use reports::{
+    AuditReport, DiffReport, DoctorReport, IndexReport, PerfReport, PerfWorkloadReport, Report, ReviewProfileCounts,
+    ShowReport,
+};

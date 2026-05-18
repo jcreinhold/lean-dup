@@ -12,7 +12,7 @@ The crate graph owns the coarse information-hiding contract for the Rust impleme
 reason each component changes: Lean protocol mechanics, Lake project resolution, persisted corpus storage, search and
 review policy, report projection, quality measurement, and terminal I/O.
 
-The smallest public interface is seven package names and their dependency direction. Callers should not learn SQLite
+The smallest public interface is eight package names and their dependency direction. Callers should not learn SQLite
 tables, cache key layout, retrieval key encodings, worker JSONL framing, prompt/eval corpus policy, or CLI stdout/stderr
 rules unless they are in the crate that owns that concern.
 
@@ -28,18 +28,23 @@ Rejected: a crate per old module. That would make shallow pass-through crates ar
 Rejected: one `core` crate plus one CLI crate. That keeps the code easy to move but leaves the same complected internal
 architecture.
 
-Chosen: seven functional crates. This is deeper because each crate hides a volatile design family and the dependency
-graph prevents lower-level concerns from learning about CLI, evaluation, or report presentation.
+Chosen first: seven functional crates. This made the old single-crate concerns visible, but it left diagnostics
+misnamed as report output and left audit phase ordering in the CLI.
+
+Chosen now: eight functional crates with a diagnostics/report split. This is deeper because diagnostic plumbing and
+user-facing report contracts change for different reasons. It also lets `lean-dup-search` own the audit workflow while
+`lean-dup-report` owns stable projection and wording.
 
 ## Crates
 
 | Crate | Hidden knowledge | Must not depend on |
 | --- | --- | --- |
 | `lean-dup-worker` | Lean worker protocol, subprocess transport, worker version/build policy, timeouts. | Any other `lean-dup` crate. |
+| `lean-dup-diagnostics` | Shared error projection, progress/profile events, runtime perf collection. | Project, index, search, eval, report, CLI. |
 | `lean-dup-project` | Lake workspace discovery, selected module roots, mathlib source/execution roots, toolchain facts. | Index, search, eval, CLI. |
 | `lean-dup-index` | SQLite indexes, cache keys, provenance metadata, latest pointers, cache diagnostics and cleanup. | Search, eval, CLI. |
-| `lean-dup-search` | Candidate generation, semantic evidence planning, ranking, source facts, replacement hints, report explanations. | Eval, CLI. |
-| `lean-dup-report` | Shared errors, progress/profile events, and runtime performance diagnostics. | Project, index, search, eval, CLI. |
+| `lean-dup-search` | Audit workflow, candidate generation, semantic evidence planning, ranking, source facts, replacement hints. | Eval, report, CLI. |
+| `lean-dup-report` | Stable JSON DTOs, report explanations, text rendering, show/diff projection, eval table wording. | CLI. |
 | `lean-dup-eval` | Labels, suites, stage metrics, quality gates, hidden perf workload artifacts. | CLI. |
 | `lean-dup-cli` | Clap parsing, command dispatch, stdout/stderr routing, output file writes, binary compatibility. | None; this is the top layer. |
 
@@ -48,27 +53,30 @@ rename is accepted.
 
 ## Current Tradeoffs
 
-The split preserves behavior first. Some APIs are still broader than ideal because cross-crate extraction made former
-`pub(crate)` records public. Those records are now visible design debt, not an intended final surface. The next
-interface-tightening pass should replace broad records with request/result APIs where the caller only needs a capability
-such as "audit", "build index", "score eval suite", or "render report".
+The second pass preserves behavior while removing the main misleading boundaries:
 
-`lean-dup-report` currently owns shared errors and diagnostic collectors rather than only final report DTOs. This keeps
-the graph acyclic while preserving cross-crate profile/perf collection. If report projection grows independently from
-diagnostics, split the internal modules inside `lean-dup-report` before adding another crate.
+- `clap` is confined to `lean-dup-cli`; domain crates expose plain enums and request/result APIs.
+- `lean-dup-search::audit::run_audit` owns the audit phase ordering, so CLI no longer sequences retrieval, probes,
+  ranking, source facts, and replacement hints.
+- `lean-dup-diagnostics` owns shared plumbing; `lean-dup-report` owns report projection and wording.
+- Old file-shaped modules such as `search::retrieval`, `search::ranking`, `index::index`, and `eval::eval` are private
+  implementation modules with curated root exports.
+
+Some report and search DTOs remain public because JSON output, eval scoring, and report rendering use the same data
+model. Further tightening should proceed only when a concrete caller can be simplified without losing report stability.
 
 ## Red Flag Review
 
-- **Shallow module:** residual risk in public records widened for compilation. The crate boundaries themselves hide
-  meaningful concerns; later API tightening should reduce record exposure.
+- **Shallow module:** improved. Diagnostics, report projection, and audit workflow now hide real decisions rather than
+  exposing old source-file modules.
 - **Pass-through wrapper:** mitigated. Crates own files and behavior, not only re-export old modules.
-- **Temporal decomposition:** mitigated. Boundaries are by concern, not by audit execution order.
-- **Information leakage:** partially mitigated. SQLite, worker transport, and CLI output policy are separated; broad
-  public structs remain to be tightened.
+- **Temporal decomposition:** mitigated. Audit sequencing is inside `lean-dup-search::audit`, not hand-wired by CLI.
+- **Information leakage:** mitigated. SQLite, worker transport, CLI parsing, report wording, and diagnostic plumbing are
+  separated and enforced by boundary tests.
 - **Special-general mixture:** mitigated. Evaluation and CLI sit above production search/indexing.
-- **Conjoined methods:** residual risk in `lean-dup-cli::commands`, which still orchestrates audit phases. A later
-  search API pass should pull that sequence down.
-- **Hard-to-describe public API:** residual risk from the first extraction. The crate graph is describable; individual
-  public types need trimming.
+- **Conjoined methods:** mitigated for audit. `show` and `diff` reuse the search audit output instead of duplicating
+  phase sequencing.
+- **Hard-to-describe public API:** improved. Public module surfaces are now curated root exports; remaining broad DTOs
+  are tied to stable reports or eval.
 - **Implementation details contaminating interface comments:** mitigated in crate-level docs; some moved item comments
   predate the split and should be reviewed opportunistically.

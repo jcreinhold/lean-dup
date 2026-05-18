@@ -4,14 +4,13 @@
 //! policy, denominators, and artifact-oriented metrics without changing the
 //! production audit behavior.
 
-use clap::ValueEnum;
 use serde::Serialize;
 
-pub mod eval;
+mod eval;
 
-pub use eval::{EvalRequest, EvaluationReport};
+pub use eval::{EvalRequest, EvaluationReport, peak_rss_bytes, render_metrics, run};
 
-#[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum EvalSuite {
     Default,

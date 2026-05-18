@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::eval::labels::GoldLabels;
 use crate::eval::scoring::{CountMetric, GoldPair, ObservedRun, RecallAtK};
-use lean_dup_search::retrieval::KeyContribution;
+use lean_dup_search::KeyContribution;
 
 /// Stable stage-level denominators for search-quality evaluation.
 ///
@@ -306,7 +306,7 @@ mod tests {
     use super::{SemanticVerificationStageMetrics, feature_families, score};
     use crate::eval::labels::GoldLabels;
     use crate::eval::scoring::{CountMetric, GoldPair, ObservedPair, ObservedRun, TimingMetrics};
-    use lean_dup_search::retrieval::KeyContribution;
+    use lean_dup_search::KeyContribution;
 
     #[test]
     fn stage_metrics_separate_generated_and_top_k_recall() {

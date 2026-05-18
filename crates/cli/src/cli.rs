@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
-pub use lean_dup_eval::EvalSuite;
-pub use lean_dup_search::{ProbePolicy, ReviewProfile};
+use lean_dup_eval::EvalSuite;
+use lean_dup_search::{ProbePolicy, ReviewProfile};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
@@ -145,8 +145,8 @@ pub struct AuditArgs {
     #[arg(long, value_enum, default_value_t = ReviewPriority::Low)]
     pub min_priority: ReviewPriority,
 
-    #[arg(long = "review-profile", value_enum, default_value_t = ReviewProfile::Mathlib)]
-    pub review_profile: ReviewProfile,
+    #[arg(long = "review-profile", value_enum, default_value_t = CliReviewProfile::Mathlib)]
+    pub review_profile: CliReviewProfile,
 
     #[arg(long = "save-baseline")]
     pub save_baseline: Option<String>,
@@ -157,8 +157,8 @@ pub struct AuditArgs {
     #[arg(long = "probe-budget", hide = true, default_value_t = 500)]
     pub probe_budget: usize,
 
-    #[arg(long = "probe-policy", hide = true, value_enum, default_value_t = ProbePolicy::Actionable)]
-    pub probe_policy: ProbePolicy,
+    #[arg(long = "probe-policy", hide = true, value_enum, default_value_t = CliProbePolicy::Actionable)]
+    pub probe_policy: CliProbePolicy,
 
     #[arg(long = "probe-chunk-size", hide = true, default_value_t = 16)]
     pub probe_chunk_size: usize,
@@ -169,8 +169,8 @@ pub struct AuditArgs {
 
 #[derive(Debug, Clone, clap::Args)]
 pub struct EvalArgs {
-    #[arg(long, value_enum, default_value_t = EvalSuite::Default)]
-    pub suite: EvalSuite,
+    #[arg(long, value_enum, default_value_t = CliEvalSuite::Default)]
+    pub suite: CliEvalSuite,
 
     #[arg(long, value_enum, default_value_t = EvalFormat::Table)]
     pub format: EvalFormat,
@@ -258,6 +258,64 @@ pub enum EvalFormat {
 
 #[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
+pub enum CliEvalSuite {
+    Default,
+    HardNegatives,
+    KanproofsInternal,
+    KanproofsMathlib,
+    ProductionGate,
+}
+
+impl From<CliEvalSuite> for EvalSuite {
+    fn from(value: CliEvalSuite) -> Self {
+        match value {
+            CliEvalSuite::Default => Self::Default,
+            CliEvalSuite::HardNegatives => Self::HardNegatives,
+            CliEvalSuite::KanproofsInternal => Self::KanproofsInternal,
+            CliEvalSuite::KanproofsMathlib => Self::KanproofsMathlib,
+            CliEvalSuite::ProductionGate => Self::ProductionGate,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum CliReviewProfile {
+    Mathlib,
+    Internal,
+    ApiDesign,
+    Noise,
+}
+
+impl From<CliReviewProfile> for ReviewProfile {
+    fn from(value: CliReviewProfile) -> Self {
+        match value {
+            CliReviewProfile::Mathlib => Self::Mathlib,
+            CliReviewProfile::Internal => Self::Internal,
+            CliReviewProfile::ApiDesign => Self::ApiDesign,
+            CliReviewProfile::Noise => Self::Noise,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum CliProbePolicy {
+    Actionable,
+    Broad,
+}
+
+impl From<CliProbePolicy> for ProbePolicy {
+    fn from(value: CliProbePolicy) -> Self {
+        match value {
+            CliProbePolicy::Actionable => Self::Actionable,
+            CliProbePolicy::Broad => Self::Broad,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
 pub enum PerfFormat {
     Json,
 }
@@ -272,6 +330,20 @@ pub enum PerfWorkload {
     KanproofsFullMathlibNoProbes,
     KanproofsFullMathlib,
     FixtureAudit,
+}
+
+impl PerfWorkload {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ColdMathlibIndex => "cold-mathlib-index",
+            Self::WarmMathlibIndex => "warm-mathlib-index",
+            Self::KanproofsTargetedMathlib => "kanproofs-targeted-mathlib",
+            Self::KanproofsFullNoMathlib => "kanproofs-full-no-mathlib",
+            Self::KanproofsFullMathlibNoProbes => "kanproofs-full-mathlib-no-probes",
+            Self::KanproofsFullMathlib => "kanproofs-full-mathlib",
+            Self::FixtureAudit => "fixture-audit",
+        }
+    }
 }
 
 impl AuditArgs {

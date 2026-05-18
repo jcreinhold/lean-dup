@@ -1,9 +1,11 @@
-pub mod table;
+mod table;
 
 mod labels;
-pub mod memory;
+mod memory;
 mod scoring;
 mod stage_metrics;
 mod suites;
 
+pub use memory::peak_rss_bytes;
 pub use suites::{EvalRequest, EvaluationReport, run};
+pub use table::render_metrics;

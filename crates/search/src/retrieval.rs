@@ -4,12 +4,12 @@ use std::collections::{BTreeMap, BinaryHeap};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use serde::Serialize;
 
-use lean_dup_index::index::{
+use lean_dup_diagnostics::Result;
+use lean_dup_diagnostics::perf::{self, CostClass};
+use lean_dup_index::{
     DeclarationHandle, FingerprintKind, FingerprintQuery, HydratedDeclaration, OpenedIndex, PostingKey,
     RoleFeatureQuery,
 };
-use lean_dup_report::Result;
-use lean_dup_report::perf::{self, CostClass};
 
 const TOP_K_PER_WORKSPACE_DECLARATION: usize = 80;
 const ROLE_POSTING_LIMIT: usize = 512;
@@ -513,7 +513,7 @@ fn add_local_matches(
 
 struct ExternalMatchContext<'a> {
     indexes: &'a [OpenedIndex],
-    index_facts: &'a [lean_dup_index::index::OpenedIndexFacts],
+    index_facts: &'a [lean_dup_index::OpenedIndexFacts],
     counts: &'a HashMap<(usize, PostingKey), usize>,
     postings: &'a HashMap<(usize, PostingKey), Vec<DeclarationHandle>>,
 }
@@ -725,9 +725,9 @@ mod tests {
     use tempfile::TempDir;
 
     use super::retrieve_candidates;
-    use lean_dup_index::index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore};
+    use lean_dup_diagnostics::progress::Reporter;
+    use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore};
     use lean_dup_project::workspace::{WorkspaceRequest, resolve};
-    use lean_dup_report::progress::Reporter;
     use lean_dup_worker::{Fingerprints, WorkerClient};
 
     fn repo_root() -> PathBuf {
@@ -745,7 +745,7 @@ mod tests {
         label: &str,
         origin: &str,
         kind: IndexBuildKind,
-    ) -> (IndexStore, lean_dup_index::index::OpenedIndex) {
+    ) -> (IndexStore, lean_dup_index::OpenedIndex) {
         let fixture_root = repo_root().join("tests/fixtures").join(fixture);
         let output = Command::new("lake")
             .arg("build")
@@ -789,7 +789,7 @@ mod tests {
         (store, opened)
     }
 
-    fn hydrated_workspace(cache: &TempDir) -> Vec<lean_dup_index::index::HydratedDeclaration> {
+    fn hydrated_workspace(cache: &TempDir) -> Vec<lean_dup_index::HydratedDeclaration> {
         let (_store, opened) = build_index(cache, "tiny", "Tiny", "workspace", "workspace", IndexBuildKind::Local);
         let handles = opened.all_handles().unwrap();
         opened.hydrate(&handles).unwrap()

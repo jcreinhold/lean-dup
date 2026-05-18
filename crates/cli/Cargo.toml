@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+lean-dup-diagnostics = { path = "../diagnostics" }
 lean-dup-eval = { path = "../eval" }
 lean-dup-index = { path = "../index" }
 lean-dup-project = { path = "../project" }

@@ -5,10 +5,9 @@ name = "lean-dup-eval"
 version.workspace = true
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
+lean-dup-diagnostics = { path = "../diagnostics" }
 lean-dup-index = { path = "../index" }
 lean-dup-project = { path = "../project" }
-lean-dup-report = { path = "../report" }
 lean-dup-search = { path = "../search" }
 lean-dup-worker = { path = "../worker" }
 rustc-hash = "2"

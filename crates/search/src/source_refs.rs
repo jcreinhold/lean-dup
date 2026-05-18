@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use lean_dup_index::index::HydratedDeclaration;
+use lean_dup_index::HydratedDeclaration;
 
 const DEFAULT_MAX_FILE_BYTES: u64 = 1_000_000;
 const DEFAULT_MAX_REFERENCES_PER_DECLARATION: usize = 256;
@@ -453,7 +453,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{ImportStatus, SourceFactInput, collect_source_facts};
-    use lean_dup_index::index::{DeclarationHandle, HydratedDeclaration};
+    use lean_dup_index::{DeclarationHandle, HydratedDeclaration};
     use lean_dup_worker::{Fingerprints, SourcePoint, SourceSpan};
 
     #[test]

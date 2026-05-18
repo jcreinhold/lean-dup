@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use walkdir::WalkDir;
 
-use lean_dup_report::progress::Reporter;
-use lean_dup_report::{Error, Result, read_to_string};
+use lean_dup_diagnostics::progress::Reporter;
+use lean_dup_diagnostics::{Error, Result, read_to_string};
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceRequest {
@@ -300,7 +300,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{WorkspaceRequest, resolve};
-    use lean_dup_report::progress::Reporter;
+    use lean_dup_diagnostics::progress::Reporter;
 
     #[test]
     fn discovers_toml_lakefile_roots_and_sources() {
