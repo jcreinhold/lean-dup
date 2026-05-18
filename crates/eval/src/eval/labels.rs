@@ -1,5 +1,5 @@
 use rustc_hash::{FxHashMap, FxHashSet};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::EvalSuite;
 use crate::eval::scoring::GoldPair;
@@ -35,14 +35,14 @@ pub struct TypedGoldLabel {
     pub static_evidence_acceptable: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum LabelPolarity {
     Positive,
     HardNegative,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum MatchClass {
     ExactTheoremDuplicate,
@@ -56,7 +56,7 @@ pub enum MatchClass {
     HardNegative,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ExpectedStageVisibility {
     Candidate,
@@ -65,7 +65,7 @@ pub enum ExpectedStageVisibility {
     Hidden,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AdjudicationSource {
     FixtureIntent,
@@ -74,7 +74,7 @@ pub enum AdjudicationSource {
     PythonEraRegression,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum LabelConfidence {
     High,

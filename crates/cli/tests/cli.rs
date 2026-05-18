@@ -310,6 +310,61 @@ fn eval_output_writes_artifact_and_keeps_stdout_valid() {
 }
 
 #[test]
+fn eval_hidden_search_dataset_mode_writes_feature_artifact() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let artifact = repo_root().join("target/search-quality/default-dataset.json");
+    let _ = fs::remove_file(&artifact);
+
+    let help = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .args(["eval", "--help"])
+        .assert()
+        .success();
+    let help_stdout = String::from_utf8(help.get_output().stdout.clone()).unwrap();
+    assert!(!help_stdout.contains("--write-search-dataset"));
+
+    let assert = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args([
+            "eval",
+            "--suite",
+            "default",
+            "--format",
+            "json",
+            "--write-search-dataset",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(
+        payload["search_dataset_artifact"],
+        "target/search-quality/default-dataset.json"
+    );
+
+    let dataset: Value = serde_json::from_str(&fs::read_to_string(&artifact).unwrap()).unwrap();
+    assert_eq!(dataset["schema_version"], "lean-dup.search-dataset.v1");
+    assert_eq!(dataset["suite"], "default");
+    let pairs = dataset["pairs"].as_array().unwrap();
+    assert!(!pairs.is_empty());
+    assert!(pairs.iter().any(|pair| pair["label"].is_object()));
+    assert!(pairs.iter().any(|pair| pair["label_status"] == "unlabeled"));
+    let first = &pairs[0];
+    assert!(first["stage_position"].is_object());
+    assert!(first["final_visibility"].is_object());
+    assert!(first["features"]["retrieval_feature_families"].is_array());
+    assert!(first["features"]["semantic_evidence_state"].is_string());
+
+    let raw = fs::read_to_string(artifact).unwrap();
+    for forbidden in ["/Users/", "statement_text", "IndexQuery", "FeatureMatch", "sqlite"] {
+        assert!(!raw.contains(forbidden), "dataset leaked {forbidden}");
+    }
+}
+
+#[test]
 fn doctor_reports_workspace_facts_from_repo_root() {
     let _worker = worker_cli_lock();
     let root = repo_root();

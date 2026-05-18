@@ -1,10 +1,10 @@
-use rustc_hash::FxHashSet;
 use serde::Serialize;
 
 use lean_dup_index::{HydratedDeclaration, OpenedIndex};
 
 use crate::Result;
-use crate::retrieval::{CandidateExplanation, KeyContribution, RetrievalDiagnostics, retrieve_candidates};
+use crate::pair_features::{SearchPairFeatures, feature_families, pair_features};
+use crate::retrieval::{CandidateExplanation, RetrievalDiagnostics, retrieve_candidates};
 
 /// Request for search-stage observations used by offline evaluation.
 ///
@@ -41,6 +41,7 @@ pub struct SearchObservedPair {
     pub origin: String,
     pub feature_families: Vec<String>,
     pub survived_shown_filter: bool,
+    pub features: SearchPairFeatures,
 }
 
 pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObservation> {
@@ -57,6 +58,11 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
                 origin: candidate.declaration.origin.clone(),
                 feature_families: feature_families(&candidate.explanation.contributions),
                 survived_shown_filter: shown,
+                features: pair_features(
+                    &set.anchor,
+                    &candidate.declaration,
+                    &candidate.explanation.contributions,
+                ),
             });
         }
     }
@@ -94,34 +100,4 @@ fn is_shown_queue_candidate(explanation: &CandidateExplanation) -> bool {
             "statement-fingerprint" | "safe-permutation-fingerprint" | "connective-fingerprint"
         )
     })
-}
-
-fn feature_families(contributions: &[KeyContribution]) -> Vec<String> {
-    let mut families = contributions
-        .iter()
-        .map(feature_family)
-        .collect::<FxHashSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    if families.is_empty() {
-        families.push("unknown".to_owned());
-    }
-    families.sort();
-    families
-}
-
-fn feature_family(contribution: &KeyContribution) -> String {
-    match contribution.kind.as_str() {
-        "statement-fingerprint" => "statement_fingerprint".to_owned(),
-        "safe-permutation-fingerprint" => "safe_permutation_fingerprint".to_owned(),
-        "connective-fingerprint" => "connective_fingerprint".to_owned(),
-        "conclusion-fingerprint" => "conclusion_fingerprint".to_owned(),
-        "role-feature" => match contribution.role.as_deref() {
-            Some("conclusion_const") => "role_conclusion_const".to_owned(),
-            Some("hypothesis_const") => "role_hypothesis_const".to_owned(),
-            Some("conclusion_head" | "hypothesis_head" | "binder_domain_head") => "role_head".to_owned(),
-            _ => "role_other".to_owned(),
-        },
-        _ => "other".to_owned(),
-    }
 }

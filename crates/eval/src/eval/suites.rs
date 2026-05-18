@@ -9,6 +9,7 @@ use crate::eval::labels::{GoldLabels, load_builtin};
 use crate::eval::scoring::{
     CountMetric, EvaluationMetrics, GoldPair, ObservedPair, ObservedRun, RecallAtK, TimingMetrics, score_run,
 };
+use crate::eval::search_dataset;
 use crate::eval::stage_metrics::SemanticVerificationStageMetrics;
 use lean_dup_diagnostics::perf;
 use lean_dup_diagnostics::progress::Reporter;
@@ -25,6 +26,7 @@ pub struct EvalRequest {
     pub workspace: Option<PathBuf>,
     pub mathlib_workspace: Option<PathBuf>,
     pub k_values: Vec<usize>,
+    pub write_search_dataset: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -32,6 +34,8 @@ pub struct EvalOutput {
     pub status: String,
     pub suite: String,
     pub metrics: EvaluationMetrics,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search_dataset_artifact: Option<PathBuf>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub runs: Vec<EvaluationRunReport>,
 }
@@ -161,11 +165,18 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
     };
     let metrics = score_run(&labels, &observed, &k_values);
     enforce_suite_gates(&definition, &labels, &metrics)?;
+    let search_dataset_artifact = if request.write_search_dataset {
+        let dataset = search_dataset::build(&labels.suite, &labels, &output);
+        Some(search_dataset::write_default_artifact(&repo_root(), &dataset)?)
+    } else {
+        None
+    };
 
     Ok(EvalOutput {
         status: "ok".to_owned(),
         suite: labels.suite,
         metrics,
+        search_dataset_artifact,
         runs: Vec::new(),
     })
 }
@@ -179,6 +190,7 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
                 workspace: None,
                 mathlib_workspace: None,
                 k_values: request.k_values.clone(),
+                write_search_dataset: false,
             },
             false,
             reporter,
@@ -192,6 +204,7 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
                 workspace: request.workspace.clone(),
                 mathlib_workspace: request.mathlib_workspace.clone(),
                 k_values: request.k_values.clone(),
+                write_search_dataset: false,
             },
             true,
             reporter,
@@ -212,6 +225,7 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
         status: status.to_owned(),
         suite: "production-gate".to_owned(),
         metrics,
+        search_dataset_artifact: None,
         runs,
     })
 }
@@ -595,6 +609,7 @@ mod tests {
                 workspace: None,
                 mathlib_workspace: None,
                 k_values: vec![1, 5, 10],
+                write_search_dataset: false,
             },
             &mut Reporter::new(false, false),
         );
@@ -648,6 +663,7 @@ mod tests {
                 workspace: Some(missing),
                 mathlib_workspace: None,
                 k_values: vec![1, 5, 10],
+                write_search_dataset: false,
             },
             true,
             &mut Reporter::new(false, false),
@@ -680,6 +696,7 @@ mod tests {
                 workspace: None,
                 mathlib_workspace: None,
                 k_values: vec![1, 5, 10],
+                write_search_dataset: false,
             },
             &mut Reporter::new(false, true),
         )
@@ -696,6 +713,7 @@ mod tests {
                 workspace: None,
                 mathlib_workspace: None,
                 k_values: vec![1, 5, 10],
+                write_search_dataset: false,
             },
             &mut Reporter::new(false, true),
         )

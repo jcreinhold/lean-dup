@@ -10,6 +10,7 @@ mod audit;
 mod baseline;
 mod error;
 mod observation;
+mod pair_features;
 mod ranking;
 mod replacement_hints;
 mod retrieval;
@@ -25,6 +26,9 @@ pub use audit::{
 pub use error::{Error, Result};
 pub use observation::{
     SearchObservation, SearchObservationRequest, SearchObservedPair, SearchRetrievalObservation, observe_search,
+};
+pub use pair_features::{
+    SearchEvidenceMode, SearchModuleRelation, SearchPairFeatures, SearchRoleOverlap, SearchSemanticEvidenceState,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]

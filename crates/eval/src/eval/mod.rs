@@ -1,5 +1,6 @@
 mod labels;
 mod scoring;
+mod search_dataset;
 mod stage_metrics;
 mod suites;
 

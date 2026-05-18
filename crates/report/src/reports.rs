@@ -30,6 +30,8 @@ pub struct EvalReportDto {
     pub status: String,
     pub suite: String,
     pub metrics: EvalMetricsDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search_dataset_artifact: Option<PathBuf>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub runs: Vec<EvalRunReportDto>,
 }
@@ -441,6 +443,7 @@ pub fn eval_report(report: EvalOutput) -> EvalReportDto {
         status: report.status,
         suite: report.suite,
         metrics: eval_metrics_dto(report.metrics),
+        search_dataset_artifact: report.search_dataset_artifact,
         runs: report
             .runs
             .into_iter()

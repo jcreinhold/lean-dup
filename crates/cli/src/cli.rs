@@ -171,6 +171,9 @@ pub struct EvalArgs {
 
     #[arg(long)]
     pub output: Option<PathBuf>,
+
+    #[arg(long, hide = true)]
+    pub write_search_dataset: bool,
 }
 
 #[derive(Debug, Clone, clap::Args)]
