@@ -12,6 +12,7 @@ use crate::eval::memory;
 use crate::eval::scoring::{
     CountMetric, EvaluationMetrics, GoldPair, ObservedPair, ObservedRun, RecallAtK, TimingMetrics, score_run,
 };
+use crate::eval::stage_metrics::{SemanticVerificationStageMetrics, feature_families};
 use crate::index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
 use crate::progress::Reporter;
 use crate::retrieval::{CandidateExplanation, RetrievalOutput, retrieve_candidates};
@@ -151,6 +152,7 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<Evaluatio
             total: output.candidate_sets.len(),
         },
         probe_unavailable: CountMetric { found: 0, total: 0 },
+        semantic_verification: SemanticVerificationStageMetrics::default(),
         timings: TimingMetrics {
             index_load_ms,
             retrieval_ms,
@@ -295,6 +297,7 @@ fn aggregate_metrics(suite: &str, runs: &[&EvaluationMetrics]) -> EvaluationMetr
                 .sum(),
         })
         .collect();
+    let stage_metrics = runs.iter().map(|metrics| &metrics.stage_metrics).collect::<Vec<_>>();
 
     EvaluationMetrics {
         suite: suite.to_owned(),
@@ -303,6 +306,7 @@ fn aggregate_metrics(suite: &str, runs: &[&EvaluationMetrics]) -> EvaluationMetr
         hard_negative_hits: sum_count(runs, |metrics| &metrics.hard_negative_hits),
         visible_groups: sum_count(runs, |metrics| &metrics.visible_groups),
         probe_unavailable: sum_count(runs, |metrics| &metrics.probe_unavailable),
+        stage_metrics: crate::eval::stage_metrics::aggregate(suite, &stage_metrics),
         candidate_count: runs.iter().map(|metrics| metrics.candidate_count).sum(),
         timings: TimingMetrics {
             index_load_ms: runs.iter().map(|metrics| metrics.timings.index_load_ms).sum(),
@@ -518,13 +522,17 @@ fn observed_pairs(output: &RetrievalOutput) -> Vec<ObservedPair> {
     let mut pairs = Vec::new();
     for set in &output.candidate_sets {
         for (index, candidate) in set.candidates.iter().enumerate() {
+            let shown = is_shown_queue_candidate(&candidate.explanation);
             pairs.push(ObservedPair {
                 pair: GoldPair::new(
                     set.anchor.qualified_name.clone(),
                     candidate.declaration.qualified_name.clone(),
                 ),
                 rank: index + 1,
-                shown: is_shown_queue_candidate(&candidate.explanation),
+                shown,
+                origin: candidate.declaration.origin.clone(),
+                feature_families: feature_families(&candidate.explanation.contributions),
+                survived_shown_filter: shown,
             });
         }
     }
@@ -588,6 +596,7 @@ mod tests {
     use super::{EvalRequest, aggregate_metrics, run, run_child_suite};
     use crate::cli::EvalSuite;
     use crate::eval::scoring::{CountMetric, EvaluationMetrics, RecallAtK, TimingMetrics};
+    use crate::eval::stage_metrics::{SearchStageMetrics, SemanticVerificationStageMetrics};
     use crate::progress::Reporter;
 
     #[test]
@@ -640,6 +649,10 @@ mod tests {
         assert_eq!(aggregate.visible_groups.total, 6);
         assert_eq!(aggregate.probe_unavailable.found, 4);
         assert_eq!(aggregate.probe_unavailable.total, 6);
+        assert_eq!(aggregate.stage_metrics.candidate_generation_recall.found, 4);
+        assert_eq!(aggregate.stage_metrics.candidate_generation_recall.total, 6);
+        assert_eq!(aggregate.stage_metrics.semantic_verification.planned, 4);
+        assert_eq!(aggregate.stage_metrics.semantic_verification.cached, 6);
         assert_eq!(aggregate.peak_memory_bytes, Some(30));
     }
 
@@ -724,6 +737,21 @@ mod tests {
             hard_negative_hits: CountMetric { found: 0, total },
             visible_groups: CountMetric { found, total },
             probe_unavailable: CountMetric { found, total },
+            stage_metrics: SearchStageMetrics {
+                candidate_generation_recall: CountMetric { found, total },
+                top_k_recall_before_final_ranking: vec![RecallAtK { k: 10, found, total }],
+                ranked_recall: vec![RecallAtK { k: 10, found, total }],
+                visible_queue_precision: CountMetric { found, total },
+                hard_negative_survival: Default::default(),
+                candidate_count_by_origin: Default::default(),
+                candidate_count_by_feature_family: Default::default(),
+                semantic_verification: SemanticVerificationStageMetrics {
+                    planned: found,
+                    cached: total,
+                    worker: 0,
+                    unavailable: found,
+                },
+            },
             candidate_count: total,
             timings: TimingMetrics {
                 index_load_ms: total as u128,

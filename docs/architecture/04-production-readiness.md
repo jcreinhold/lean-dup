@@ -183,7 +183,7 @@ The expected evidence artifacts are:
 | 27 | `G9`, `G1` | Python implementation removed; production-gate command completes but quality gates fail. |
 | 28 | `G1`, `G2`, `G3`, `G7` | Search-quality charter and match taxonomy. |
 | 29 | `G1`, `G2` | Pending: task-specific label schema and adjudication corpus. |
-| 30 | `G1`, `G2` | Pending: stage metrics and retrieval observability. |
+| 30 | `G1`, `G2` | Stage metrics and retrieval observability exist; quality gates remain open until stage denominators pass. |
 | 31 | `G1`, `G2`, `G6` | Pending: pair feature store and search dataset artifacts. |
 | 32 | `G1`, `G2`, `G6` | Pending: candidate generation as an explicit high-recall stage. |
 | 33 | `G1`, `G2`, `G6` | Pending: calibrated symbolic scorer and ablation harness. |

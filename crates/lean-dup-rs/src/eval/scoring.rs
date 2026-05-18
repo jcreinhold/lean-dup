@@ -2,6 +2,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
 
 use crate::eval::labels::GoldLabels;
+use crate::eval::stage_metrics::{SearchStageMetrics, SemanticVerificationStageMetrics};
 
 /// An unordered declaration pair used by evaluation labels and observations.
 ///
@@ -34,6 +35,9 @@ pub(crate) struct ObservedPair {
     pub(crate) pair: GoldPair,
     pub(crate) rank: usize,
     pub(crate) shown: bool,
+    pub(crate) origin: String,
+    pub(crate) feature_families: Vec<String>,
+    pub(crate) survived_shown_filter: bool,
 }
 
 /// Observed candidates and measured costs for one corpus run.
@@ -43,6 +47,7 @@ pub(crate) struct ObservedRun {
     pub(crate) pairs: Vec<ObservedPair>,
     pub(crate) visible_groups: CountMetric,
     pub(crate) probe_unavailable: CountMetric,
+    pub(crate) semantic_verification: SemanticVerificationStageMetrics,
     pub(crate) timings: TimingMetrics,
     pub(crate) peak_memory_bytes: Option<u64>,
 }
@@ -67,6 +72,7 @@ pub(crate) struct EvaluationMetrics {
     pub(crate) hard_negative_hits: CountMetric,
     pub(crate) visible_groups: CountMetric,
     pub(crate) probe_unavailable: CountMetric,
+    pub(crate) stage_metrics: SearchStageMetrics,
     pub(crate) candidate_count: usize,
     pub(crate) timings: TimingMetrics,
     pub(crate) peak_memory_bytes: Option<u64>,
@@ -115,6 +121,8 @@ pub(crate) fn score_run(labels: &GoldLabels, observed: &ObservedRun, k_values: &
     let shown_true_positives = shown_pairs.intersection(&labels.positives).count();
     let hard_negative_hits = shown_pairs.intersection(&labels.hard_negatives).count();
 
+    let stage_metrics = crate::eval::stage_metrics::score(labels, observed, k_values);
+
     EvaluationMetrics {
         suite: observed.suite.clone(),
         recall,
@@ -128,6 +136,7 @@ pub(crate) fn score_run(labels: &GoldLabels, observed: &ObservedRun, k_values: &
         },
         visible_groups: observed.visible_groups.clone(),
         probe_unavailable: observed.probe_unavailable.clone(),
+        stage_metrics,
         candidate_count: observed.pairs.len(),
         timings: observed.timings.clone(),
         peak_memory_bytes: observed.peak_memory_bytes,
@@ -162,6 +171,7 @@ mod tests {
 
     use super::{CountMetric, GoldPair, ObservedPair, ObservedRun, TimingMetrics, score_run};
     use crate::eval::labels::GoldLabels;
+    use crate::eval::stage_metrics::SemanticVerificationStageMetrics;
 
     #[test]
     fn recall_at_k_reports_raw_counts() {
@@ -227,10 +237,14 @@ mod tests {
                     pair: GoldPair::new(left, right),
                     rank,
                     shown,
+                    origin: "workspace".to_owned(),
+                    feature_families: vec!["statement_fingerprint".to_owned()],
+                    survived_shown_filter: shown,
                 })
                 .collect(),
             visible_groups: CountMetric::default(),
             probe_unavailable: CountMetric::default(),
+            semantic_verification: SemanticVerificationStageMetrics::default(),
             timings: TimingMetrics::default(),
             peak_memory_bytes: None,
         }

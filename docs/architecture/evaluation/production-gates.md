@@ -6,6 +6,8 @@ pipeline, see
 [../06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md).
 For the Prompt 29 typed adjudication schema, see
 [search-labels.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/evaluation/search-labels.md).
+For Prompt 30 stage-level quality denominators, see
+[search-stage-metrics.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/evaluation/search-stage-metrics.md).
 
 ## Design Note
 

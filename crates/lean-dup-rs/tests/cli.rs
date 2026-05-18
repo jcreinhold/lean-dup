@@ -205,6 +205,22 @@ fn eval_default_json_contains_raw_metric_counts() {
             .any(|recall| recall["k"] == 10 && recall["found"].as_u64() == recall["total"].as_u64())
     );
     assert_eq!(payload["metrics"]["hard_negative_hits"]["found"], 0);
+    assert!(payload["metrics"]["stage_metrics"].is_object());
+    assert_eq!(
+        payload["metrics"]["stage_metrics"]["candidate_generation_recall"]["total"],
+        payload["metrics"]["recall"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|recall| recall["k"] == 10)
+            .unwrap()["total"]
+    );
+    assert!(
+        payload["metrics"]["stage_metrics"]["candidate_count_by_feature_family"]
+            .as_object()
+            .unwrap()
+            .contains_key("statement_fingerprint")
+    );
 }
 
 #[test]
@@ -232,6 +248,16 @@ fn eval_hard_negatives_json_reports_positive_and_hard_negative_denominators() {
     );
     assert!(payload["metrics"]["hard_negative_hits"]["total"].as_u64().unwrap() > 0);
     assert_eq!(payload["metrics"]["hard_negative_hits"]["found"], 0);
+    assert!(
+        payload["metrics"]["stage_metrics"]["hard_negative_survival"]["candidate_generation"]["total"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert_eq!(
+        payload["metrics"]["stage_metrics"]["hard_negative_survival"]["visible_queue"]["found"],
+        0
+    );
 }
 
 #[test]
