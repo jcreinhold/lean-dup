@@ -91,6 +91,9 @@ pub struct EvalStageMetricsDto {
     pub hard_negative_survival: EvalHardNegativeSurvivalDto,
     pub candidate_count_by_origin: std::collections::BTreeMap<String, usize>,
     pub candidate_count_by_feature_family: std::collections::BTreeMap<String, usize>,
+    pub generated_candidate_count_by_policy: std::collections::BTreeMap<String, usize>,
+    pub generated_candidate_count_by_feature_family: std::collections::BTreeMap<String, usize>,
+    pub hard_negative_generated_by_feature_family: std::collections::BTreeMap<String, usize>,
     pub semantic_verification: EvalSemanticVerificationStageMetricsDto,
 }
 
@@ -516,6 +519,11 @@ fn eval_metrics_dto(metrics: lean_dup_eval::EvaluationMetrics) -> EvalMetricsDto
             },
             candidate_count_by_origin: metrics.stage_metrics.candidate_count_by_origin,
             candidate_count_by_feature_family: metrics.stage_metrics.candidate_count_by_feature_family,
+            generated_candidate_count_by_policy: metrics.stage_metrics.generated_candidate_count_by_policy,
+            generated_candidate_count_by_feature_family: metrics
+                .stage_metrics
+                .generated_candidate_count_by_feature_family,
+            hard_negative_generated_by_feature_family: metrics.stage_metrics.hard_negative_generated_by_feature_family,
             semantic_verification: EvalSemanticVerificationStageMetricsDto {
                 planned: metrics.stage_metrics.semantic_verification.planned,
                 cached: metrics.stage_metrics.semantic_verification.cached,

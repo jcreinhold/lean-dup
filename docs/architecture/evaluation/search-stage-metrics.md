@@ -54,12 +54,14 @@ its internal key representation private.
 - `candidate_count_by_origin`: candidate observations grouped by stable origin labels such as `workspace`, `mathlib`,
   or `external:fixture`;
 - `candidate_count_by_feature_family`: candidate observations grouped by stable retrieval evidence families;
+- `generated_candidate_count_by_policy`: generated observations grouped by private search policy labels;
+- `generated_candidate_count_by_feature_family`: generated observations grouped by stable feature family;
+- `hard_negative_generated_by_feature_family`: generated hard negatives grouped by stable feature family;
 - `semantic_verification`: planned, cached, worker, and unavailable probe counts. Retrieval-only eval suites report
   zeros until an audit-backed observation path supplies probe diagnostics.
 
-The current eval observation surface is retrieval output. That means candidate generation currently means "candidate
-appeared in the bounded retrieval result." Prompt 32 will split candidate generation from first-stage ranking more
-cleanly; Prompt 30 records the current limitation rather than hiding it.
+Prompt 32 split generated observations from the bounded ranked queue. Candidate generation now means "the pair was
+created by the private generation stage," while top-k and visible metrics describe later survival.
 
 ## Feature Families
 
@@ -106,9 +108,8 @@ missing from bounded retrieval output or hard negatives surviving into the visib
 The semantic-verification counters are zero for retrieval-only suites. Audit-backed eval observations are a later
 extension; this prompt only creates the stable metric slots.
 
-Top-k recall before final ranking currently mirrors retrieval rank because the calibrated scorer and pair-feature
-boundary do not exist yet. Prompt 31 creates pair feature artifacts, Prompt 32 separates candidate generation from
-ranking, and Prompt 33 introduces calibrated symbolic scoring.
+Top-k recall before final ranking still uses the current first-stage selection order. Prompt 33 introduces calibrated
+symbolic scoring.
 
 ## Red Flag Review
 

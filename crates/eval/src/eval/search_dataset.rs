@@ -44,7 +44,8 @@ pub struct SearchDatasetLabel {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SearchDatasetStagePosition {
     pub generated: bool,
-    pub rank: usize,
+    pub ranked: bool,
+    pub rank: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -117,7 +118,8 @@ fn dataset_pair(
         label_status: label_status(label.as_ref()),
         label,
         stage_position: SearchDatasetStagePosition {
-            generated: true,
+            generated: observed.generated,
+            ranked: observed.ranked,
             rank: observed.rank,
         },
         final_visibility: SearchDatasetFinalVisibility {
@@ -229,7 +231,10 @@ mod tests {
         SearchObservedPair {
             left: left.to_owned(),
             right: right.to_owned(),
-            rank,
+            generated: true,
+            ranked: true,
+            generation_policy: "local_duplicate_audit".to_owned(),
+            rank: Some(rank),
             shown: rank == 1,
             origin: "workspace".to_owned(),
             feature_families: vec!["statement_fingerprint".to_owned()],

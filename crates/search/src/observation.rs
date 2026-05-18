@@ -1,10 +1,14 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use serde::Serialize;
 
 use lean_dup_index::{HydratedDeclaration, OpenedIndex};
 
 use crate::Result;
 use crate::pair_features::{SearchPairFeatures, feature_families, pair_features};
-use crate::retrieval::{CandidateExplanation, RetrievalDiagnostics, retrieve_candidates};
+use crate::retrieval::{
+    CandidateExplanation, GeneratedPairEvidence, RetrievalDiagnostics, generated_pair_evidence, retrieve_candidates,
+};
 
 /// Request for search-stage observations used by offline evaluation.
 ///
@@ -14,6 +18,13 @@ use crate::retrieval::{CandidateExplanation, RetrievalDiagnostics, retrieve_cand
 pub struct SearchObservationRequest<'a> {
     pub workspace: &'a [HydratedDeclaration],
     pub comparison_indexes: &'a [OpenedIndex],
+    pub tracked_pairs: &'a [SearchTrackedPair],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct SearchTrackedPair {
+    pub left: String,
+    pub right: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -27,16 +38,23 @@ pub struct SearchObservation {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct SearchRetrievalObservation {
     pub candidate_count: usize,
+    pub generated_candidate_count: usize,
+    pub ranked_candidate_count: usize,
     pub hydrated_external_count: usize,
     pub pruned_feature_fanout_count: usize,
     pub heap_truncations: usize,
+    pub candidate_count_by_generation_policy: BTreeMap<String, usize>,
+    pub pruned_feature_fanouts: Vec<SearchPrunedFeatureFanout>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SearchObservedPair {
     pub left: String,
     pub right: String,
-    pub rank: usize,
+    pub generated: bool,
+    pub ranked: bool,
+    pub generation_policy: String,
+    pub rank: Option<usize>,
     pub shown: bool,
     pub origin: String,
     pub feature_families: Vec<String>,
@@ -44,16 +62,33 @@ pub struct SearchObservedPair {
     pub features: SearchPairFeatures,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SearchPrunedFeatureFanout {
+    pub policy: String,
+    pub source: String,
+    pub reason: String,
+    pub feature_family: String,
+    pub count: usize,
+}
+
 pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObservation> {
     let output = retrieve_candidates(request.workspace, request.comparison_indexes)?;
     let mut pairs = Vec::new();
+    let mut ranked_pair_ids = BTreeSet::new();
     for set in &output.candidate_sets {
         for (index, candidate) in set.candidates.iter().enumerate() {
             let shown = is_shown_queue_candidate(&candidate.explanation);
+            ranked_pair_ids.insert(pair_key(
+                &set.anchor.qualified_name,
+                &candidate.declaration.qualified_name,
+            ));
             pairs.push(SearchObservedPair {
                 left: set.anchor.qualified_name.clone(),
                 right: candidate.declaration.qualified_name.clone(),
-                rank: index + 1,
+                generated: true,
+                ranked: true,
+                generation_policy: generation_policy_for_ranked(&candidate.declaration),
+                rank: Some(index + 1),
                 shown,
                 origin: candidate.declaration.origin.clone(),
                 feature_families: feature_families(&candidate.explanation.contributions),
@@ -66,6 +101,8 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
             });
         }
     }
+    let index_facts = tracked_index_facts(request.comparison_indexes)?;
+    pairs.extend(tracked_generated_pairs(&request, &ranked_pair_ids, &index_facts)?);
     let visible_groups_found = output
         .candidate_sets
         .iter()
@@ -87,9 +124,23 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
 fn retrieval_observation(diagnostics: &RetrievalDiagnostics) -> SearchRetrievalObservation {
     SearchRetrievalObservation {
         candidate_count: diagnostics.candidate_count,
+        generated_candidate_count: diagnostics.generated_candidate_count,
+        ranked_candidate_count: diagnostics.ranked_candidate_count,
         hydrated_external_count: diagnostics.hydrated_external_count,
         pruned_feature_fanout_count: diagnostics.pruned_postings.len(),
         heap_truncations: diagnostics.heap_truncations.len(),
+        candidate_count_by_generation_policy: diagnostics.candidate_count_by_generation_policy.clone(),
+        pruned_feature_fanouts: diagnostics
+            .pruned_feature_fanouts
+            .iter()
+            .map(|item| SearchPrunedFeatureFanout {
+                policy: item.policy.clone(),
+                source: item.source.clone(),
+                reason: item.reason.clone(),
+                feature_family: item.feature_family.clone(),
+                count: item.count,
+            })
+            .collect(),
     }
 }
 
@@ -100,4 +151,252 @@ fn is_shown_queue_candidate(explanation: &CandidateExplanation) -> bool {
             "statement-fingerprint" | "safe-permutation-fingerprint" | "connective-fingerprint"
         )
     })
+}
+
+fn tracked_generated_pairs(
+    request: &SearchObservationRequest<'_>,
+    ranked_pair_ids: &BTreeSet<(String, String)>,
+    index_facts: &[lean_dup_index::OpenedIndexFacts],
+) -> Result<Vec<SearchObservedPair>> {
+    if request.tracked_pairs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let declarations = tracked_declarations(request)?;
+    let mut observed = Vec::new();
+    let mut seen = BTreeSet::new();
+    for tracked in request.tracked_pairs {
+        let key = pair_key(&tracked.left, &tracked.right);
+        if ranked_pair_ids.contains(&key) || !seen.insert(key) {
+            continue;
+        }
+        let Some(left) = declarations.get(&tracked.left) else {
+            continue;
+        };
+        let Some(right) = declarations.get(&tracked.right) else {
+            continue;
+        };
+        let Some(oriented) = orient_pair(left, right, request.comparison_indexes, index_facts) else {
+            continue;
+        };
+        let Some(evidence) = generated_pair_evidence(
+            request.workspace,
+            oriented.anchor,
+            oriented.candidate,
+            oriented.external,
+        )?
+        else {
+            continue;
+        };
+        observed.push(generated_observed_pair(oriented.anchor, oriented.candidate, evidence));
+    }
+    observed.sort_by(|left, right| left.left.cmp(&right.left).then_with(|| left.right.cmp(&right.right)));
+    Ok(observed)
+}
+
+#[derive(Clone)]
+struct LocatedDeclaration {
+    declaration: HydratedDeclaration,
+    comparison_index: Option<usize>,
+}
+
+struct OrientedTrackedPair<'a> {
+    anchor: &'a HydratedDeclaration,
+    candidate: &'a HydratedDeclaration,
+    external: Option<(&'a OpenedIndex, &'a lean_dup_index::OpenedIndexFacts)>,
+}
+
+fn tracked_declarations(request: &SearchObservationRequest<'_>) -> Result<BTreeMap<String, LocatedDeclaration>> {
+    let requested_names = request
+        .tracked_pairs
+        .iter()
+        .flat_map(|pair| [pair.left.clone(), pair.right.clone()])
+        .collect::<BTreeSet<_>>();
+    let mut declarations = BTreeMap::new();
+    for declaration in request.workspace {
+        if requested_names.contains(&declaration.qualified_name) {
+            declarations.insert(
+                declaration.qualified_name.clone(),
+                LocatedDeclaration {
+                    declaration: declaration.clone(),
+                    comparison_index: None,
+                },
+            );
+        }
+    }
+    let missing = requested_names
+        .into_iter()
+        .filter(|name| !declarations.contains_key(name))
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        return Ok(declarations);
+    }
+    for (index, opened) in request.comparison_indexes.iter().enumerate() {
+        let still_missing = missing
+            .iter()
+            .filter(|name| !declarations.contains_key(*name))
+            .cloned()
+            .collect::<Vec<_>>();
+        if still_missing.is_empty() {
+            break;
+        }
+        for declaration in opened.declarations_named(&still_missing)? {
+            let name = declaration.qualified_name.clone();
+            declarations.entry(name).or_insert_with(|| LocatedDeclaration {
+                declaration,
+                comparison_index: Some(index),
+            });
+        }
+    }
+    Ok(declarations)
+}
+
+fn orient_pair<'a>(
+    left: &'a LocatedDeclaration,
+    right: &'a LocatedDeclaration,
+    indexes: &'a [OpenedIndex],
+    index_facts: &'a [lean_dup_index::OpenedIndexFacts],
+) -> Option<OrientedTrackedPair<'a>> {
+    match (left.comparison_index, right.comparison_index) {
+        (None, None) => Some(OrientedTrackedPair {
+            anchor: &left.declaration,
+            candidate: &right.declaration,
+            external: None,
+        }),
+        (None, Some(index)) => index_facts.get(index).and_then(|facts| {
+            indexes.get(index).map(|opened| OrientedTrackedPair {
+                anchor: &left.declaration,
+                candidate: &right.declaration,
+                external: Some((opened, facts)),
+            })
+        }),
+        (Some(index), None) => index_facts.get(index).and_then(|facts| {
+            indexes.get(index).map(|opened| OrientedTrackedPair {
+                anchor: &right.declaration,
+                candidate: &left.declaration,
+                external: Some((opened, facts)),
+            })
+        }),
+        (Some(_), Some(_)) => None,
+    }
+}
+
+fn generated_observed_pair(
+    anchor: &HydratedDeclaration,
+    candidate: &HydratedDeclaration,
+    evidence: GeneratedPairEvidence,
+) -> SearchObservedPair {
+    let feature_families = feature_families(&evidence.contributions);
+    SearchObservedPair {
+        left: anchor.qualified_name.clone(),
+        right: candidate.qualified_name.clone(),
+        generated: true,
+        ranked: false,
+        generation_policy: evidence.policy,
+        rank: None,
+        shown: false,
+        origin: candidate.origin.clone(),
+        feature_families,
+        survived_shown_filter: false,
+        features: pair_features(anchor, candidate, &evidence.contributions),
+    }
+}
+
+fn tracked_index_facts(indexes: &[OpenedIndex]) -> Result<Vec<lean_dup_index::OpenedIndexFacts>> {
+    let mut facts = Vec::with_capacity(indexes.len());
+    for index in indexes {
+        facts.push(index.facts()?);
+    }
+    Ok(facts)
+}
+
+fn pair_key(left: &str, right: &str) -> (String, String) {
+    if left <= right {
+        (left.to_owned(), right.to_owned())
+    } else {
+        (right.to_owned(), left.to_owned())
+    }
+}
+
+fn generation_policy_for_ranked(candidate: &HydratedDeclaration) -> String {
+    if candidate.origin == "workspace" {
+        "local_duplicate_audit".to_owned()
+    } else if candidate.origin == "mathlib" {
+        "mathlib_comparison".to_owned()
+    } else if candidate.source_span.is_some() {
+        "source_backed_external_comparison".to_owned()
+    } else {
+        "static_external_comparison".to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lean_dup_index::{DeclarationHandle, HydratedDeclaration};
+    use lean_dup_worker::{Fingerprints, RoleFeature};
+
+    use super::{SearchObservationRequest, SearchTrackedPair, observe_search};
+
+    #[test]
+    fn tracked_pairs_record_generated_before_ranked_selection() {
+        let rows = generated_rows(100);
+        let tracked = vec![SearchTrackedPair {
+            left: "Synthetic.generated_0".to_owned(),
+            right: "Synthetic.generated_1".to_owned(),
+        }];
+
+        let observation = observe_search(SearchObservationRequest {
+            workspace: &rows,
+            comparison_indexes: &[],
+            tracked_pairs: &tracked,
+        })
+        .unwrap();
+
+        let pair = observation
+            .pairs
+            .iter()
+            .find(|pair| {
+                (pair.left == "Synthetic.generated_0" && pair.right == "Synthetic.generated_1")
+                    || (pair.left == "Synthetic.generated_1" && pair.right == "Synthetic.generated_0")
+            })
+            .expect("tracked generated pair");
+        assert!(pair.generated);
+        assert!(!pair.ranked);
+        assert_eq!(pair.rank, None);
+        assert_eq!(pair.generation_policy, "local_duplicate_audit");
+        assert!(pair.feature_families.contains(&"statement_fingerprint".to_owned()));
+        assert!(observation.retrieval.generated_candidate_count > observation.retrieval.ranked_candidate_count);
+    }
+
+    fn generated_rows(count: usize) -> Vec<HydratedDeclaration> {
+        (0..count)
+            .map(|index| HydratedDeclaration {
+                handle: DeclarationHandle::for_test(format!("synthetic-{index}")),
+                declaration_id: format!("synthetic:generated:{index}"),
+                origin: "workspace".to_owned(),
+                module: "Synthetic".to_owned(),
+                qualified_name: format!("Synthetic.generated_{index}"),
+                display_name: format!("generated_{index}"),
+                kind: "theorem".to_owned(),
+                visibility: "public".to_owned(),
+                modifiers: Vec::new(),
+                source_span: None,
+                statement_text: "raw statement text must not serialize".to_owned(),
+                status_flags: Vec::new(),
+                feature_version: "test".to_owned(),
+                fingerprints: Fingerprints {
+                    statement: "same-statement".to_owned(),
+                    safe_binder_permutation: String::new(),
+                    connective_shape: String::new(),
+                    conclusion_shape: String::new(),
+                },
+                role_features: vec![RoleFeature {
+                    role: "conclusion_const".to_owned(),
+                    key: "same-role".to_owned(),
+                    display: Some("Same".to_owned()),
+                }],
+                binder_count: 0,
+                low_signal_markers: Vec::new(),
+            })
+            .collect()
+    }
 }

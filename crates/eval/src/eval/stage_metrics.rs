@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
@@ -19,6 +19,9 @@ pub struct SearchStageMetrics {
     pub hard_negative_survival: HardNegativeSurvival,
     pub candidate_count_by_origin: BTreeMap<String, usize>,
     pub candidate_count_by_feature_family: BTreeMap<String, usize>,
+    pub generated_candidate_count_by_policy: BTreeMap<String, usize>,
+    pub generated_candidate_count_by_feature_family: BTreeMap<String, usize>,
+    pub hard_negative_generated_by_feature_family: BTreeMap<String, usize>,
     pub semantic_verification: SemanticVerificationStageMetrics,
 }
 
@@ -46,6 +49,12 @@ pub struct SemanticVerificationStageMetrics {
 
 pub fn score(labels: &GoldLabels, observed: &ObservedRun, k_values: &[usize]) -> SearchStageMetrics {
     let best_rank_by_pair = best_rank_by_pair(&observed.pairs);
+    let generated_pairs = observed
+        .pairs
+        .iter()
+        .filter(|pair| pair.generated)
+        .map(|pair| pair.pair.clone())
+        .collect::<FxHashSet<_>>();
     let shown_pairs = observed
         .pairs
         .iter()
@@ -85,7 +94,7 @@ pub fn score(labels: &GoldLabels, observed: &ObservedRun, k_values: &[usize]) ->
             found: labels
                 .positives
                 .iter()
-                .filter(|pair| best_rank_by_pair.contains_key(*pair))
+                .filter(|pair| generated_pairs.contains(*pair))
                 .count(),
             total: labels.positives.len(),
         },
@@ -100,7 +109,7 @@ pub fn score(labels: &GoldLabels, observed: &ObservedRun, k_values: &[usize]) ->
                 found: labels
                     .hard_negatives
                     .iter()
-                    .filter(|pair| best_rank_by_pair.contains_key(*pair))
+                    .filter(|pair| generated_pairs.contains(*pair))
                     .count(),
                 total: labels.hard_negatives.len(),
             },
@@ -112,6 +121,9 @@ pub fn score(labels: &GoldLabels, observed: &ObservedRun, k_values: &[usize]) ->
         },
         candidate_count_by_origin: count_by_origin(observed),
         candidate_count_by_feature_family: count_by_feature_family(observed),
+        generated_candidate_count_by_policy: count_generated_by_policy(observed),
+        generated_candidate_count_by_feature_family: count_generated_by_feature_family(observed),
+        hard_negative_generated_by_feature_family: count_generated_hard_negatives_by_feature_family(labels, observed),
         semantic_verification: observed.semantic_verification.clone(),
     }
 }
@@ -149,6 +161,17 @@ pub fn aggregate(_suite: &str, runs: &[&SearchStageMetrics]) -> SearchStageMetri
         candidate_count_by_feature_family: sum_maps(
             runs.iter().map(|metrics| &metrics.candidate_count_by_feature_family),
         ),
+        generated_candidate_count_by_policy: sum_maps(
+            runs.iter().map(|metrics| &metrics.generated_candidate_count_by_policy),
+        ),
+        generated_candidate_count_by_feature_family: sum_maps(
+            runs.iter()
+                .map(|metrics| &metrics.generated_candidate_count_by_feature_family),
+        ),
+        hard_negative_generated_by_feature_family: sum_maps(
+            runs.iter()
+                .map(|metrics| &metrics.hard_negative_generated_by_feature_family),
+        ),
         semantic_verification: SemanticVerificationStageMetrics {
             planned: runs.iter().map(|metrics| metrics.semantic_verification.planned).sum(),
             cached: runs.iter().map(|metrics| metrics.semantic_verification.cached).sum(),
@@ -163,7 +186,7 @@ pub fn aggregate(_suite: &str, runs: &[&SearchStageMetrics]) -> SearchStageMetri
 
 fn count_by_origin(observed: &ObservedRun) -> BTreeMap<String, usize> {
     let mut counts = BTreeMap::new();
-    for pair in &observed.pairs {
+    for pair in observed.pairs.iter().filter(|pair| pair.ranked) {
         *counts.entry(pair.origin.clone()).or_insert(0) += 1;
     }
     counts
@@ -171,7 +194,7 @@ fn count_by_origin(observed: &ObservedRun) -> BTreeMap<String, usize> {
 
 fn count_by_feature_family(observed: &ObservedRun) -> BTreeMap<String, usize> {
     let mut counts = BTreeMap::new();
-    for pair in &observed.pairs {
+    for pair in observed.pairs.iter().filter(|pair| pair.ranked) {
         for family in &pair.feature_families {
             *counts.entry(family.clone()).or_insert(0) += 1;
         }
@@ -179,13 +202,55 @@ fn count_by_feature_family(observed: &ObservedRun) -> BTreeMap<String, usize> {
     counts
 }
 
+fn count_generated_by_policy(observed: &ObservedRun) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for pair in observed.pairs.iter().filter(|pair| pair.generated) {
+        *counts.entry(pair.generation_policy.clone()).or_insert(0) += 1;
+    }
+    counts
+}
+
+fn count_generated_by_feature_family(observed: &ObservedRun) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for pair in observed.pairs.iter().filter(|pair| pair.generated) {
+        for family in &pair.feature_families {
+            *counts.entry(family.clone()).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+fn count_generated_hard_negatives_by_feature_family(
+    labels: &GoldLabels,
+    observed: &ObservedRun,
+) -> BTreeMap<String, usize> {
+    let mut seen_by_family = BTreeSet::new();
+    for pair in observed
+        .pairs
+        .iter()
+        .filter(|pair| pair.generated && labels.hard_negatives.contains(&pair.pair))
+    {
+        for family in &pair.feature_families {
+            seen_by_family.insert((family.clone(), pair.pair.clone()));
+        }
+    }
+    let mut counts = BTreeMap::new();
+    for (family, _) in seen_by_family {
+        *counts.entry(family).or_insert(0) += 1;
+    }
+    counts
+}
+
 fn best_rank_by_pair(pairs: &[crate::eval::scoring::ObservedPair]) -> FxHashMap<GoldPair, usize> {
     let mut ranks: FxHashMap<GoldPair, usize> = FxHashMap::default();
     for observed in pairs {
+        let Some(observed_rank) = observed.rank else {
+            continue;
+        };
         ranks
             .entry(observed.pair.clone())
-            .and_modify(|rank| *rank = (*rank).min(observed.rank))
-            .or_insert(observed.rank);
+            .and_modify(|rank| *rank = (*rank).min(observed_rank))
+            .or_insert(observed_rank);
     }
     ranks
 }
@@ -276,7 +341,7 @@ mod tests {
         let labels = labels(["A:B", "C:D"], []);
         let observed = observed([
             pair("A", "B", 1, true, "workspace", ["statement_fingerprint"]),
-            pair("C", "D", 4, false, "workspace", ["role_other"]),
+            generated_pair("C", "D", "workspace", ["role_other"]),
         ]);
 
         let metrics = score(&labels, &observed, &[1]);
@@ -285,6 +350,10 @@ mod tests {
         assert_eq!(metrics.candidate_generation_recall.total, 2);
         assert_eq!(metrics.top_k_recall_before_final_ranking[0].found, 1);
         assert_eq!(metrics.top_k_recall_before_final_ranking[0].total, 2);
+        assert_eq!(
+            metrics.generated_candidate_count_by_policy.get("local_duplicate_audit"),
+            Some(&2)
+        );
     }
 
     #[test]
@@ -300,6 +369,12 @@ mod tests {
         assert_eq!(metrics.hard_negative_survival.candidate_generation.found, 2);
         assert_eq!(metrics.hard_negative_survival.top_k[0].found, 1);
         assert_eq!(metrics.hard_negative_survival.visible_queue.found, 1);
+        assert_eq!(
+            metrics
+                .hard_negative_generated_by_feature_family
+                .get("statement_fingerprint"),
+            Some(&1)
+        );
     }
 
     #[test]
@@ -352,11 +427,28 @@ mod tests {
     ) -> ObservedPair {
         ObservedPair {
             pair: GoldPair::new(left, right),
-            rank,
+            generated: true,
+            ranked: true,
+            generation_policy: "local_duplicate_audit".to_owned(),
+            rank: Some(rank),
             shown,
             origin: origin.to_owned(),
             feature_families: families.into_iter().map(str::to_owned).collect(),
             survived_shown_filter: shown,
+        }
+    }
+
+    fn generated_pair<const F: usize>(left: &str, right: &str, origin: &str, families: [&str; F]) -> ObservedPair {
+        ObservedPair {
+            pair: GoldPair::new(left, right),
+            generated: true,
+            ranked: false,
+            generation_policy: "local_duplicate_audit".to_owned(),
+            rank: None,
+            shown: false,
+            origin: origin.to_owned(),
+            feature_families: families.into_iter().map(str::to_owned).collect(),
+            survived_shown_filter: false,
         }
     }
 

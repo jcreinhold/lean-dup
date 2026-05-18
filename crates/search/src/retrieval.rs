@@ -72,9 +72,19 @@ pub struct CandidateExplanation {
 #[allow(dead_code)]
 pub struct RetrievalDiagnostics {
     pub candidate_count: usize,
+    pub generated_candidate_count: usize,
+    pub ranked_candidate_count: usize,
     pub hydrated_external_count: usize,
     pub pruned_postings: Vec<PrunedPosting>,
+    pub pruned_feature_fanouts: Vec<PrunedFeatureFanout>,
     pub heap_truncations: Vec<HeapTruncation>,
+    pub candidate_count_by_generation_policy: BTreeMap<String, usize>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct GeneratedPairEvidence {
+    pub policy: String,
+    pub contributions: Vec<KeyContribution>,
 }
 
 /// One semantic key contribution to a retrieved candidate.
@@ -88,6 +98,24 @@ pub struct KeyContribution {
     pub score: f64,
 }
 
+impl KeyContribution {
+    pub(crate) fn feature_family(&self) -> String {
+        match self.kind.as_str() {
+            "statement-fingerprint" => "statement_fingerprint".to_owned(),
+            "safe-permutation-fingerprint" => "safe_permutation_fingerprint".to_owned(),
+            "connective-fingerprint" => "connective_fingerprint".to_owned(),
+            "conclusion-fingerprint" => "conclusion_fingerprint".to_owned(),
+            "role-feature" => match self.role.as_deref() {
+                Some("conclusion_const") => "role_conclusion_const".to_owned(),
+                Some("hypothesis_const") => "role_hypothesis_const".to_owned(),
+                Some("conclusion_head" | "hypothesis_head" | "binder_domain_head") => "role_head".to_owned(),
+                _ => "role_other".to_owned(),
+            },
+            _ => "other".to_owned(),
+        }
+    }
+}
+
 /// A semantic posting that retrieval chose not to expand.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[allow(dead_code)]
@@ -98,6 +126,17 @@ pub struct PrunedPosting {
     pub kind: String,
     pub role: Option<String>,
     pub display: Option<String>,
+    pub count: usize,
+}
+
+/// A broad semantic feature fanout that candidate generation did not expand.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[allow(dead_code)]
+pub struct PrunedFeatureFanout {
+    pub policy: String,
+    pub source: String,
+    pub reason: String,
+    pub feature_family: String,
     pub count: usize,
 }
 
@@ -255,6 +294,7 @@ enum CandidateId {
 #[derive(Debug, Clone)]
 struct CandidateAccumulator {
     id: CandidateId,
+    policy: CandidateGenerationPolicy,
     score: f64,
     admitted: bool,
     contributions: BTreeMap<String, KeyContribution>,
@@ -265,6 +305,25 @@ struct SelectedCandidate {
     id: CandidateId,
     score: f64,
     contributions: Vec<KeyContribution>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum CandidateGenerationPolicy {
+    LocalDuplicateAudit,
+    MathlibComparison,
+    StaticExternalComparison,
+    SourceBackedExternalComparison,
+}
+
+impl CandidateGenerationPolicy {
+    fn label(self) -> &'static str {
+        match self {
+            Self::LocalDuplicateAudit => "local_duplicate_audit",
+            Self::MathlibComparison => "mathlib_comparison",
+            Self::StaticExternalComparison => "static_external_comparison",
+            Self::SourceBackedExternalComparison => "source_backed_external_comparison",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -348,6 +407,64 @@ fn planned_keys(declaration: &HydratedDeclaration) -> Vec<PlannedKey> {
         });
     }
     plans
+}
+
+pub(crate) fn generated_pair_evidence(
+    workspace: &[HydratedDeclaration],
+    anchor: &HydratedDeclaration,
+    candidate: &HydratedDeclaration,
+    external: Option<(&OpenedIndex, &lean_dup_index::OpenedIndexFacts)>,
+) -> Result<Option<GeneratedPairEvidence>> {
+    let anchor_plans = planned_keys(anchor);
+    let candidate_keys = planned_keys(candidate)
+        .into_iter()
+        .map(|plan| plan.key)
+        .collect::<HashSet<_>>();
+    let policy = external.map_or(CandidateGenerationPolicy::LocalDuplicateAudit, |(_, facts)| {
+        policy_for_external(facts)
+    });
+    let total_documents = external.map_or(workspace.len(), |(_, facts)| facts.declaration_count);
+    let local_counts = if external.is_none() {
+        let workspace_plans = workspace.iter().map(planned_keys).collect::<Vec<_>>();
+        Some(local_counts(&local_postings(&workspace_plans)))
+    } else {
+        None
+    };
+    let mut contributions = BTreeMap::new();
+    let mut admitted = false;
+    for plan in sorted_plans(&anchor_plans) {
+        if !candidate_keys.contains(&plan.key) {
+            continue;
+        }
+        let count = if let Some((opened, _)) = external {
+            opened.feature_fanout(std::slice::from_ref(&plan.key))?.count(&plan.key)
+        } else {
+            local_counts
+                .as_ref()
+                .and_then(|counts| counts.get(&plan.key).copied())
+                .unwrap_or(0)
+        };
+        if count == 0 || count > posting_limit(plan) {
+            continue;
+        }
+        if !plan.admits_candidate && !admitted {
+            continue;
+        }
+        admitted |= plan.admits_candidate;
+        let mut contribution = plan.contribution.clone();
+        contribution.score = plan.base_weight * rarity_weight(total_documents, count);
+        contributions
+            .entry(contribution_sort_key(&contribution))
+            .and_modify(|existing: &mut KeyContribution| existing.score += contribution.score)
+            .or_insert(contribution);
+    }
+    if !admitted {
+        return Ok(None);
+    }
+    Ok(Some(GeneratedPairEvidence {
+        policy: policy.label().to_owned(),
+        contributions: contributions.into_values().collect(),
+    }))
 }
 
 fn fingerprint_plan(kind: FingerprintKind, key: &str, label: &'static str, base_weight: f64) -> PlannedKey {
@@ -504,6 +621,13 @@ fn add_local_matches(
             display: plan.contribution.display.clone(),
             count,
         });
+        record_pruned_feature_fanout(
+            diagnostics,
+            CandidateGenerationPolicy::LocalDuplicateAudit,
+            "workspace",
+            plan,
+            count,
+        );
         return;
     }
     for candidate_index in matches {
@@ -511,7 +635,13 @@ fn add_local_matches(
             continue;
         }
         let score = plan.base_weight * rarity_weight(workspace.len(), count);
-        add_contribution(CandidateId::Workspace(*candidate_index), plan, score, accumulators);
+        add_contribution(
+            CandidateId::Workspace(*candidate_index),
+            CandidateGenerationPolicy::LocalDuplicateAudit,
+            plan,
+            score,
+            accumulators,
+        );
     }
 }
 
@@ -531,6 +661,7 @@ fn add_external_matches(
     diagnostics: &mut RetrievalDiagnostics,
 ) {
     for (index, facts) in context.index_facts.iter().enumerate().take(context.indexes.len()) {
+        let policy = policy_for_external(facts);
         let count = context.counts.get(&(index, plan.key.clone())).copied().unwrap_or(0);
         if count == 0 {
             continue;
@@ -545,6 +676,7 @@ fn add_external_matches(
                 display: plan.contribution.display.clone(),
                 count,
             });
+            record_pruned_feature_fanout(diagnostics, policy, &facts.origin, plan, count);
             continue;
         }
         let Some(handles) = context.postings.get(&(index, plan.key.clone())) else {
@@ -557,6 +689,7 @@ fn add_external_matches(
                     index,
                     handle: handle.clone(),
                 },
+                policy,
                 plan,
                 score,
                 accumulators,
@@ -567,6 +700,7 @@ fn add_external_matches(
 
 fn add_contribution(
     id: CandidateId,
+    policy: CandidateGenerationPolicy,
     plan: &PlannedKey,
     score: f64,
     accumulators: &mut HashMap<CandidateId, CandidateAccumulator>,
@@ -576,6 +710,7 @@ fn add_contribution(
     }
     let accumulator = accumulators.entry(id.clone()).or_insert_with(|| CandidateAccumulator {
         id,
+        policy,
         score: 0.0,
         admitted: false,
         contributions: BTreeMap::new(),
@@ -600,6 +735,13 @@ fn select_top(
         .into_values()
         .filter(|candidate| candidate.admitted)
         .collect::<Vec<_>>();
+    diagnostics.generated_candidate_count += candidates.len();
+    for candidate in &candidates {
+        *diagnostics
+            .candidate_count_by_generation_policy
+            .entry(candidate.policy.label().to_owned())
+            .or_default() += 1;
+    }
     if candidates.len() > TOP_K_PER_WORKSPACE_DECLARATION {
         diagnostics.heap_truncations.push(HeapTruncation {
             anchor_declaration_id: anchor_declaration_id.to_owned(),
@@ -641,7 +783,37 @@ fn select_top(
             .unwrap_or(Ordering::Equal)
             .then_with(|| candidate_sort_key(&left.id).cmp(&candidate_sort_key(&right.id)))
     });
+    diagnostics.ranked_candidate_count += selected.len();
     selected
+}
+
+fn policy_for_external(facts: &lean_dup_index::OpenedIndexFacts) -> CandidateGenerationPolicy {
+    if facts.origin == "mathlib" {
+        CandidateGenerationPolicy::MathlibComparison
+    } else {
+        match facts.provenance.kind {
+            lean_dup_index::IndexProvenanceKind::Static => CandidateGenerationPolicy::StaticExternalComparison,
+            lean_dup_index::IndexProvenanceKind::SourceBacked => {
+                CandidateGenerationPolicy::SourceBackedExternalComparison
+            }
+        }
+    }
+}
+
+fn record_pruned_feature_fanout(
+    diagnostics: &mut RetrievalDiagnostics,
+    policy: CandidateGenerationPolicy,
+    source: &str,
+    plan: &PlannedKey,
+    count: usize,
+) {
+    diagnostics.pruned_feature_fanouts.push(PrunedFeatureFanout {
+        policy: policy.label().to_owned(),
+        source: source.to_owned(),
+        reason: prune_reason_for_plan(plan).to_owned(),
+        feature_family: plan.contribution.feature_family(),
+        count,
+    });
 }
 
 fn hydrate_external(
@@ -852,6 +1024,47 @@ mod tests {
                 .pruned_postings
                 .iter()
                 .any(|posting| posting.reason == "broad-posting" && posting.display.as_deref() == Some("Eq"))
+        );
+        assert!(
+            output
+                .diagnostics
+                .pruned_feature_fanouts
+                .iter()
+                .any(|fanout| fanout.reason == "broad-posting" && fanout.feature_family == "role_head")
+        );
+    }
+
+    #[test]
+    fn generated_candidates_are_counted_before_top_k_selection() {
+        let cache = TempDir::new().unwrap();
+        let workspace = hydrated_workspace(&cache);
+        let seed = workspace
+            .iter()
+            .find(|row| row.qualified_name == "Tiny.same_left")
+            .unwrap();
+        let mut rows = Vec::new();
+        for index in 0..100 {
+            let mut row = seed.clone();
+            row.declaration_id = format!("synthetic:generated:{index}");
+            row.qualified_name = format!("Synthetic.generated_{index}");
+            row.display_name = format!("generated_{index}");
+            row.handle = lean_dup_index::DeclarationHandle::for_test(row.declaration_id.clone());
+            rows.push(row);
+        }
+
+        let output = retrieve_candidates(&rows, &[]).unwrap();
+
+        assert!(output.diagnostics.generated_candidate_count > output.diagnostics.candidate_count);
+        assert_eq!(
+            output.diagnostics.ranked_candidate_count,
+            output.diagnostics.candidate_count
+        );
+        assert_eq!(
+            output
+                .diagnostics
+                .candidate_count_by_generation_policy
+                .get("local_duplicate_audit"),
+            Some(&output.diagnostics.generated_candidate_count)
         );
     }
 

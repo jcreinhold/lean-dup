@@ -63,12 +63,13 @@ Each pair row contains:
 - `left` and `right`: normalized declaration names;
 - `label_status`: `positive`, `hard-negative`, or `unlabeled`;
 - `label`: typed label metadata when the pair is adjudicated;
-- `stage_position`: whether the pair was generated and its current rank;
+- `stage_position`: whether the pair was generated, whether it survived ranking, and its rank when ranked;
 - `final_visibility`: current shown-queue facts;
 - `features`: search-owned stable feature facts.
 
-Rows are sorted by `(left, right, rank)`. Unlabeled retrieved candidates remain in the artifact because later prompts
-need to inspect false-positive and background-candidate distributions, not only the gold pairs.
+Rows are sorted by `(left, right, rank)`, with generated-only rows carrying no rank. Unlabeled retrieved candidates
+remain in the artifact because later prompts need to inspect false-positive and background-candidate distributions, not
+only the gold pairs.
 
 ## Feature Contract
 

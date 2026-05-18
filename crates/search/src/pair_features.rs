@@ -80,14 +80,7 @@ pub(crate) fn feature_families(contributions: &[KeyContribution]) -> Vec<String>
 }
 
 fn feature_family(contribution: &KeyContribution) -> String {
-    match contribution.kind.as_str() {
-        "statement-fingerprint" => "statement_fingerprint".to_owned(),
-        "safe-permutation-fingerprint" => "safe_permutation_fingerprint".to_owned(),
-        "connective-fingerprint" => "connective_fingerprint".to_owned(),
-        "conclusion-fingerprint" => "conclusion_fingerprint".to_owned(),
-        "role-feature" => role_family(contribution.role.as_deref()),
-        _ => "other".to_owned(),
-    }
+    contribution.feature_family()
 }
 
 fn role_family(role: Option<&str>) -> String {

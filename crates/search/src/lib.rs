@@ -25,7 +25,8 @@ pub use audit::{
 };
 pub use error::{Error, Result};
 pub use observation::{
-    SearchObservation, SearchObservationRequest, SearchObservedPair, SearchRetrievalObservation, observe_search,
+    SearchObservation, SearchObservationRequest, SearchObservedPair, SearchPrunedFeatureFanout,
+    SearchRetrievalObservation, SearchTrackedPair, observe_search,
 };
 pub use pair_features::{
     SearchEvidenceMode, SearchModuleRelation, SearchPairFeatures, SearchRoleOverlap, SearchSemanticEvidenceState,

@@ -185,7 +185,7 @@ The expected evidence artifacts are:
 | 29 | `G1`, `G2` | Pending: task-specific label schema and adjudication corpus. |
 | 30 | `G1`, `G2` | Stage metrics and retrieval observability exist; quality gates remain open until stage denominators pass. |
 | 31 | `G1`, `G2`, `G6` | Pair feature facts and hidden search dataset artifacts exist; scoring behavior is unchanged. |
-| 32 | `G1`, `G2`, `G6` | Pending: candidate generation as an explicit high-recall stage. |
+| 32 | `G1`, `G2`, `G6` | Candidate generation is an explicit private search stage with generated/ranked observability; scoring behavior is unchanged. |
 | 33 | `G1`, `G2`, `G6` | Pending: calibrated symbolic scorer and ablation harness. |
 | 34 | `G2`, `G3` | Pending: semantic reranking and obligation-yield improvements. |
 | 35 | `G1`, `G2`, `G6` | Pending: hidden local embedding experiment gate. |

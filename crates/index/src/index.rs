@@ -707,6 +707,38 @@ impl OpenedIndex {
         })
     }
 
+    /// Hydrate declarations with the requested qualified names.
+    ///
+    /// This lookup is intended for evaluation labels and targeted diagnostics.
+    /// It preserves the index boundary by returning declaration facts directly;
+    /// callers do not receive storage rows, SQL predicates, or posting data.
+    pub fn declarations_named(&self, qualified_names: &[String]) -> Result<Vec<HydratedDeclaration>> {
+        if qualified_names.is_empty() {
+            return Ok(Vec::new());
+        }
+        perf::record_count(
+            CostClass::SqliteIndex,
+            "sqlite.hydrate.named_declarations",
+            qualified_names.len() as u64,
+        );
+        perf::measure_result(CostClass::SqliteIndex, "sqlite.hydrate_named", || {
+            let connection = open_readonly(&self.path)?;
+            let mut names = qualified_names.to_vec();
+            names.sort();
+            names.dedup();
+            let mut handles = Vec::new();
+            let mut statement = connection
+                .prepare("SELECT handle FROM declarations WHERE qualified_name = ?1 ORDER BY declaration_id")?;
+            for name in names {
+                let rows = statement.query_map(params![name], |row| row.get::<_, String>(0))?;
+                for row in rows {
+                    handles.push(DeclarationHandle(row?));
+                }
+            }
+            self.hydrate(&handles)
+        })
+    }
+
     pub fn cache_probe_results(&self, entries: &[ProbeCacheEntry]) -> Result<()> {
         if entries.is_empty() {
             return Ok(());

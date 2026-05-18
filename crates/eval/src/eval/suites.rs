@@ -15,7 +15,7 @@ use lean_dup_diagnostics::perf;
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
 use lean_dup_project::{WorkspaceRequest, resolve, resolve_project_mathlib};
-use lean_dup_search::{SearchObservation, SearchObservationRequest, observe_search};
+use lean_dup_search::{SearchObservation, SearchObservationRequest, SearchTrackedPair, observe_search};
 use lean_dup_worker::WorkerClient;
 
 use crate::{Error, Result};
@@ -134,14 +134,17 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
     let index_load_ms = index_started.elapsed().as_millis();
 
     let retrieval_started = Instant::now();
+    let tracked_pairs = tracked_pairs(&labels);
     let output = match &external {
         Some(external) => observe_search(SearchObservationRequest {
             workspace: &workspace_rows,
             comparison_indexes: std::slice::from_ref(external),
+            tracked_pairs: &tracked_pairs,
         })?,
         None => observe_search(SearchObservationRequest {
             workspace: &workspace_rows,
             comparison_indexes: &[],
+            tracked_pairs: &tracked_pairs,
         })?,
     };
     let retrieval_ms = retrieval_started.elapsed().as_millis();
@@ -179,6 +182,21 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
         search_dataset_artifact,
         runs: Vec::new(),
     })
+}
+
+fn tracked_pairs(labels: &GoldLabels) -> Vec<SearchTrackedPair> {
+    let mut pairs = labels
+        .positives
+        .iter()
+        .chain(labels.hard_negatives.iter())
+        .map(|pair| SearchTrackedPair {
+            left: pair.left.clone(),
+            right: pair.right.clone(),
+        })
+        .collect::<Vec<_>>();
+    pairs.sort();
+    pairs.dedup();
+    pairs
 }
 
 fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutput> {
@@ -536,6 +554,9 @@ fn observed_pairs(output: &SearchObservation) -> Vec<ObservedPair> {
         .iter()
         .map(|pair| ObservedPair {
             pair: GoldPair::new(pair.left.clone(), pair.right.clone()),
+            generated: pair.generated,
+            ranked: pair.ranked,
+            generation_policy: pair.generation_policy.clone(),
             rank: pair.rank,
             shown: pair.shown,
             origin: pair.origin.clone(),
@@ -746,6 +767,9 @@ mod tests {
                 hard_negative_survival: Default::default(),
                 candidate_count_by_origin: Default::default(),
                 candidate_count_by_feature_family: Default::default(),
+                generated_candidate_count_by_policy: Default::default(),
+                generated_candidate_count_by_feature_family: Default::default(),
+                hard_negative_generated_by_feature_family: Default::default(),
                 semantic_verification: SemanticVerificationStageMetrics {
                     planned: found,
                     cached: total,

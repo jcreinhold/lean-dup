@@ -33,7 +33,10 @@ impl GoldPair {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ObservedPair {
     pub pair: GoldPair,
-    pub rank: usize,
+    pub generated: bool,
+    pub ranked: bool,
+    pub generation_policy: String,
+    pub rank: Option<usize>,
     pub shown: bool,
     pub origin: String,
     pub feature_families: Vec<String>,
@@ -137,7 +140,7 @@ pub fn score_run(labels: &GoldLabels, observed: &ObservedRun, k_values: &[usize]
         visible_groups: observed.visible_groups.clone(),
         probe_unavailable: observed.probe_unavailable.clone(),
         stage_metrics,
-        candidate_count: observed.pairs.len(),
+        candidate_count: observed.pairs.iter().filter(|pair| pair.ranked).count(),
         timings: observed.timings.clone(),
         peak_memory_bytes: observed.peak_memory_bytes,
     }
@@ -146,10 +149,13 @@ pub fn score_run(labels: &GoldLabels, observed: &ObservedRun, k_values: &[usize]
 fn best_rank_by_pair(pairs: &[ObservedPair]) -> FxHashMap<GoldPair, usize> {
     let mut ranks: FxHashMap<GoldPair, usize> = FxHashMap::default();
     for observed in pairs {
+        let Some(observed_rank) = observed.rank else {
+            continue;
+        };
         ranks
             .entry(observed.pair.clone())
-            .and_modify(|rank| *rank = (*rank).min(observed.rank))
-            .or_insert(observed.rank);
+            .and_modify(|rank| *rank = (*rank).min(observed_rank))
+            .or_insert(observed_rank);
     }
     ranks
 }
@@ -235,7 +241,10 @@ mod tests {
                 .into_iter()
                 .map(|(left, right, rank, shown)| ObservedPair {
                     pair: GoldPair::new(left, right),
-                    rank,
+                    generated: true,
+                    ranked: true,
+                    generation_policy: "local_duplicate_audit".to_owned(),
+                    rank: Some(rank),
                     shown,
                     origin: "workspace".to_owned(),
                     feature_families: vec!["statement_fingerprint".to_owned()],

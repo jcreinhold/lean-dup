@@ -249,6 +249,12 @@ fn eval_default_json_contains_raw_metric_counts() {
             .unwrap()
             .contains_key("statement_fingerprint")
     );
+    assert!(
+        payload["metrics"]["stage_metrics"]["generated_candidate_count_by_policy"]
+            .as_object()
+            .unwrap()
+            .contains_key("local_duplicate_audit")
+    );
 }
 
 #[test]
@@ -354,6 +360,8 @@ fn eval_hidden_search_dataset_mode_writes_feature_artifact() {
     assert!(pairs.iter().any(|pair| pair["label_status"] == "unlabeled"));
     let first = &pairs[0];
     assert!(first["stage_position"].is_object());
+    assert!(first["stage_position"]["generated"].is_boolean());
+    assert!(first["stage_position"]["ranked"].is_boolean());
     assert!(first["final_visibility"].is_object());
     assert!(first["features"]["retrieval_feature_families"].is_array());
     assert!(first["features"]["semantic_evidence_state"].is_string());
