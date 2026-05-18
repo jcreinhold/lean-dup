@@ -25,11 +25,7 @@ fn repo_root() -> PathBuf {
 
 #[test]
 fn help_lists_foundation_commands() {
-    let assert = Command::cargo_bin("lean-dup-rs")
-        .unwrap()
-        .arg("--help")
-        .assert()
-        .success();
+    let assert = Command::cargo_bin("lean-dup").unwrap().arg("--help").assert().success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
 
     for command in ["doctor", "index", "index-mathlib", "audit", "eval", "show", "diff"] {
@@ -47,7 +43,7 @@ fn help_lists_foundation_commands() {
 
 #[test]
 fn index_mathlib_help_has_no_standalone_mathlib_default() {
-    let assert = Command::cargo_bin("lean-dup-rs")
+    let assert = Command::cargo_bin("lean-dup")
         .unwrap()
         .args(["index-mathlib", "--help"])
         .assert()
@@ -63,7 +59,7 @@ fn hidden_perf_fixture_workload_emits_json_metrics() {
     let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();
     let output = tempfile::NamedTempFile::new().unwrap();
-    let assert = Command::cargo_bin("lean-dup-rs")
+    let assert = Command::cargo_bin("lean-dup")
         .unwrap()
         .args(["perf", "--workload", "fixture-audit", "--cache-root"])
         .arg(cache.path())
@@ -88,7 +84,7 @@ fn doctor_json_reports_cache_lifecycle_diagnostics() {
     let cache = tempfile::TempDir::new().unwrap();
     let tiny = repo_root().join("tests/fixtures/tiny");
 
-    let assert = Command::cargo_bin("lean-dup-rs")
+    let assert = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["doctor", "--workspace"])
@@ -134,7 +130,7 @@ fn hidden_cache_cleanup_dry_run_and_execute_preserve_latest_entry() {
     )
     .unwrap();
 
-    let dry_run = Command::cargo_bin("lean-dup-rs")
+    let dry_run = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["cache-cleanup", "--format", "json"])
@@ -148,7 +144,7 @@ fn hidden_cache_cleanup_dry_run_and_execute_preserve_latest_entry() {
     assert!(active.exists());
     assert!(stale.exists());
 
-    Command::cargo_bin("lean-dup-rs")
+    Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["cache-cleanup", "--execute"])
@@ -165,7 +161,7 @@ fn hidden_cache_cleanup_dry_run_and_execute_preserve_latest_entry() {
 fn eval_default_prints_compact_metrics_table() {
     let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();
-    let assert = Command::cargo_bin("lean-dup-rs")
+    let assert = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["eval", "--suite", "default", "--format", "table"])
@@ -185,7 +181,7 @@ fn eval_default_prints_compact_metrics_table() {
 fn eval_default_json_contains_raw_metric_counts() {
     let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();
-    let assert = Command::cargo_bin("lean-dup-rs")
+    let assert = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["eval", "--suite", "default", "--format", "json"])
@@ -227,7 +223,7 @@ fn eval_default_json_contains_raw_metric_counts() {
 fn eval_hard_negatives_json_reports_positive_and_hard_negative_denominators() {
     let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();
-    let assert = Command::cargo_bin("lean-dup-rs")
+    let assert = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["eval", "--suite", "hard-negatives", "--format", "json"])
@@ -265,7 +261,7 @@ fn eval_output_writes_artifact_and_keeps_stdout_valid() {
     let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();
     let output = tempfile::NamedTempFile::new().unwrap();
-    let assert = Command::cargo_bin("lean-dup-rs")
+    let assert = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["eval", "--suite", "default", "--format", "json", "--output"])
@@ -285,7 +281,7 @@ fn eval_output_writes_artifact_and_keeps_stdout_valid() {
 fn doctor_reports_workspace_facts_from_repo_root() {
     let _worker = worker_cli_lock();
     let root = repo_root();
-    Command::cargo_bin("lean-dup-rs")
+    Command::cargo_bin("lean-dup")
         .unwrap()
         .args(["doctor", "--workspace"])
         .arg(&root)
@@ -311,7 +307,7 @@ fn doctor_reports_workspace_facts_from_repo_root() {
 fn doctor_respects_cache_dir_override() {
     let _worker = worker_cli_lock();
     let temp = tempfile::TempDir::new().unwrap();
-    Command::cargo_bin("lean-dup-rs")
+    Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", temp.path())
         .args(["doctor", "--workspace"])
@@ -327,7 +323,7 @@ fn doctor_respects_cache_dir_override() {
 #[test]
 fn audit_json_keeps_progress_and_profile_off_stdout() {
     let _worker = worker_cli_lock();
-    let assert = Command::cargo_bin("lean-dup-rs")
+    let assert = Command::cargo_bin("lean-dup")
         .unwrap()
         .args(["--progress", "--profile", "audit", "--workspace"])
         .arg(repo_root())
@@ -360,7 +356,7 @@ fn review_profiles_filter_one_ranked_audit_result() {
     let root = repo_root();
     let tiny = root.join("tests/fixtures/tiny");
 
-    let assert = Command::cargo_bin("lean-dup-rs")
+    let assert = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["audit", "--workspace"])
@@ -397,7 +393,7 @@ fn audit_json_includes_stable_report_explanations() {
     let cache = tempfile::TempDir::new().unwrap();
     let tiny = repo_root().join("tests/fixtures/tiny");
 
-    let assert = Command::cargo_bin("lean-dup-rs")
+    let assert = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["audit", "--workspace"])
@@ -436,7 +432,7 @@ fn audit_text_reports_queue_probe_and_provenance_explanations() {
     let cache = tempfile::TempDir::new().unwrap();
     let tiny = repo_root().join("tests/fixtures/tiny");
 
-    let assert = Command::cargo_bin("lean-dup-rs")
+    let assert = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["audit", "--workspace"])
@@ -462,7 +458,7 @@ fn json_stdout_stays_clean_with_progress_and_profile() {
     let cache = tempfile::TempDir::new().unwrap();
     let tiny = repo_root().join("tests/fixtures/tiny");
 
-    let assert = Command::cargo_bin("lean-dup-rs")
+    let assert = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["--progress", "--profile", "audit", "--workspace"])
@@ -488,7 +484,7 @@ fn audit_fixture_mathlib_label_produces_actionable_hints() {
     let external = root.join("tests/fixtures/external");
     let tiny = root.join("tests/fixtures/tiny");
 
-    let index = Command::cargo_bin("lean-dup-rs")
+    let index = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["index", "--workspace"])
@@ -504,7 +500,7 @@ fn audit_fixture_mathlib_label_produces_actionable_hints() {
         .unwrap();
     drop(connection);
 
-    let assert = Command::cargo_bin("lean-dup-rs")
+    let assert = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["audit", "--workspace"])
@@ -561,7 +557,7 @@ fn source_backed_external_index_gets_proof_grade_probe_evidence() {
         String::from_utf8_lossy(&lake.stdout)
     );
 
-    Command::cargo_bin("lean-dup-rs")
+    Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["index", "--workspace"])
@@ -570,7 +566,7 @@ fn source_backed_external_index_gets_proof_grade_probe_evidence() {
         .assert()
         .success();
 
-    let assert = Command::cargo_bin("lean-dup-rs")
+    let assert = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["audit", "--workspace"])
@@ -615,7 +611,7 @@ fn audit_default_text_hides_noise_blockers() {
     let root = repo_root();
     let tiny = root.join("tests/fixtures/tiny");
 
-    let assert = Command::cargo_bin("lean-dup-rs")
+    let assert = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["audit", "--workspace"])
@@ -636,7 +632,7 @@ fn show_renders_evidence_blockers_probe_hint_and_callers_for_group() {
     let cache = tempfile::TempDir::new().unwrap();
     let root = repo_root();
     let tiny = root.join("tests/fixtures/tiny");
-    let audit = Command::cargo_bin("lean-dup-rs")
+    let audit = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["audit", "--workspace"])
@@ -656,7 +652,7 @@ fn show_renders_evidence_blockers_probe_hint_and_callers_for_group() {
     let payload: Value = serde_json::from_str(&stdout).unwrap();
     let group_id = payload["review"]["groups"][0]["id"].as_str().unwrap();
 
-    let show = Command::cargo_bin("lean-dup-rs")
+    let show = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["show", "--workspace"])
@@ -689,7 +685,7 @@ fn baseline_diff_reports_appeared_disappeared_and_changed_groups() {
     let root = repo_root();
     let tiny = root.join("tests/fixtures/tiny");
 
-    let audit = Command::cargo_bin("lean-dup-rs")
+    let audit = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["audit", "--workspace"])
@@ -710,7 +706,7 @@ fn baseline_diff_reports_appeared_disappeared_and_changed_groups() {
     groups.push(fake_disappeared);
     fs::write(&baseline_path, serde_json::to_string_pretty(&baseline).unwrap()).unwrap();
 
-    Command::cargo_bin("lean-dup-rs")
+    Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["diff", "--workspace"])
@@ -730,7 +726,7 @@ fn index_builds_canonical_sqlite_and_reuses_cache() {
     let cache = tempfile::TempDir::new().unwrap();
     let external = repo_root().join("tests/fixtures/external");
 
-    let first = Command::cargo_bin("lean-dup-rs")
+    let first = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["index", "--workspace"])
@@ -756,7 +752,7 @@ fn index_builds_canonical_sqlite_and_reuses_cache() {
     let latest = fs::read_to_string(cache.path().join("indexes/fixture/latest.json")).unwrap();
     assert!(latest.contains(&index_dir));
 
-    Command::cargo_bin("lean-dup-rs")
+    Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["index", "--workspace"])

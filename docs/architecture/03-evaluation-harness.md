@@ -16,7 +16,7 @@ shown-queue precision denominators, hard-negative policy, timing names, and memo
 Its smallest public interface is:
 
 - `score_run(labels, observed, k_values) -> EvaluationMetrics`;
-- `lean-dup-rs eval --suite <name> --format table|json`.
+- `lean-dup eval --suite <name> --format table|json`.
 
 These decisions must not leak upward or sideways:
 

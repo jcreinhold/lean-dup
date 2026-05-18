@@ -208,7 +208,7 @@ fn workload_command(args: &PerfArgs) -> Vec<String> {
         .clone()
         .unwrap_or_else(|| PathBuf::from("/Users/jcreinhold/Code/kan-proofs"));
     let repo = repo_root();
-    let mut command = vec!["lean-dup-rs".to_owned(), "--profile".to_owned()];
+    let mut command = vec!["lean-dup".to_owned(), "--profile".to_owned()];
     match args.workload {
         PerfWorkload::ColdMathlibIndex | PerfWorkload::WarmMathlibIndex => {
             command.extend([

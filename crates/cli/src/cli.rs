@@ -6,7 +6,7 @@ pub use lean_dup_search::{ProbePolicy, ReviewProfile};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
-#[command(name = "lean-dup-rs")]
+#[command(name = "lean-dup")]
 #[command(about = "Rust foundation CLI for Lean duplicate audits")]
 pub struct Cli {
     #[arg(long, global = true, help = "Render typed progress events on stderr")]

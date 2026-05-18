@@ -5,7 +5,7 @@ name = "lean-dup-cli"
 version.workspace = true
 
 [[bin]]
-name = "lean-dup-rs"
+name = "lean-dup"
 path = "src/main.rs"
 
 [dependencies]

@@ -110,7 +110,7 @@ cargo run -p lean-dup-cli -- audit --workspace tests/fixtures/tiny --module Tiny
   --no-semantic-probes \
   > target/report-contract/fixture-audit.txt
 
-target/release/lean-dup-rs --progress --profile audit \
+target/release/lean-dup --progress --profile audit \
   --workspace /Users/jcreinhold/Code/kan-proofs --module KanProofs \
   --compare-mathlib --format json \
   > target/report-contract/kanproofs-full-mathlib.json

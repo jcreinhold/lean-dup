@@ -14,7 +14,7 @@ hard-negative hits `3/16`, KanProofs/mathlib recall@10 `0/11`, and KanProofs/mat
 
 The internal audit-throughput profiling layer owns workload cache state, timing labels, memory snapshots,
 retrieval/source/probe/render counters, and before/after artifact paths. Its smallest public interface is the existing
-`--profile` output, the hidden `lean-dup-rs perf` workloads, and this architecture report.
+`--profile` output, the hidden `lean-dup perf` workloads, and this architecture report.
 
 Audit, retrieval, ranking, semantic verification, indexing, and rendering callers must not learn SQLite layout,
 retrieval key shape, source scanning policy, probe chunking, JSONL transport details, or cache internals. The preserved
@@ -33,16 +33,16 @@ measurement boundary owns artifact naming and cost classification while the norm
 
 ## Workloads And Artifacts
 
-All commands used `target/release/lean-dup-rs` against `/Users/jcreinhold/Code/kan-proofs`. The shared cache root was
+All commands used `target/release/lean-dup` against `/Users/jcreinhold/Code/kan-proofs`. The shared cache root was
 the default `~/.cache/lean-dup`. Before artifacts are under `target/perf/prompt25/before/`; after artifacts are under
 `target/perf/prompt25/after-final/`. The hidden perf cost-class artifacts are under
 `target/perf/prompt25/after-final/perf/`.
 
 ```sh
-target/release/lean-dup-rs --progress --profile audit --workspace /Users/jcreinhold/Code/kan-proofs --module KanProofs --format json
-target/release/lean-dup-rs --progress --profile audit --workspace /Users/jcreinhold/Code/kan-proofs --module KanProofs --compare-mathlib --no-semantic-probes --format json
-target/release/lean-dup-rs --progress --profile audit --workspace /Users/jcreinhold/Code/kan-proofs --module KanProofs --compare-mathlib --format json
-target/release/lean-dup-rs --progress --profile audit --workspace /Users/jcreinhold/Code/kan-proofs --module KanProofs.Mathlib4Backports --compare-mathlib --format json
+target/release/lean-dup --progress --profile audit --workspace /Users/jcreinhold/Code/kan-proofs --module KanProofs --format json
+target/release/lean-dup --progress --profile audit --workspace /Users/jcreinhold/Code/kan-proofs --module KanProofs --compare-mathlib --no-semantic-probes --format json
+target/release/lean-dup --progress --profile audit --workspace /Users/jcreinhold/Code/kan-proofs --module KanProofs --compare-mathlib --format json
+target/release/lean-dup --progress --profile audit --workspace /Users/jcreinhold/Code/kan-proofs --module KanProofs.Mathlib4Backports --compare-mathlib --format json
 ```
 
 The first baseline attempt found that KanProofs needed a fresh build for the current local workspace; `lake build` in

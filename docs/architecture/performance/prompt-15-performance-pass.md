@@ -7,7 +7,7 @@ For the current as-built architecture around these historical measurements, see
 
 The new internal performance layer owns workload names, cache-state setup, timing labels, memory snapshots, worker event
 attribution, SQLite counters, retrieval counters, and report serialization. Its smallest public interface is the hidden
-developer command `lean-dup-rs perf --workload ... --format json --output ...`.
+developer command `lean-dup perf --workload ... --format json --output ...`.
 
 Audit, index, retrieval, ranking, and rendering callers must not learn SQLite table names, JSONL framing policy,
 cache-key layout, worker build caching, or Lean expression traversal details. The preserved user-facing capability is

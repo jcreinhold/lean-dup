@@ -16,7 +16,7 @@ The smallest public interface is seven package names and their dependency direct
 tables, cache key layout, retrieval key encodings, worker JSONL framing, prompt/eval corpus policy, or CLI stdout/stderr
 rules unless they are in the crate that owns that concern.
 
-The preserved capability is the same local, read-only duplicate audit pipeline exposed through the `lean-dup-rs` binary.
+The preserved capability is the same local, read-only duplicate audit pipeline exposed through the `lean-dup` binary.
 The discarded Python-era behavior is a single implementation surface where workspace discovery, indexing, search,
 reporting, and evaluation all changed together.
 
@@ -43,7 +43,7 @@ graph prevents lower-level concerns from learning about CLI, evaluation, or repo
 | `lean-dup-eval` | Labels, suites, stage metrics, quality gates, hidden perf workload artifacts. | CLI. |
 | `lean-dup-cli` | Clap parsing, command dispatch, stdout/stderr routing, output file writes, binary compatibility. | None; this is the top layer. |
 
-The package and directory names deliberately omit `-rs`. The binary remains `lean-dup-rs` until a separate user-facing
+The package and directory names deliberately omit `-rs`. The binary remains `lean-dup` until a separate user-facing
 rename is accepted.
 
 ## Current Tradeoffs

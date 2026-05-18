@@ -17,7 +17,7 @@ availability denominators.
 
 Its smallest public interface is:
 
-- `lean-dup-rs eval --suite default|hard-negatives|kanproofs-internal|kanproofs-mathlib|production-gate`;
+- `lean-dup eval --suite default|hard-negatives|kanproofs-internal|kanproofs-mathlib|production-gate`;
 - JSON/table metrics with raw `found/total` counts.
 
 These decisions must not leak upward or sideways:

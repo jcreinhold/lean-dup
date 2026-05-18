@@ -128,15 +128,15 @@ hard-negative denominators must pass.
 Required full-audit commands:
 
 ```sh
-env LEAN_NUM_THREADS=2 target/release/lean-dup-rs --progress --profile \
+env LEAN_NUM_THREADS=2 target/release/lean-dup --progress --profile \
   audit --workspace /Users/jcreinhold/Code/kan-proofs --format json \
   > target/audit-runs/kanproofs-full-internal.json
 
-env LEAN_NUM_THREADS=2 target/release/lean-dup-rs --progress --profile \
+env LEAN_NUM_THREADS=2 target/release/lean-dup --progress --profile \
   audit --workspace /Users/jcreinhold/Code/kan-proofs --compare-mathlib --format json \
   > target/audit-runs/kanproofs-full-mathlib.json
 
-env LEAN_NUM_THREADS=2 target/release/lean-dup-rs --progress --profile \
+env LEAN_NUM_THREADS=2 target/release/lean-dup --progress --profile \
   audit --workspace /Users/jcreinhold/Code/kan-proofs --compare-mathlib --no-semantic-probes --format json \
   > target/audit-runs/kanproofs-full-mathlib-no-probes.json
 ```
@@ -144,7 +144,7 @@ env LEAN_NUM_THREADS=2 target/release/lean-dup-rs --progress --profile \
 Required targeted audit command:
 
 ```sh
-env LEAN_NUM_THREADS=2 target/release/lean-dup-rs --progress --profile \
+env LEAN_NUM_THREADS=2 target/release/lean-dup --progress --profile \
   audit --workspace /Users/jcreinhold/Code/kan-proofs \
   --module KanProofs.Mathlib4Backports --compare-mathlib --format json \
   > target/audit-runs/kanproofs-mathlib4backports.json
@@ -153,10 +153,10 @@ env LEAN_NUM_THREADS=2 target/release/lean-dup-rs --progress --profile \
 Required cache and release diagnostics once implemented:
 
 ```sh
-target/release/lean-dup-rs doctor --format json \
+target/release/lean-dup doctor --format json \
   > target/release-diagnostics/doctor.json
 
-target/release/lean-dup-rs --version \
+target/release/lean-dup --version \
   > target/release-diagnostics/version.txt
 ```
 

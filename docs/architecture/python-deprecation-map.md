@@ -23,7 +23,7 @@ These decisions must not leak upward or sideways:
 - Python scoring thresholds, source-parsing fallbacks, and cache invalidation rules;
 - temporary prompt sequencing mechanics.
 
-The preserved user-facing capability is read-only duplicate auditing through the Rust `lean-dup-rs` binary: workspace
+The preserved user-facing capability is read-only duplicate auditing through the Rust `lean-dup` binary: workspace
 indexing, project-pinned mathlib indexing, external comparison, semantic evidence, evaluation gates, report rendering,
 `show`, `doctor`, and cache diagnostics.
 
@@ -104,6 +104,6 @@ Prompt 27 closes the Python implementation switchover, not the full production r
   quality issue for prompts 29 and 30, not a reason to preserve Python code.
 - **Conjoined methods:** mitigated. Rust boundaries split worker, index, retrieval, ranking, semantic verification,
   source references, replacement hints, and report contract.
-- **Hard-to-describe public API:** mitigated. The public command surface is the Rust `lean-dup-rs` binary.
+- **Hard-to-describe public API:** mitigated. The public command surface is the Rust `lean-dup` binary.
 - **Implementation details contaminating interface comments:** mitigated. This document describes user-facing
   capabilities and evidence, not Python internals callers must learn.

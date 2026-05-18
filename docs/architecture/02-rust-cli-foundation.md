@@ -1,6 +1,6 @@
 # Rust CLI Engine
 
-This document records the current Rust CLI boundary. It supersedes the prompt-08 foundation note: `lean-dup-rs` is now
+This document records the current Rust CLI boundary. It supersedes the prompt-08 foundation note: `lean-dup` is now
 the operational Rust/Lean engine, not a skeleton around future work. For the full as-built pipeline, see
 [06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md).
 
@@ -10,7 +10,7 @@ The CLI engine owns command parsing, command orchestration, progress/profile plu
 small user-facing command vocabulary. It coordinates workspace resolution, worker use, indexing, retrieval, semantic
 verification, ranking, report construction, evaluation, and diagnostics through internal modules.
 
-Its smallest public interface is the `lean-dup-rs` binary plus the crate-level `run` entrypoint. The normal public
+Its smallest public interface is the `lean-dup` binary plus the crate-level `run` entrypoint. The normal public
 commands are `doctor`, `index`, `index-mathlib`, `audit`, `eval`, `show`, and `diff`. Hidden developer commands are
 `perf` and `cache-cleanup`.
 

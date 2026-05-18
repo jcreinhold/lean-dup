@@ -28,7 +28,7 @@ For production-style local runs, use the release binary:
 
 ```sh
 cargo build --release -p lean-dup-cli
-target/release/lean-dup-rs audit --workspace /path/to/lake/workspace --compare-mathlib --progress
+target/release/lean-dup audit --workspace /path/to/lake/workspace --compare-mathlib --progress
 ```
 
 ## Architecture Docs
@@ -62,4 +62,4 @@ hints: the target declaration, the specific import line, direct-import status, a
 replace or preserve behind a transitional alias.
 
 The Python implementation has been retired. Historical Python modules and tests were used as regression evidence during
-the Rust/Lean rewrite; the production command surface is the Rust `lean-dup-rs` binary.
+the Rust/Lean rewrite; the production command surface is the Rust `lean-dup` binary.
