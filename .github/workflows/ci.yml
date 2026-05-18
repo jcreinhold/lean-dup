@@ -30,11 +30,16 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # Several lean-dup tests shell out to `lake` (the Lean build tool):
+      # crates/eval/src/eval/suites.rs builds fixtures, the cli integration
+      # suite runs the full audit pipeline, etc. Install elan + the toolchain
+      # pinned by lean/lean-toolchain so cargo test --workspace runs as-is.
+      - uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: lean
+          build: false
+          test: false
+          lint: false
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      # Library + bin unit tests across the workspace, plus the static-manifest
-      # boundaries check. The crates/cli/tests/cli.rs integration suite shells
-      # out to `lake` and is intentionally skipped in CI — run it locally with
-      # `cargo test -p lean-dup-cli --test cli`.
-      - run: cargo test --workspace --locked --lib --bins
-      - run: cargo test -p lean-dup-cli --test boundaries --locked
+      - run: cargo test --workspace --locked
