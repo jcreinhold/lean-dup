@@ -39,7 +39,7 @@ Production preserves proven capabilities, not Python implementation shape.
 
 ## Design It Twice
 
-**Rejected: prompt-by-prompt release checklist.** A checklist organized by prompts 21 through 30 would be easy to write,
+**Rejected: prompt-by-prompt release checklist.** A checklist organized by prompts 21 through 40 would be easy to write,
 but it would be temporally decomposed. It would make release status depend on execution order rather than evidence, and
 it would not hide the release policy behind a stable boundary.
 
@@ -81,10 +81,14 @@ aggregate eval command, but it also exposed quality failures: `target/eval/promp
 aggregate recall@10 `15/32`, aggregate hard-negative hits `3/16`, KanProofs/mathlib recall@10 `0/11`, and
 KanProofs/mathlib hard-negative hits `3/4`.
 
+Prompts 28 through 37 are now the search-quality prerequisite for release hardening. They are governed by
+[search-quality.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/search-quality.md), which defines the match
+taxonomy, stage objectives, and quality evidence needed before `G1` and `G2` can close.
+
 | Gate | Status | Production claim | Required evidence artifact |
 | --- | --- | --- | --- |
-| `G1 regression_quality` | Open | KanProofs and fixture quality are proven with raw denominators. | `docs/architecture/evaluation/production-gates.md` plus `target/eval/production-gate.json`. |
-| `G2 precision_control` | Open | Hard negatives and known bogus mathlib matches do not leak into the default visible queue. | `docs/architecture/evaluation/production-gates.md` hard-negative section plus fixture/KanProofs eval JSON. |
+| `G1 regression_quality` | Open | KanProofs and fixture quality are proven with raw denominators and stage-level search metrics. | `docs/architecture/search-quality.md`, `docs/architecture/evaluation/production-gates.md`, and `target/eval/production-gate.json`. |
+| `G2 precision_control` | Open | Hard negatives and known bogus mathlib matches do not leak into the default visible queue. | `docs/architecture/search-quality.md`, `docs/architecture/evaluation/production-gates.md` hard-negative section, and fixture/KanProofs eval JSON. |
 | `G3 semantic_probe_yield` | Partial | Probes are recoverable and typed, but useful proof-grade yield remains insufficiently validated. | `docs/architecture/performance/prompt-23-semantic-probe-yield.md` plus real-workload probe evidence. |
 | `G4 external_comparison_provenance` | Implemented, awaiting validation | Source-backed and static external indexes have explicit, user-visible semantics. | `docs/architecture/05-external-comparison-provenance.md` plus JSON/profile fixture outputs. |
 | `G5 cache_validity_lifecycle` | Implemented, awaiting validation | Shared caches reuse safely and invalidate only on relevant source, toolchain, worker, protocol, or semantic changes. | `docs/architecture/cache-validity-lifecycle.md` plus `target/cache/doctor-production.json`. |
@@ -177,9 +181,19 @@ The expected evidence artifacts are:
 | 25 | `G6`, `G3`, `G5` | Warm full-audit throughput improved; full mathlib comparison remains expensive. |
 | 26 | `G7`, `G2` | Empty-queue explanations, `show` explanations, and stable JSON contract exist. |
 | 27 | `G9`, `G1` | Python implementation removed; production-gate command completes but quality gates fail. |
-| 28 | `G8`, `G5`, `G7` | Pending: CI, packaging, version output, release docs, and reproducibility diagnostics. |
-| 29 | `G1`, `G2`, `G3`, `G4`, `G5`, `G6`, `G7` | Pending: real-workload validation on KanProofs and a second project or fixture. |
-| 30 | All gates | Pending: final production/no-go document. |
+| 28 | `G1`, `G2`, `G3`, `G7` | Search-quality charter and match taxonomy. |
+| 29 | `G1`, `G2` | Pending: task-specific label schema and adjudication corpus. |
+| 30 | `G1`, `G2` | Pending: stage metrics and retrieval observability. |
+| 31 | `G1`, `G2`, `G6` | Pending: pair feature store and search dataset artifacts. |
+| 32 | `G1`, `G2`, `G6` | Pending: candidate generation as an explicit high-recall stage. |
+| 33 | `G1`, `G2`, `G6` | Pending: calibrated symbolic scorer and ablation harness. |
+| 34 | `G2`, `G3` | Pending: semantic reranking and obligation-yield improvements. |
+| 35 | `G1`, `G2`, `G6` | Pending: hidden local embedding experiment gate. |
+| 36 | `G1`, `G2`, `G7` | Pending: threshold calibration and review policy. |
+| 37 | `G1`, `G2`, `G3`, `G6`, `G7` | Pending: search-quality validation and go/no-go. |
+| 38 | `G8`, `G5`, `G7` | Pending: CI, packaging, version output, release docs, and reproducibility diagnostics. |
+| 39 | `G1`, `G2`, `G3`, `G4`, `G5`, `G6`, `G7` | Pending: real-workload validation on KanProofs and a second project or fixture. |
+| 40 | All gates | Pending: final production/no-go document. |
 
 ## No-Go Criteria
 
@@ -198,7 +212,7 @@ The release is a no-go if any of these remain true:
 
 - **Shallow module:** avoided. The document defines release gates, evidence, and no-go policy instead of restating the
   prompt sequence.
-- **Pass-through wrapper:** avoided. The charter is not a wrapper around prompts 21 through 30; it gives the prompts a
+- **Pass-through wrapper:** avoided. The charter is not a wrapper around prompts 21 through 40; it gives the prompts a
   shared release contract.
 - **Temporal decomposition:** avoided. Gates are organized by production capability, not by implementation order.
 - **Information leakage:** avoided. The document names evidence requirements without exposing eval label layout, SQLite

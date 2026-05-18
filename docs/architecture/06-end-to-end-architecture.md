@@ -224,7 +224,7 @@ claims require semantic verification. With static indexes, findings remain expli
 ### `show`
 
 `show` explains a ranked group that can be resolved from the current workspace/index context. It is not yet a full
-report-file browser. Prompt 29 may decide whether real workload review needs report-file-backed `show`.
+report-file browser. Prompt 39 may decide whether real workload review needs report-file-backed `show`.
 
 ### `eval`
 
@@ -259,7 +259,12 @@ Open quality/release blockers:
 - KanProofs/mathlib hard-negative leakage remains.
 - Semantic probes are safer and more recoverable, but useful proof-grade yield still needs real-workload validation.
 - Full mathlib comparison remains expensive even with warm caches.
-- CI, packaging, version output, install docs, and release reproducibility are still prompt 28 work.
+- CI, packaging, version output, install docs, and release reproducibility are still prompt 38 work.
+
+The search-quality problem is now specified in
+[search-quality.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/search-quality.md). That charter defines the
+match classes, stage objectives, and evidence thresholds that must be validated before release hardening can close the
+quality gates.
 
 No FFI spike is currently justified. The measured work so far points to import/index/retrieval/report shaping and
 quality issues, not subprocess framing as the dominant release blocker.
