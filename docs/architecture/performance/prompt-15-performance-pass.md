@@ -29,10 +29,10 @@ sequence of SQLite probes, cache checks, Lake invocations, worker calls, and rep
 The hidden command is:
 
 ```sh
-cargo run -q -p lean-dup-rs -- perf --workload cold-mathlib-index --cache-root target/lean-dup-perf/mathlib-cache --output target/lean-dup-perf/reports/cold-mathlib-index.json
-cargo run -q -p lean-dup-rs -- perf --workload warm-mathlib-index --cache-root /Users/jcreinhold/.cache/lean-dup --output target/lean-dup-perf/reports/warm-mathlib-index-home-cache.json
-cargo run -q -p lean-dup-rs -- perf --workload kanproofs-targeted-mathlib --cache-root target/lean-dup-perf/kanproofs-targeted-cache --output target/lean-dup-perf/reports/kanproofs-targeted-mathlib.json
-cargo run -q -p lean-dup-rs -- perf --workload kanproofs-full-no-mathlib --cache-root target/lean-dup-perf/kanproofs-full-no-mathlib-cache --output target/lean-dup-perf/reports/kanproofs-full-no-mathlib.json
+cargo run -q -p lean-dup-cli -- perf --workload cold-mathlib-index --cache-root target/lean-dup-perf/mathlib-cache --output target/lean-dup-perf/reports/cold-mathlib-index.json
+cargo run -q -p lean-dup-cli -- perf --workload warm-mathlib-index --cache-root /Users/jcreinhold/.cache/lean-dup --output target/lean-dup-perf/reports/warm-mathlib-index-home-cache.json
+cargo run -q -p lean-dup-cli -- perf --workload kanproofs-targeted-mathlib --cache-root target/lean-dup-perf/kanproofs-targeted-cache --output target/lean-dup-perf/reports/kanproofs-targeted-mathlib.json
+cargo run -q -p lean-dup-cli -- perf --workload kanproofs-full-no-mathlib --cache-root target/lean-dup-perf/kanproofs-full-no-mathlib-cache --output target/lean-dup-perf/reports/kanproofs-full-no-mathlib.json
 ```
 
 The harness defaults to `/Users/jcreinhold/Code/kan-proofs` and `target/lean-dup-perf/cache`. Mathlib workloads now use

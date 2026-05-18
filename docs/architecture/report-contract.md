@@ -102,11 +102,11 @@ When `visible groups: 0`, the text report must explain why without requiring `jq
 Prompt 26 evidence should live under `target/report-contract/`:
 
 ```sh
-cargo run -p lean-dup-rs -- audit --workspace tests/fixtures/tiny --module Tiny \
+cargo run -p lean-dup-cli -- audit --workspace tests/fixtures/tiny --module Tiny \
   --no-semantic-probes --format json \
   > target/report-contract/fixture-audit.json
 
-cargo run -p lean-dup-rs -- audit --workspace tests/fixtures/tiny --module Tiny \
+cargo run -p lean-dup-cli -- audit --workspace tests/fixtures/tiny --module Tiny \
   --no-semantic-probes \
   > target/report-contract/fixture-audit.txt
 

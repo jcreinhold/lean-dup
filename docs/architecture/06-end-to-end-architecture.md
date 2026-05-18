@@ -7,6 +7,8 @@ facts that require the elaborated Lean environment.
 For historical context, see [00-overview.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/00-overview.md). For
 release status, see
 [04-production-readiness.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/04-production-readiness.md).
+For Rust crate boundaries, see
+[07-crate-factoring.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/07-crate-factoring.md).
 
 ## Scope
 
@@ -68,7 +70,7 @@ artifact policy.
 
 ### CLI And Commands
 
-`crates/lean-dup-rs/src/cli.rs` defines the user and hidden developer command surface. `commands.rs` orchestrates
+`crates/cli/src/cli.rs` defines the user and hidden developer command surface. `commands.rs` orchestrates
 workflows but does not own Lake layout, worker transport, SQLite schema, ranking policy, probe details, or text/JSON
 formatting. That keeps command handling from becoming a temporal script in Rust.
 

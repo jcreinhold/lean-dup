@@ -88,21 +88,21 @@ and `G2 precision_control`.
 Fast gate:
 
 ```sh
-cargo run -p lean-dup-rs -- eval --suite default --format json \
+cargo run -p lean-dup-cli -- eval --suite default --format json \
   --output target/eval/default.json
 ```
 
 Hard-negative gate:
 
 ```sh
-cargo run -p lean-dup-rs -- eval --suite hard-negatives --format json \
+cargo run -p lean-dup-cli -- eval --suite hard-negatives --format json \
   --output target/eval/hard-negatives.json
 ```
 
 Production aggregate:
 
 ```sh
-cargo run -p lean-dup-rs -- eval --suite production-gate --format json \
+cargo run -p lean-dup-cli -- eval --suite production-gate --format json \
   --output target/eval/production-gate.json
 ```
 

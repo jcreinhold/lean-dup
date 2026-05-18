@@ -10,24 +10,24 @@ is intentionally local and deterministic: no network services, no embeddings, an
 Build the Rust binary and Lean worker first:
 
 ```sh
-cargo build -p lean-dup-rs
+cargo build -p lean-dup-cli
 cd lean && lake build
 ```
 
 For local development, run the Rust CLI through Cargo:
 
 ```sh
-cargo run -p lean-dup-rs -- doctor --workspace /path/to/lake/workspace
-cargo run -p lean-dup-rs -- audit --workspace /path/to/lake/workspace --format text
-cargo run -p lean-dup-rs -- audit --workspace /path/to/lake/workspace --format json
-cargo run -p lean-dup-rs -- audit --workspace /path/to/lake/workspace --compare-mathlib --progress
-cargo run -p lean-dup-rs -- show --workspace /path/to/lake/workspace --group exact-statement-1
+cargo run -p lean-dup-cli -- doctor --workspace /path/to/lake/workspace
+cargo run -p lean-dup-cli -- audit --workspace /path/to/lake/workspace --format text
+cargo run -p lean-dup-cli -- audit --workspace /path/to/lake/workspace --format json
+cargo run -p lean-dup-cli -- audit --workspace /path/to/lake/workspace --compare-mathlib --progress
+cargo run -p lean-dup-cli -- show --workspace /path/to/lake/workspace --group exact-statement-1
 ```
 
 For production-style local runs, use the release binary:
 
 ```sh
-cargo build --release -p lean-dup-rs
+cargo build --release -p lean-dup-cli
 target/release/lean-dup-rs audit --workspace /path/to/lake/workspace --compare-mathlib --progress
 ```
 
@@ -39,6 +39,8 @@ for the as-built pipeline and design rationale. Production gates are tracked in
 [docs/architecture/04-production-readiness.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/04-production-readiness.md),
 and the Lean/Rust worker protocol is specified in
 [docs/architecture/01-worker-protocol.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/01-worker-protocol.md).
+The Rust crate split is recorded in
+[docs/architecture/07-crate-factoring.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/07-crate-factoring.md).
 
 By default, `audit` scans the inferred local Lake workspace roots and includes private theorem-like declarations when
 Lean exposes them through compiled modules. Use `--module Root.Module` to restrict the audit to one root module and its

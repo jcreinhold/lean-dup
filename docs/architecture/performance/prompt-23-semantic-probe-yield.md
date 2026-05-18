@@ -65,11 +65,11 @@ Diagnostics now aggregate unavailable results by stable reason, obligation kind,
 Commands:
 
 ```bash
-cargo run -p lean-dup-rs -- audit --workspace /Users/jcreinhold/Code/kan-proofs \
+cargo run -p lean-dup-cli -- audit --workspace /Users/jcreinhold/Code/kan-proofs \
   --module KanProofs.Mathlib4Backports --compare-mathlib --progress --profile --format json \
   > target/audit-runs/kanproofs-mathlib4backports-prompt23.json
 
-cargo run -p lean-dup-rs -- audit --workspace /Users/jcreinhold/Code/kan-proofs \
+cargo run -p lean-dup-cli -- audit --workspace /Users/jcreinhold/Code/kan-proofs \
   --compare-mathlib --progress --profile --format json \
   > target/audit-runs/kanproofs-full-mathlib-prompt23-rerun.json
 ```

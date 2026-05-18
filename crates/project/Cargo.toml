@@ -1,0 +1,14 @@
+[package]
+edition.workspace = true
+license.workspace = true
+name = "lean-dup-project"
+version.workspace = true
+
+[dependencies]
+lean-dup-report = { path = "../report" }
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3"

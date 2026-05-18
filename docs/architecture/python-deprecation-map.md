@@ -51,9 +51,9 @@ Fresh Prompt 27 artifacts:
 
 | Command | Artifact | Result |
 | --- | --- | --- |
-| `cargo run -p lean-dup-rs -- eval --suite default --format json --output target/eval/prompt27-default.json` | `target/eval/prompt27-default.json` | `status = ok`, recall@10 `14/14`, hard-negative hits `0/4`. |
-| `cargo run -p lean-dup-rs -- eval --suite hard-negatives --format json --output target/eval/prompt27-hard-negatives.json` | `target/eval/prompt27-hard-negatives.json` | `status = ok`, hard-negative hits `0/5`. |
-| `cargo run -p lean-dup-rs -- eval --suite production-gate --format json --output target/eval/prompt27-production-gate.json` | `target/eval/prompt27-production-gate.json` | `status = ok`; manual KanProofs mathlib no longer fails the old 60 second worker timeout. |
+| `cargo run -p lean-dup-cli -- eval --suite default --format json --output target/eval/prompt27-default.json` | `target/eval/prompt27-default.json` | `status = ok`, recall@10 `14/14`, hard-negative hits `0/4`. |
+| `cargo run -p lean-dup-cli -- eval --suite hard-negatives --format json --output target/eval/prompt27-hard-negatives.json` | `target/eval/prompt27-hard-negatives.json` | `status = ok`, hard-negative hits `0/5`. |
+| `cargo run -p lean-dup-cli -- eval --suite production-gate --format json --output target/eval/prompt27-production-gate.json` | `target/eval/prompt27-production-gate.json` | `status = ok`; manual KanProofs mathlib no longer fails the old 60 second worker timeout. |
 
 The production-gate artifact still reports a precision problem in the manual KanProofs mathlib child:
 `hard_negative_hits = 3/4`. That is not a Python switchover blocker because the Rust gate now completes, but it remains
@@ -67,16 +67,16 @@ contract.
 
 | Removed Python path | Rust/Lean replacement | Validated capability preserved | Design mistake eliminated |
 | --- | --- | --- | --- |
-| `src/lean_dup/cli.py`, `__main__.py`, `__init__.py` | `crates/lean-dup-rs/src/cli.rs`, `commands.rs`, `render.rs` | `doctor`, `index`, `index-mathlib`, `audit`, `eval`, `show`, `diff`, progress/profile-safe output. | Two production command surfaces and Python entry-point drift. |
-| `src/lean_dup/workspace.py` | `crates/lean-dup-rs/src/workspace.rs`, `mathlib.rs`, `cache.rs` | Lake workspace resolution and project-pinned mathlib resolution. | Workspace and package layout knowledge scattered through Python audit code. |
+| `src/lean_dup/cli.py`, `__main__.py`, `__init__.py` | `crates/cli/src/cli.rs`, `commands.rs`, `render.rs` | `doctor`, `index`, `index-mathlib`, `audit`, `eval`, `show`, `diff`, progress/profile-safe output. | Two production command surfaces and Python entry-point drift. |
+| `src/lean_dup/workspace.py` | `crates/project/src/workspace.rs`, `mathlib.rs`, `cache.rs` | Lake workspace resolution and project-pinned mathlib resolution. | Workspace and package layout knowledge scattered through Python audit code. |
 | `src/lean_dup/extractor.py`, `lean_runtime/Extractor.lean` | `lean/LeanDup/Worker.lean`, Rust `worker` and `index` modules | Lean-owned declaration extraction with typed protocol rows and cached indexes. | Source parsing and JSON/string-driven semantic facts in Python. |
 | `src/lean_dup/features.py`, `matching.py`, `text.py` | Lean worker feature extraction plus Rust `retrieval.rs` | Canonical fingerprints, role features, low-signal markers, candidate retrieval. | Rust/Python recomputation of Lean semantic structure from text. |
-| `src/lean_dup/external_index.py` | `crates/lean-dup-rs/src/index.rs`, `external_provenance.rs`, `cache_lifecycle.rs` | SQLite indexes, shared mathlib cache, source-backed/static provenance, doctor diagnostics. | Cache and SQLite policy leaking into audit workflow. |
+| `src/lean_dup/external_index.py` | `crates/index/src/index.rs`, `external_provenance.rs`, `cache_lifecycle.rs` | SQLite indexes, shared mathlib cache, source-backed/static provenance, doctor diagnostics. | Cache and SQLite policy leaking into audit workflow. |
 | `src/lean_dup/candidates.py`, `ranking.py`, `audit.py` | Rust `retrieval.rs`, `ranking.rs`, `semantic_verification.rs`, `commands.rs` | Candidate generation, ranked review queues, actionability filtering, semantic evidence integration. | Retrieval, ranking, probe, and report policy mixed in one Python path. |
 | `src/lean_dup/probes.py`, `semantic_probes.py`, `lean_runtime/SemanticProbe.lean` | `lean/LeanDup/Worker.lean`, Rust `semantic_verification.rs`, worker protocol | Bounded source-backed semantic verification with typed unavailable diagnostics and cache keys. | Batch-fatal probe behavior and Python cache semantics as production policy. |
 | `src/lean_dup/models.py`, `replacement_hints.py` | Rust domain structs, `replacement_hints.rs`, `source_refs.rs`, `report_contract.rs` | Replacement hints, source references, report explanations, JSON/text output. | Python dataclass shape treated as report contract. |
-| `tests/test_*.py` | `crates/lean-dup-rs/tests/cli.rs`, Rust unit tests, eval label files, Lean worker tests through Rust protocol | Fixture audits, hard negatives, worker protocol behavior, report contract, cache lifecycle. | Tests coupled to obsolete Python modules and progress-free worker stdout. |
-| `pyproject.toml`, `uv.lock` | Cargo workspace plus `lean/` Lake package | Local development through `cargo run -p lean-dup-rs` and release-style Rust binary runs. | Python packaging advertised as production install path. |
+| `tests/test_*.py` | `crates/cli/tests/cli.rs`, Rust unit tests, eval label files, Lean worker tests through Rust protocol | Fixture audits, hard negatives, worker protocol behavior, report contract, cache lifecycle. | Tests coupled to obsolete Python modules and progress-free worker stdout. |
+| `pyproject.toml`, `uv.lock` | Cargo workspace plus `lean/` Lake package | Local development through `cargo run -p lean-dup-cli` and release-style Rust binary runs. | Python packaging advertised as production install path. |
 
 Lean fixture projects under `tests/fixtures/` were retained. They are not Python implementation code; they are regression
 inputs for the Rust CLI and eval suites.

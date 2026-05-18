@@ -84,14 +84,14 @@ feature encodings.
 Fast fixture evidence:
 
 ```sh
-cargo run -p lean-dup-rs -- eval --suite default --format json
-cargo run -p lean-dup-rs -- eval --suite hard-negatives --format json
+cargo run -p lean-dup-cli -- eval --suite default --format json
+cargo run -p lean-dup-cli -- eval --suite hard-negatives --format json
 ```
 
 Production-gate evidence:
 
 ```sh
-cargo run -p lean-dup-rs -- eval --suite production-gate --format json \
+cargo run -p lean-dup-cli -- eval --suite production-gate --format json \
   --output target/eval/prompt30-production-gate.json
 ```
 

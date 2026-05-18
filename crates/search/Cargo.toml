@@ -1,0 +1,19 @@
+[package]
+edition.workspace = true
+license.workspace = true
+name = "lean-dup-search"
+version.workspace = true
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+lean-dup-index = { path = "../index" }
+lean-dup-project = { path = "../project" }
+lean-dup-report = { path = "../report" }
+lean-dup-worker = { path = "../worker" }
+rustc-hash = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+
+[dev-dependencies]
+tempfile = "3"

@@ -163,17 +163,17 @@ that the current search stack finds them.
 Compatibility and fast-suite evidence:
 
 ```sh
-cargo run -p lean-dup-rs -- eval --suite default --format json \
+cargo run -p lean-dup-cli -- eval --suite default --format json \
   --output target/eval/default.json
 
-cargo run -p lean-dup-rs -- eval --suite hard-negatives --format json \
+cargo run -p lean-dup-cli -- eval --suite hard-negatives --format json \
   --output target/eval/hard-negatives.json
 ```
 
 Manual production evidence:
 
 ```sh
-cargo run -p lean-dup-rs -- eval --suite production-gate --format json \
+cargo run -p lean-dup-cli -- eval --suite production-gate --format json \
   --output target/eval/production-gate.json
 ```
 

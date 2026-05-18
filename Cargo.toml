@@ -1,5 +1,13 @@
 [workspace]
-members = ["crates/lean-dup-rs"]
+members = [
+    "crates/worker",
+    "crates/project",
+    "crates/index",
+    "crates/search",
+    "crates/report",
+    "crates/eval",
+    "crates/cli",
+]
 resolver = "3"
 
 [workspace.package]

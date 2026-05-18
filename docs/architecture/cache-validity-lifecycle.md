@@ -102,16 +102,16 @@ cd /Users/jcreinhold/Code/lean-dup/lean && lake build
 Focused cache evidence:
 
 ```sh
-cargo test -p lean-dup-rs cache_lifecycle
-cargo test -p lean-dup-rs cache_key_ignores_unrelated_files_and_tracks_lake_inputs
-cargo test -p lean-dup-rs hidden_cache_cleanup
-cargo test -p lean-dup-rs doctor_json_reports_cache_lifecycle_diagnostics
+cargo test -p lean-dup-cli cache_lifecycle
+cargo test -p lean-dup-cli cache_key_ignores_unrelated_files_and_tracks_lake_inputs
+cargo test -p lean-dup-cli hidden_cache_cleanup
+cargo test -p lean-dup-cli doctor_json_reports_cache_lifecycle_diagnostics
 ```
 
 Manual diagnostic artifact:
 
 ```sh
-cargo run -p lean-dup-rs -- doctor \
+cargo run -p lean-dup-cli -- doctor \
   --workspace /Users/jcreinhold/Code/lean-dup/tests/fixtures/tiny \
   --module Tiny --format json \
   > target/cache/doctor-production.json

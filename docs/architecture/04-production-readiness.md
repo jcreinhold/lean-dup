@@ -114,10 +114,10 @@ cd /Users/jcreinhold/Code/lean-dup/lean && lake build
 Required quality and production-gate commands:
 
 ```sh
-cargo run -p lean-dup-rs -- eval --suite default --format json \
+cargo run -p lean-dup-cli -- eval --suite default --format json \
   --output target/eval/default.json
 
-cargo run -p lean-dup-rs -- eval --suite production-gate --format json \
+cargo run -p lean-dup-cli -- eval --suite production-gate --format json \
   --output target/eval/production-gate.json
 ```
 
