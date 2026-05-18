@@ -54,19 +54,20 @@ jobs:
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
           "$HOME/.elan/bin/elan" toolchain install "${{ steps.lean.outputs.toolchain }}"
           "$HOME/.elan/bin/elan" default "${{ steps.lean.outputs.toolchain }}"
-      - name: Cache Lean fixture builds
+      - name: Cache Lean fixture and lean/ builds
         uses: actions/cache@v4
         with:
           path: |
+            lean/.lake
             tests/fixtures/tiny/.lake
             tests/fixtures/external/.lake
             tests/fixtures/source-backed/.lake
-          key: lake-fixtures-${{ runner.os }}-${{ steps.lean.outputs.toolchain }}-${{ hashFiles('tests/fixtures/**/*.lean', 'tests/fixtures/**/lakefile.*', 'tests/fixtures/**/lean-toolchain') }}
-      - name: Build Lean fixtures
+          key: lake-builds-${{ runner.os }}-${{ steps.lean.outputs.toolchain }}-${{ hashFiles('lean/**/*.lean', 'lean/lakefile.*', 'tests/fixtures/**/*.lean', 'tests/fixtures/**/lakefile.*', '**/lean-toolchain') }}
+      - name: Build lean/ and Lean fixtures
         run: |
           set -euo pipefail
-          for fixture in tests/fixtures/tiny tests/fixtures/external tests/fixtures/source-backed; do
-            ( cd "$fixture" && lake build )
+          for pkg in lean tests/fixtures/tiny tests/fixtures/external tests/fixtures/source-backed; do
+            ( cd "$pkg" && lake build )
           done
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
