@@ -1,3 +1,4 @@
+# Workspace root for the lean-dup Rust crates.
 [workspace]
 members = [
     "crates/diagnostics",
