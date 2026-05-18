@@ -66,8 +66,13 @@ jobs:
       - name: Build lean/ and Lean fixtures
         run: |
           set -euo pipefail
-          for pkg in lean tests/fixtures/tiny tests/fixtures/external tests/fixtures/source-backed; do
-            ( cd "$pkg" && lake build )
+          # The lean/ package's default target is the lean_dup_worker exe,
+          # which doesn't pull in the top-level LeanDup.olean that the audit
+          # pipeline imports. Build the LeanDup library explicitly alongside
+          # the exe so cargo tests find LeanDup.olean.
+          ( cd lean && lake build LeanDup lean_dup_worker )
+          for fixture in tests/fixtures/tiny tests/fixtures/external tests/fixtures/source-backed; do
+            ( cd "$fixture" && lake build )
           done
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
