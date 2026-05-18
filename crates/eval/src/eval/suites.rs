@@ -28,7 +28,7 @@ pub struct EvalRequest {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct EvaluationReport {
+pub struct EvalOutput {
     pub status: String,
     pub suite: String,
     pub metrics: EvaluationMetrics,
@@ -76,14 +76,14 @@ struct SuiteIndexRequest<'a> {
     kind: IndexBuildKind,
 }
 
-pub fn run(request: EvalRequest, reporter: &mut Reporter) -> Result<EvaluationReport> {
+pub fn run(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutput> {
     if request.suite == EvalSuite::ProductionGate {
         return run_production_gate(request, reporter);
     }
     run_single(request, reporter)
 }
 
-fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvaluationReport> {
+fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutput> {
     let total_started = Instant::now();
     let labels = load_builtin(request.suite)?;
     let definition = suite_definition(&request);
@@ -162,7 +162,7 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<Evaluatio
     let metrics = score_run(&labels, &observed, &k_values);
     enforce_suite_gates(&definition, &labels, &metrics)?;
 
-    Ok(EvaluationReport {
+    Ok(EvalOutput {
         status: "ok".to_owned(),
         suite: labels.suite,
         metrics,
@@ -170,7 +170,7 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<Evaluatio
     })
 }
 
-fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<EvaluationReport> {
+fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutput> {
     let mut runs = Vec::new();
     for child in [EvalSuite::Default, EvalSuite::HardNegatives] {
         runs.push(run_child_suite(
@@ -208,7 +208,7 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
         "ok"
     };
 
-    Ok(EvaluationReport {
+    Ok(EvalOutput {
         status: status.to_owned(),
         suite: "production-gate".to_owned(),
         metrics,

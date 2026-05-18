@@ -23,7 +23,15 @@ pub struct SearchObservation {
     pub pairs: Vec<SearchObservedPair>,
     pub visible_groups_found: usize,
     pub visible_groups_total: usize,
-    pub retrieval: RetrievalDiagnostics,
+    pub retrieval: SearchRetrievalObservation,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct SearchRetrievalObservation {
+    pub candidate_count: usize,
+    pub hydrated_external_count: usize,
+    pub pruned_feature_fanout_count: usize,
+    pub heap_truncations: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -68,8 +76,17 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
         pairs,
         visible_groups_found,
         visible_groups_total,
-        retrieval: output.diagnostics,
+        retrieval: retrieval_observation(&output.diagnostics),
     })
+}
+
+fn retrieval_observation(diagnostics: &RetrievalDiagnostics) -> SearchRetrievalObservation {
+    SearchRetrievalObservation {
+        candidate_count: diagnostics.candidate_count,
+        hydrated_external_count: diagnostics.hydrated_external_count,
+        pruned_feature_fanout_count: diagnostics.pruned_postings.len(),
+        heap_truncations: diagnostics.heap_truncations.len(),
+    }
 }
 
 fn is_shown_queue_candidate(explanation: &CandidateExplanation) -> bool {

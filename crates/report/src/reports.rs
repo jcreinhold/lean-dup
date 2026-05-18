@@ -1,13 +1,12 @@
 use std::path::PathBuf;
 
 use lean_dup_diagnostics::perf::{PerfEvent, PerfSummary};
-use lean_dup_eval::EvaluationReport;
+use lean_dup_eval::EvalOutput;
 use lean_dup_index::{CacheCleanupReport, CacheDiagnostics, CacheStatus, ComparisonEvidenceMode};
 use lean_dup_search::ReviewProfile;
 use lean_dup_search::audit::{
-    AuditOutput, ConfidenceTier, DiffOutput, ProbeDiagnostics, RankedGroup, RankedReview, ReplacementHint,
-    ReviewAction, ReviewEvidence, ReviewEvidenceMode, ReviewMember, ReviewPriority, ReviewRelation, ShowOutput,
-    review_filter,
+    AuditEvidence, AuditGroup, AuditMember, AuditOutput, AuditProbeSummary, AuditReplacementHint, AuditReview,
+    DiffOutput, ShowOutput,
 };
 use serde::{Deserialize, Serialize};
 
@@ -21,10 +20,99 @@ pub enum Report {
     Index(IndexReport),
     IndexMathlib(IndexReport),
     Audit(Box<AuditReport>),
-    Eval(EvaluationReport),
+    Eval(EvalReportDto),
     Perf(PerfReport),
     Show(Box<ShowReport>),
     Diff(DiffReport),
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EvalReportDto {
+    pub status: String,
+    pub suite: String,
+    pub metrics: EvalMetricsDto,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub runs: Vec<EvalRunReportDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EvalRunReportDto {
+    pub suite: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<EvalMetricsDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub manual: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EvalMetricsDto {
+    pub suite: String,
+    pub recall: Vec<EvalRecallAtKDto>,
+    pub shown_queue_precision: EvalCountMetricDto,
+    pub hard_negative_hits: EvalCountMetricDto,
+    pub visible_groups: EvalCountMetricDto,
+    pub probe_unavailable: EvalCountMetricDto,
+    pub stage_metrics: EvalStageMetricsDto,
+    pub candidate_count: usize,
+    pub timings: EvalTimingMetricsDto,
+    pub peak_memory_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EvalRecallAtKDto {
+    pub k: usize,
+    pub found: usize,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct EvalCountMetricDto {
+    pub found: usize,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct EvalTimingMetricsDto {
+    pub index_load_ms: u128,
+    pub retrieval_ms: u128,
+    pub probe_ms: u128,
+    pub total_ms: u128,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct EvalStageMetricsDto {
+    pub candidate_generation_recall: EvalCountMetricDto,
+    pub top_k_recall_before_final_ranking: Vec<EvalRecallAtKDto>,
+    pub ranked_recall: Vec<EvalRecallAtKDto>,
+    pub visible_queue_precision: EvalCountMetricDto,
+    pub hard_negative_survival: EvalHardNegativeSurvivalDto,
+    pub candidate_count_by_origin: std::collections::BTreeMap<String, usize>,
+    pub candidate_count_by_feature_family: std::collections::BTreeMap<String, usize>,
+    pub semantic_verification: EvalSemanticVerificationStageMetricsDto,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct EvalHardNegativeSurvivalDto {
+    pub candidate_generation: EvalCountMetricDto,
+    pub top_k: Vec<EvalCountAtKDto>,
+    pub visible_queue: EvalCountMetricDto,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EvalCountAtKDto {
+    pub k: usize,
+    pub found: usize,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct EvalSemanticVerificationStageMetricsDto {
+    pub planned: usize,
+    pub cached: usize,
+    pub worker: usize,
+    pub unavailable: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -349,28 +437,128 @@ pub struct BaselineChangeReport {
     pub after: BaselineGroupReport,
 }
 
+pub fn eval_report(report: EvalOutput) -> EvalReportDto {
+    EvalReportDto {
+        status: report.status,
+        suite: report.suite,
+        metrics: eval_metrics_dto(report.metrics),
+        runs: report
+            .runs
+            .into_iter()
+            .map(|run| EvalRunReportDto {
+                suite: run.suite,
+                status: run.status,
+                metrics: run.metrics.map(eval_metrics_dto),
+                reason: run.reason,
+                manual: run.manual,
+            })
+            .collect(),
+    }
+}
+
+fn eval_metrics_dto(metrics: lean_dup_eval::EvaluationMetrics) -> EvalMetricsDto {
+    EvalMetricsDto {
+        suite: metrics.suite,
+        recall: metrics
+            .recall
+            .into_iter()
+            .map(|recall| EvalRecallAtKDto {
+                k: recall.k,
+                found: recall.found,
+                total: recall.total,
+            })
+            .collect(),
+        shown_queue_precision: eval_count_metric_dto(metrics.shown_queue_precision),
+        hard_negative_hits: eval_count_metric_dto(metrics.hard_negative_hits),
+        visible_groups: eval_count_metric_dto(metrics.visible_groups),
+        probe_unavailable: eval_count_metric_dto(metrics.probe_unavailable),
+        stage_metrics: EvalStageMetricsDto {
+            candidate_generation_recall: eval_count_metric_dto(metrics.stage_metrics.candidate_generation_recall),
+            top_k_recall_before_final_ranking: metrics
+                .stage_metrics
+                .top_k_recall_before_final_ranking
+                .into_iter()
+                .map(|recall| EvalRecallAtKDto {
+                    k: recall.k,
+                    found: recall.found,
+                    total: recall.total,
+                })
+                .collect(),
+            ranked_recall: metrics
+                .stage_metrics
+                .ranked_recall
+                .into_iter()
+                .map(|recall| EvalRecallAtKDto {
+                    k: recall.k,
+                    found: recall.found,
+                    total: recall.total,
+                })
+                .collect(),
+            visible_queue_precision: eval_count_metric_dto(metrics.stage_metrics.visible_queue_precision),
+            hard_negative_survival: EvalHardNegativeSurvivalDto {
+                candidate_generation: eval_count_metric_dto(
+                    metrics.stage_metrics.hard_negative_survival.candidate_generation,
+                ),
+                top_k: metrics
+                    .stage_metrics
+                    .hard_negative_survival
+                    .top_k
+                    .into_iter()
+                    .map(|count| EvalCountAtKDto {
+                        k: count.k,
+                        found: count.found,
+                        total: count.total,
+                    })
+                    .collect(),
+                visible_queue: eval_count_metric_dto(metrics.stage_metrics.hard_negative_survival.visible_queue),
+            },
+            candidate_count_by_origin: metrics.stage_metrics.candidate_count_by_origin,
+            candidate_count_by_feature_family: metrics.stage_metrics.candidate_count_by_feature_family,
+            semantic_verification: EvalSemanticVerificationStageMetricsDto {
+                planned: metrics.stage_metrics.semantic_verification.planned,
+                cached: metrics.stage_metrics.semantic_verification.cached,
+                worker: metrics.stage_metrics.semantic_verification.worker,
+                unavailable: metrics.stage_metrics.semantic_verification.unavailable,
+            },
+        },
+        candidate_count: metrics.candidate_count,
+        timings: EvalTimingMetricsDto {
+            index_load_ms: metrics.timings.index_load_ms,
+            retrieval_ms: metrics.timings.retrieval_ms,
+            probe_ms: metrics.timings.probe_ms,
+            total_ms: metrics.timings.total_ms,
+        },
+        peak_memory_bytes: metrics.peak_memory_bytes,
+    }
+}
+
+fn eval_count_metric_dto(metric: lean_dup_eval::CountMetric) -> EvalCountMetricDto {
+    EvalCountMetricDto {
+        found: metric.found,
+        total: metric.total,
+    }
+}
+
 pub fn audit_report(output: AuditOutput) -> AuditReport {
-    let filter = review_filter(output.review_profile, output.include_generated, output.show_noise);
-    let visible_ranked_groups = output
-        .review
-        .visible_groups(filter)
-        .into_iter()
-        .cloned()
-        .collect::<Vec<_>>();
-    let visible_group_count = visible_ranked_groups.len();
-    let profile_counts = profile_counts(&output.review);
+    let visible_group_count = output.visible_groups.len();
+    let profile_counts = ReviewProfileCounts {
+        mathlib: output.profile_counts.mathlib,
+        internal: output.profile_counts.internal,
+        api_design: output.profile_counts.api_design,
+        noise: output.profile_counts.noise,
+    };
     let explanations = crate::report_contract::explain_audit(
         &output.review,
-        &visible_ranked_groups,
-        filter,
+        &output.visible_groups,
+        &output.queue_summary,
         &output.semantic_verification,
         &output.comparison_provenance,
     );
     let retrieval = RetrievalReport {
         candidate_count: output.retrieval.candidate_count,
         hydrated_external_count: output.retrieval.hydrated_external_count,
-        pruned_postings: output.retrieval.pruned_postings.len(),
-        heap_truncations: output.retrieval.heap_truncations.len(),
+        pruned_postings: output.retrieval.pruned_feature_fanout_count,
+        heap_truncations: output.retrieval.heap_truncations,
     };
     let comparison_provenance = output
         .comparison_provenance
@@ -379,7 +567,7 @@ pub fn audit_report(output: AuditOutput) -> AuditReport {
         .collect();
     let semantic_verification = semantic_verification_report(&output.semantic_verification);
     let review = review_report(&output.review);
-    let visible_groups = visible_ranked_groups.iter().map(group_report).collect();
+    let visible_groups = output.visible_groups.iter().map(group_report).collect();
     AuditReport {
         report_schema_version: crate::report_contract::REPORT_SCHEMA_VERSION,
         status: "ok",
@@ -477,12 +665,7 @@ fn cache_cleanup_entry_report(entry: lean_dup_index::CacheCleanupEntry) -> Cache
 }
 
 pub fn show_report(output: ShowOutput) -> ShowReport {
-    let filter = review_filter(
-        output.audit.review_profile,
-        output.audit.include_generated,
-        output.audit.show_noise,
-    );
-    let explanation = crate::report_contract::explain_group(&output.group, filter);
+    let explanation = crate::report_contract::explain_group(&output.group);
     let group = group_report(&output.group);
     ShowReport {
         status: "ok",
@@ -520,7 +703,7 @@ fn comparison_provenance_report(report: &lean_dup_index::ComparisonProvenanceRep
     }
 }
 
-fn semantic_verification_report(report: &ProbeDiagnostics) -> SemanticVerificationReport {
+fn semantic_verification_report(report: &AuditProbeSummary) -> SemanticVerificationReport {
     SemanticVerificationReport {
         enabled: report.enabled,
         policy: report.policy.clone(),
@@ -555,10 +738,10 @@ fn semantic_verification_report(report: &ProbeDiagnostics) -> SemanticVerificati
     }
 }
 
-fn review_report(review: &RankedReview) -> ReviewReport {
+fn review_report(review: &AuditReview) -> ReviewReport {
     ReviewReport {
         groups: review.groups.iter().map(group_report).collect(),
-        suppressed_count: review.suppressed.len(),
+        suppressed_count: review.suppressed_count,
         diagnostics: ReviewDiagnosticsReport {
             candidate_pairs: review.diagnostics.candidate_pairs,
             emitted_groups: review.diagnostics.emitted_groups,
@@ -569,28 +752,28 @@ fn review_report(review: &RankedReview) -> ReviewReport {
     }
 }
 
-fn group_report(group: &RankedGroup) -> ReviewGroupReport {
+fn group_report(group: &AuditGroup) -> ReviewGroupReport {
     ReviewGroupReport {
         id: group.id.clone(),
         pair_id: group.pair_id.clone(),
-        relation: relation_label(group.relation).to_owned(),
+        relation: group.relation.clone(),
         members: group.members.iter().map(member_report).collect(),
         evidence: group.evidence.iter().map(evidence_report).collect(),
         signals: group.signals.clone(),
         blockers: group.blockers.clone(),
-        confidence: confidence_label(group.confidence).to_owned(),
-        review_priority: priority_label(group.review_priority).to_owned(),
-        recommended_action: action_label(group.recommended_action).to_owned(),
+        confidence: group.confidence.clone(),
+        review_priority: group.review_priority.clone(),
+        recommended_action: group.recommended_action.clone(),
         target_decl: group.target_decl.clone(),
         target_module: group.target_module.clone(),
-        evidence_mode: evidence_mode_label(group.evidence_mode).to_owned(),
+        evidence_mode: group.evidence_mode.clone(),
         probe_summary: group.probe_summary.clone(),
         local_caller_count: group.local_caller_count,
         replacement_hint: group.replacement_hint.as_ref().map(replacement_hint_report),
     }
 }
 
-fn member_report(member: &ReviewMember) -> ReviewMemberReport {
+fn member_report(member: &AuditMember) -> ReviewMemberReport {
     ReviewMemberReport {
         declaration_id: member.declaration_id.clone(),
         origin: member.origin.clone(),
@@ -614,21 +797,21 @@ fn member_report(member: &ReviewMember) -> ReviewMemberReport {
     }
 }
 
-fn evidence_report(evidence: &ReviewEvidence) -> ReviewEvidenceReport {
+fn evidence_report(evidence: &AuditEvidence) -> ReviewEvidenceReport {
     ReviewEvidenceReport {
         kind: evidence.kind.clone(),
         role: evidence.role.clone(),
         display: evidence.display.clone(),
         score: evidence.score,
-        summary: evidence.summary(),
+        summary: evidence.summary.clone(),
     }
 }
 
-fn replacement_hint_report(hint: &ReplacementHint) -> ReplacementHintReport {
+fn replacement_hint_report(hint: &AuditReplacementHint) -> ReplacementHintReport {
     ReplacementHintReport {
         target_decl: hint.target_decl.clone(),
         target_module: hint.target_module.clone(),
-        import_status: format!("{:?}", hint.import_status).to_ascii_lowercase(),
+        import_status: hint.import_status.clone(),
         caller_count: hint.caller_count,
         displayed_callers: hint
             .displayed_callers
@@ -675,78 +858,11 @@ fn baseline_group_report(group: &lean_dup_search::audit::SearchBaselineGroup) ->
     }
 }
 
-fn profile_counts(review: &RankedReview) -> ReviewProfileCounts {
-    ReviewProfileCounts {
-        mathlib: review
-            .visible_groups(review_filter(ReviewProfile::Mathlib, false, false))
-            .len(),
-        internal: review
-            .visible_groups(review_filter(ReviewProfile::Internal, false, false))
-            .len(),
-        api_design: review
-            .visible_groups(review_filter(ReviewProfile::ApiDesign, false, false))
-            .len(),
-        noise: review
-            .visible_groups(review_filter(ReviewProfile::Noise, false, false))
-            .len(),
-    }
-}
-
 fn comparison_evidence_mode_label(mode: ComparisonEvidenceMode) -> &'static str {
     match mode {
         ComparisonEvidenceMode::Static => "static",
         ComparisonEvidenceMode::SourceBackedNotImportable => "source-backed-not-importable",
         ComparisonEvidenceMode::ProofGrade => "proof-grade",
-    }
-}
-
-fn evidence_mode_label(mode: ReviewEvidenceMode) -> &'static str {
-    match mode {
-        ReviewEvidenceMode::Static => "static",
-        ReviewEvidenceMode::SourceBackedNotImportable => "source-backed-not-importable",
-        ReviewEvidenceMode::ProofGrade => "proof-grade",
-    }
-}
-
-fn relation_label(relation: ReviewRelation) -> &'static str {
-    match relation {
-        ReviewRelation::ExactStatement => "exact-statement",
-        ReviewRelation::PermutedStatement => "permuted-statement",
-        ReviewRelation::ConnectiveEquivalent => "connective-equivalent",
-        ReviewRelation::Specialization => "specialization",
-        ReviewRelation::SourceClone => "source-clone",
-        ReviewRelation::SubsumptionCandidate => "subsumption-candidate",
-        ReviewRelation::NearStatement => "near-statement",
-    }
-}
-
-fn action_label(action: ReviewAction) -> &'static str {
-    match action {
-        ReviewAction::AlreadyInMathlib => "already-in-mathlib",
-        ReviewAction::LocalAlias => "local-alias",
-        ReviewAction::ReplaceLocalUses => "replace-local-uses",
-        ReviewAction::MergeGeneralization => "merge-generalization",
-        ReviewAction::SpecializationOf => "specialization-of",
-        ReviewAction::ProbableSourceClone => "probable-source-clone",
-        ReviewAction::ManualReview => "manual-review",
-    }
-}
-
-fn priority_label(priority: ReviewPriority) -> &'static str {
-    match priority {
-        ReviewPriority::High => "high",
-        ReviewPriority::Medium => "medium",
-        ReviewPriority::Low => "low",
-        ReviewPriority::Noise => "noise",
-    }
-}
-
-fn confidence_label(confidence: ConfidenceTier) -> &'static str {
-    match confidence {
-        ConfidenceTier::High => "high",
-        ConfidenceTier::Medium => "medium",
-        ConfidenceTier::Low => "low",
-        ConfidenceTier::Noise => "noise",
     }
 }
 

@@ -6,8 +6,8 @@ use serde::Serialize;
 
 use lean_dup_diagnostics::perf::{self, CostClass};
 use lean_dup_index::{
-    DeclarationHandle, FingerprintKind, FingerprintQuery, HydratedDeclaration, OpenedIndex, PostingKey,
-    RoleFeatureQuery,
+    DeclarationHandle, FingerprintKind, HydratedDeclaration, OpenedIndex, SemanticFeatureKey,
+    SemanticFingerprintFeature, SemanticRoleFeature,
 };
 
 use crate::Result;
@@ -239,7 +239,7 @@ fn retrieve_candidates_inner(workspace: &[HydratedDeclaration], indexes: &[Opene
 
 #[derive(Debug, Clone)]
 struct PlannedKey {
-    key: PostingKey,
+    key: SemanticFeatureKey,
     contribution: KeyContribution,
     base_weight: f64,
     broad_head: bool,
@@ -331,7 +331,7 @@ fn planned_keys(declaration: &HydratedDeclaration) -> Vec<PlannedKey> {
         let admits_candidate = !broad_head && feature.role != "binder_domain_head";
         let base_weight = role_weight(&feature.role, broad_head);
         plans.push(PlannedKey {
-            key: PostingKey::RoleFeature(RoleFeatureQuery {
+            key: SemanticFeatureKey::RoleFeature(SemanticRoleFeature {
                 role: feature.role.clone(),
                 key: feature.key.clone(),
             }),
@@ -352,7 +352,7 @@ fn planned_keys(declaration: &HydratedDeclaration) -> Vec<PlannedKey> {
 
 fn fingerprint_plan(kind: FingerprintKind, key: &str, label: &'static str, base_weight: f64) -> PlannedKey {
     PlannedKey {
-        key: PostingKey::Fingerprint(FingerprintQuery {
+        key: SemanticFeatureKey::Fingerprint(SemanticFingerprintFeature {
             kind,
             key: key.to_owned(),
         }),
@@ -410,8 +410,8 @@ fn sorted_plans(plans: &[PlannedKey]) -> Vec<&PlannedKey> {
     sorted
 }
 
-fn local_postings(plans_by_decl: &[Vec<PlannedKey>]) -> HashMap<PostingKey, Vec<usize>> {
-    let mut postings: HashMap<PostingKey, Vec<usize>> = HashMap::default();
+fn local_postings(plans_by_decl: &[Vec<PlannedKey>]) -> HashMap<SemanticFeatureKey, Vec<usize>> {
+    let mut postings: HashMap<SemanticFeatureKey, Vec<usize>> = HashMap::default();
     for (index, plans) in plans_by_decl.iter().enumerate() {
         let mut seen = HashSet::default();
         for plan in plans {
@@ -423,7 +423,7 @@ fn local_postings(plans_by_decl: &[Vec<PlannedKey>]) -> HashMap<PostingKey, Vec<
     postings
 }
 
-fn local_counts(postings: &HashMap<PostingKey, Vec<usize>>) -> HashMap<PostingKey, usize> {
+fn local_counts(postings: &HashMap<SemanticFeatureKey, Vec<usize>>) -> HashMap<SemanticFeatureKey, usize> {
     postings
         .iter()
         .map(|(key, handles)| (key.clone(), handles.len()))
@@ -433,11 +433,11 @@ fn local_counts(postings: &HashMap<PostingKey, Vec<usize>>) -> HashMap<PostingKe
 fn external_counts(
     indexes: &[OpenedIndex],
     workspace_plans: &[Vec<PlannedKey>],
-) -> Result<HashMap<(usize, PostingKey), usize>> {
+) -> Result<HashMap<(usize, SemanticFeatureKey), usize>> {
     let keys = unique_keys(workspace_plans);
     let mut counts = HashMap::default();
     for (index, opened) in indexes.iter().enumerate() {
-        for count in opened.posting_counts(&keys)? {
+        for count in opened.feature_match_counts(&keys)? {
             counts.insert((index, count.key), count.count);
         }
     }
@@ -447,8 +447,8 @@ fn external_counts(
 fn external_postings(
     indexes: &[OpenedIndex],
     workspace_plans: &[Vec<PlannedKey>],
-    external_counts: &HashMap<(usize, PostingKey), usize>,
-) -> Result<HashMap<(usize, PostingKey), Vec<DeclarationHandle>>> {
+    external_counts: &HashMap<(usize, SemanticFeatureKey), usize>,
+) -> Result<HashMap<(usize, SemanticFeatureKey), Vec<DeclarationHandle>>> {
     let keys = unique_keys(workspace_plans);
     let mut postings = HashMap::default();
     for (index, opened) in indexes.iter().enumerate() {
@@ -460,7 +460,7 @@ fn external_postings(
             })
             .cloned()
             .collect::<Vec<_>>();
-        for posting in opened.matched_postings(&selected)? {
+        for posting in opened.matched_feature_handles(&selected)? {
             postings
                 .entry((index, posting.key))
                 .or_insert_with(Vec::new)
@@ -470,7 +470,7 @@ fn external_postings(
     Ok(postings)
 }
 
-fn unique_keys(workspace_plans: &[Vec<PlannedKey>]) -> Vec<PostingKey> {
+fn unique_keys(workspace_plans: &[Vec<PlannedKey>]) -> Vec<SemanticFeatureKey> {
     let mut keys = workspace_plans
         .iter()
         .flat_map(|plans| plans.iter().map(|plan| plan.key.clone()))
@@ -485,8 +485,8 @@ fn add_local_matches(
     workspace: &[HydratedDeclaration],
     anchor_index: usize,
     plan: &PlannedKey,
-    local_postings: &HashMap<PostingKey, Vec<usize>>,
-    local_counts: &HashMap<PostingKey, usize>,
+    local_postings: &HashMap<SemanticFeatureKey, Vec<usize>>,
+    local_counts: &HashMap<SemanticFeatureKey, usize>,
     accumulators: &mut HashMap<CandidateId, CandidateAccumulator>,
     diagnostics: &mut RetrievalDiagnostics,
 ) {
@@ -518,8 +518,8 @@ fn add_local_matches(
 struct ExternalMatchContext<'a> {
     indexes: &'a [OpenedIndex],
     index_facts: &'a [lean_dup_index::OpenedIndexFacts],
-    counts: &'a HashMap<(usize, PostingKey), usize>,
-    postings: &'a HashMap<(usize, PostingKey), Vec<DeclarationHandle>>,
+    counts: &'a HashMap<(usize, SemanticFeatureKey), usize>,
+    postings: &'a HashMap<(usize, SemanticFeatureKey), Vec<DeclarationHandle>>,
 }
 
 fn add_external_matches(
@@ -677,14 +677,14 @@ fn rarity_weight(total_documents: usize, document_frequency: usize) -> f64 {
 fn posting_limit(plan: &PlannedKey) -> usize {
     if plan.broad_head {
         BROAD_HEAD_POSTING_LIMIT
-    } else if matches!(plan.key, PostingKey::RoleFeature(_)) {
+    } else if matches!(plan.key, SemanticFeatureKey::RoleFeature(_)) {
         ROLE_POSTING_LIMIT
     } else {
         usize::MAX
     }
 }
 
-fn posting_limit_for_key(workspace_plans: &[Vec<PlannedKey>], key: &PostingKey) -> usize {
+fn posting_limit_for_key(workspace_plans: &[Vec<PlannedKey>], key: &SemanticFeatureKey) -> usize {
     workspace_plans
         .iter()
         .flat_map(|plans| plans.iter())

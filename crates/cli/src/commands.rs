@@ -6,7 +6,7 @@ use crate::cli::{
     OutputFormat, ShowArgs,
 };
 use lean_dup_diagnostics::progress::Reporter;
-use lean_dup_eval::{EvalRequest, EvaluationReport};
+use lean_dup_eval::EvalRequest;
 use lean_dup_index::CleanupPolicy;
 use lean_dup_index::{self, CacheFacts};
 use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexStore, IndexSummary};
@@ -263,8 +263,8 @@ fn audit_request(args: AuditArgs) -> AuditRequest {
     }
 }
 
-fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<EvaluationReport> {
-    Ok(lean_dup_eval::run(
+fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<lean_dup_report::reports::EvalReportDto> {
+    Ok(lean_dup_report::reports::eval_report(lean_dup_eval::run(
         EvalRequest {
             suite: args.suite.into(),
             workspace: args.workspace,
@@ -272,7 +272,7 @@ fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<EvaluationReport> {
             k_values: args.k_values,
         },
         reporter,
-    )?)
+    )?))
 }
 
 fn show(args: ShowArgs, reporter: &mut Reporter) -> Result<ShowReport> {

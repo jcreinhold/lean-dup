@@ -1,11 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use serde::Serialize;
 
 use lean_dup_index::{ComparisonEvidenceMode, ComparisonProvenanceReport};
-use lean_dup_search::audit::{
-    ProbeDiagnostics, RankedGroup, RankedReview, ReviewEvidenceMode, ReviewFilter, ReviewPriority,
-};
+use lean_dup_search::audit::{AuditGroup, AuditProbeSummary, AuditQueueSummary, AuditReview};
 
 pub const REPORT_SCHEMA_VERSION: &str = "lean-dup.report.v1";
 
@@ -79,17 +77,13 @@ pub struct GroupExplanation {
 }
 
 pub fn explain_audit(
-    review: &RankedReview,
-    visible_groups: &[RankedGroup],
-    filter: ReviewFilter,
-    probes: &ProbeDiagnostics,
+    review: &AuditReview,
+    visible_groups: &[AuditGroup],
+    queue: &AuditQueueSummary,
+    probes: &AuditProbeSummary,
     provenance: &[ComparisonProvenanceReport],
 ) -> AuditExplanations {
-    let visible_ids = visible_groups
-        .iter()
-        .map(|group| group.id.as_str())
-        .collect::<BTreeSet<_>>();
-    let hidden_groups = hidden_groups(review, &visible_ids, filter);
+    let hidden_groups = hidden_groups(queue);
     let visible_queue = visible_queue(visible_groups.len(), review.groups.len(), &hidden_groups);
     AuditExplanations {
         visible_queue,
@@ -99,26 +93,12 @@ pub fn explain_audit(
     }
 }
 
-pub fn explain_group(group: &RankedGroup, filter: ReviewFilter) -> GroupExplanation {
-    let (visibility, visibility_reason) = if filter.includes(group) {
-        (
-            "visible".to_owned(),
-            "included by the active review profile and output filters".to_owned(),
-        )
-    } else {
-        (
-            "hidden".to_owned(),
-            hidden_reason(group, filter)
-                .map(hidden_reason_sentence)
-                .unwrap_or_else(|| "hidden by the active review filters".to_owned()),
-        )
-    };
-
+pub fn explain_group(group: &AuditGroup) -> GroupExplanation {
     GroupExplanation {
-        visibility,
-        visibility_reason,
-        evidence_mode: evidence_mode_label(group.evidence_mode).to_owned(),
-        evidence_summary: evidence_summary(group.evidence_mode),
+        visibility: if group.visibility.visible { "visible" } else { "hidden" }.to_owned(),
+        visibility_reason: group.visibility.reason.clone(),
+        evidence_mode: group.evidence_mode.clone(),
+        evidence_summary: evidence_summary(&group.evidence_mode),
         semantic_summary: semantic_summary(group),
         blocker_summary: blocker_summary(group),
         replacement_summary: replacement_summary(group),
@@ -151,82 +131,22 @@ fn visible_queue(visible: usize, total: usize, hidden: &HiddenGroupExplanation) 
     }
 }
 
-fn hidden_groups(review: &RankedReview, visible_ids: &BTreeSet<&str>, filter: ReviewFilter) -> HiddenGroupExplanation {
-    let mut counts = HiddenGroupExplanation {
-        total: 0,
-        noise_or_profile: 0,
-        generated: 0,
-        unverified_proof_grade: 0,
-        unavailable_probe: 0,
-        other_blockers: 0,
-    };
-    for group in &review.groups {
-        if visible_ids.contains(group.id.as_str()) || filter.includes(group) {
-            continue;
-        }
-        counts.total += 1;
-        match hidden_reason(group, filter) {
-            Some(HiddenReason::Generated) => counts.generated += 1,
-            Some(HiddenReason::UnverifiedProofGrade) => counts.unverified_proof_grade += 1,
-            Some(HiddenReason::UnavailableProbe) => counts.unavailable_probe += 1,
-            Some(HiddenReason::NoiseOrProfile) => counts.noise_or_profile += 1,
-            Some(HiddenReason::OtherBlocker) | None => counts.other_blockers += 1,
-        }
+fn hidden_groups(queue: &AuditQueueSummary) -> HiddenGroupExplanation {
+    HiddenGroupExplanation {
+        total: queue.hidden.total,
+        noise_or_profile: queue.hidden.noise_or_profile,
+        generated: queue.hidden.generated,
+        unverified_proof_grade: queue.hidden.unverified_proof_grade,
+        unavailable_probe: queue.hidden.unavailable_probe,
+        other_blockers: queue.hidden.other_blockers,
     }
-    counts
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HiddenReason {
-    Generated,
-    UnverifiedProofGrade,
-    UnavailableProbe,
-    NoiseOrProfile,
-    OtherBlocker,
-}
-
-fn hidden_reason(group: &RankedGroup, filter: ReviewFilter) -> Option<HiddenReason> {
-    if filter.includes(group) {
-        return None;
-    }
-    if !filter.include_generated && has_blocker(group, "generated-declaration") {
-        return Some(HiddenReason::Generated);
-    }
-    if has_blocker(group, "unverified-proof-grade-evidence") {
-        return Some(HiddenReason::UnverifiedProofGrade);
-    }
-    if has_blocker(group, "lean-probe-unavailable") {
-        return Some(HiddenReason::UnavailableProbe);
-    }
-    if group.review_priority == ReviewPriority::Noise
-        || group.review_priority > filter.min_priority
-        || !filter.show_noise
-    {
-        return Some(HiddenReason::NoiseOrProfile);
-    }
-    if !group.blockers.is_empty() {
-        return Some(HiddenReason::OtherBlocker);
-    }
-    Some(HiddenReason::OtherBlocker)
-}
-
-fn has_blocker(group: &RankedGroup, blocker: &str) -> bool {
+fn has_blocker(group: &AuditGroup, blocker: &str) -> bool {
     group.blockers.iter().any(|item| item == blocker)
 }
 
-fn hidden_reason_sentence(reason: HiddenReason) -> String {
-    match reason {
-        HiddenReason::Generated => "hidden because generated declarations are excluded".to_owned(),
-        HiddenReason::UnverifiedProofGrade => {
-            "hidden because proof-grade comparison evidence was required but not verified".to_owned()
-        }
-        HiddenReason::UnavailableProbe => "hidden because the required Lean semantic probe is unavailable".to_owned(),
-        HiddenReason::NoiseOrProfile => "hidden by the active review profile or noise filter".to_owned(),
-        HiddenReason::OtherBlocker => "hidden by blockers or output filters".to_owned(),
-    }
-}
-
-fn semantic_probes(probes: &ProbeDiagnostics) -> SemanticProbeExplanation {
+fn semantic_probes(probes: &AuditProbeSummary) -> SemanticProbeExplanation {
     let summary = if !probes.enabled {
         "semantic probes disabled".to_owned()
     } else if probes.planned_pairs == 0 {
@@ -298,27 +218,18 @@ fn comparison_mode_label(mode: ComparisonEvidenceMode) -> &'static str {
     }
 }
 
-fn evidence_summary(mode: ReviewEvidenceMode) -> String {
+fn evidence_summary(mode: &str) -> String {
     match mode {
-        ReviewEvidenceMode::Static => "static indexed evidence; Lean did not verify this group".to_owned(),
-        ReviewEvidenceMode::SourceBackedNotImportable => {
+        "static" => "static indexed evidence; Lean did not verify this group".to_owned(),
+        "source-backed-not-importable" => {
             "source-backed index exists, but its declarations are not importable in this audit".to_owned()
         }
-        ReviewEvidenceMode::ProofGrade => {
-            "proof-grade source-backed evidence is required for actionable claims".to_owned()
-        }
+        "proof-grade" => "proof-grade source-backed evidence is required for actionable claims".to_owned(),
+        _ => "unknown evidence mode".to_owned(),
     }
 }
 
-fn evidence_mode_label(mode: ReviewEvidenceMode) -> &'static str {
-    match mode {
-        ReviewEvidenceMode::Static => "static",
-        ReviewEvidenceMode::SourceBackedNotImportable => "source-backed-not-importable",
-        ReviewEvidenceMode::ProofGrade => "proof-grade",
-    }
-}
-
-fn semantic_summary(group: &RankedGroup) -> String {
+fn semantic_summary(group: &AuditGroup) -> String {
     if let Some(summary) = &group.probe_summary {
         return summary.clone();
     }
@@ -337,7 +248,7 @@ fn semantic_summary(group: &RankedGroup) -> String {
     "no additional semantic probe evidence is attached".to_owned()
 }
 
-fn blocker_summary(group: &RankedGroup) -> String {
+fn blocker_summary(group: &AuditGroup) -> String {
     if group.blockers.is_empty() {
         "none".to_owned()
     } else {
@@ -345,13 +256,12 @@ fn blocker_summary(group: &RankedGroup) -> String {
     }
 }
 
-fn replacement_summary(group: &RankedGroup) -> String {
+fn replacement_summary(group: &AuditGroup) -> String {
     if let Some(hint) = &group.replacement_hint {
         let mut summary = format!(
-            "target {}; import={:?}; callers={}",
+            "target {}; import={}; callers={}",
             hint.target_decl, hint.import_status, hint.caller_count
-        )
-        .to_ascii_lowercase();
+        );
         if !hint.blockers.is_empty() {
             summary.push_str(&format!("; blockers={}", hint.blockers.join(", ")));
         }
@@ -369,19 +279,19 @@ mod tests {
     use super::{explain_audit, explain_group};
     use lean_dup_index::{ComparisonEvidenceMode, ComparisonProvenanceReport};
     use lean_dup_search::audit::{
-        ConfidenceTier, ProbeDiagnostics, RankedGroup, RankedReview, RankingDiagnostics, ReviewAction,
-        ReviewEvidenceMode, ReviewFilter, ReviewPriority, ReviewRelation,
+        AuditGroup, AuditHiddenGroupCounts, AuditProbeSummary, AuditQueueSummary, AuditReview, AuditReviewDiagnostics,
+        AuditVisibility,
     };
 
     #[test]
     fn zero_visible_groups_have_concrete_reason() {
-        let review = review(vec![group(
-            "g1",
-            ReviewPriority::Noise,
-            vec!["unverified-proof-grade-evidence"],
-            ReviewEvidenceMode::ProofGrade,
-        )]);
-        let explanations = explain_audit(&review, &[], default_filter(), &ProbeDiagnostics::default(), &[]);
+        let review = review(vec![group("g1", "proof-grade", false)]);
+        let queue = queue(AuditHiddenGroupCounts {
+            total: 1,
+            unverified_proof_grade: 1,
+            ..AuditHiddenGroupCounts::default()
+        });
+        let explanations = explain_audit(&review, &[], &queue, &AuditProbeSummary::default(), &[]);
 
         assert_eq!(explanations.visible_queue.visible, 0);
         assert!(explanations.visible_queue.reason.contains("proof-grade"));
@@ -391,27 +301,20 @@ mod tests {
     #[test]
     fn hidden_group_counts_are_exclusive_and_deterministic() {
         let review = review(vec![
-            group(
-                "generated",
-                ReviewPriority::Noise,
-                vec!["generated-declaration", "unverified-proof-grade-evidence"],
-                ReviewEvidenceMode::ProofGrade,
-            ),
-            group(
-                "unverified",
-                ReviewPriority::Noise,
-                vec!["unverified-proof-grade-evidence"],
-                ReviewEvidenceMode::ProofGrade,
-            ),
-            group(
-                "unavailable",
-                ReviewPriority::Noise,
-                vec!["lean-probe-unavailable"],
-                ReviewEvidenceMode::ProofGrade,
-            ),
-            group("noise", ReviewPriority::Noise, vec![], ReviewEvidenceMode::Static),
+            group("generated", "proof-grade", false),
+            group("unverified", "proof-grade", false),
+            group("unavailable", "proof-grade", false),
+            group("noise", "static", false),
         ]);
-        let explanations = explain_audit(&review, &[], default_filter(), &ProbeDiagnostics::default(), &[]);
+        let queue = queue(AuditHiddenGroupCounts {
+            total: 4,
+            generated: 1,
+            unverified_proof_grade: 1,
+            unavailable_probe: 1,
+            noise_or_profile: 1,
+            ..AuditHiddenGroupCounts::default()
+        });
+        let explanations = explain_audit(&review, &[], &queue, &AuditProbeSummary::default(), &[]);
 
         assert_eq!(explanations.hidden_groups.total, 4);
         assert_eq!(explanations.hidden_groups.generated, 1);
@@ -422,17 +325,23 @@ mod tests {
 
     #[test]
     fn probe_summary_uses_stable_unavailable_reason_labels() {
-        let mut diagnostics = ProbeDiagnostics {
+        let mut diagnostics = AuditProbeSummary {
             enabled: true,
             planned_pairs: 2,
             unavailable_results: 2,
-            ..ProbeDiagnostics::default()
+            ..AuditProbeSummary::default()
         };
         diagnostics
             .unavailable_by_reason
             .insert("opaque-or-unreducible".to_owned(), 2);
 
-        let explanations = explain_audit(&review(Vec::new()), &[], default_filter(), &diagnostics, &[]);
+        let explanations = explain_audit(
+            &review(Vec::new()),
+            &[],
+            &queue(AuditHiddenGroupCounts::default()),
+            &diagnostics,
+            &[],
+        );
 
         assert_eq!(
             explanations
@@ -446,30 +355,17 @@ mod tests {
 
     #[test]
     fn group_explanations_distinguish_evidence_modes() {
-        let static_group = group("static", ReviewPriority::High, vec![], ReviewEvidenceMode::Static);
-        let not_importable = group(
-            "not-importable",
-            ReviewPriority::High,
-            vec![],
-            ReviewEvidenceMode::SourceBackedNotImportable,
-        );
-        let proof_grade = group("proof", ReviewPriority::High, vec![], ReviewEvidenceMode::ProofGrade);
+        let static_group = group("static", "static", true);
+        let not_importable = group("not-importable", "source-backed-not-importable", true);
+        let proof_grade = group("proof", "proof-grade", true);
 
+        assert!(explain_group(&static_group).evidence_summary.contains("static"));
         assert!(
-            explain_group(&static_group, default_filter())
-                .evidence_summary
-                .contains("static")
-        );
-        assert!(
-            explain_group(&not_importable, default_filter())
+            explain_group(&not_importable)
                 .evidence_summary
                 .contains("not importable")
         );
-        assert!(
-            explain_group(&proof_grade, default_filter())
-                .evidence_summary
-                .contains("proof-grade")
-        );
+        assert!(explain_group(&proof_grade).evidence_summary.contains("proof-grade"));
     }
 
     #[test]
@@ -488,8 +384,8 @@ mod tests {
         let explanations = explain_audit(
             &review(Vec::new()),
             &[],
-            default_filter(),
-            &ProbeDiagnostics::default(),
+            &queue(AuditHiddenGroupCounts::default()),
+            &AuditProbeSummary::default(),
             &[report],
         );
 
@@ -497,49 +393,49 @@ mod tests {
         assert!(explanations.comparison_provenance.summary.contains("proof-grade"));
     }
 
-    fn default_filter() -> ReviewFilter {
-        ReviewFilter {
-            include_generated: false,
-            show_noise: false,
-            min_priority: ReviewPriority::Medium,
-        }
-    }
-
-    fn review(groups: Vec<RankedGroup>) -> RankedReview {
-        RankedReview {
-            diagnostics: RankingDiagnostics {
+    fn review(groups: Vec<AuditGroup>) -> AuditReview {
+        AuditReview {
+            diagnostics: AuditReviewDiagnostics {
                 candidate_pairs: groups.len(),
                 emitted_groups: groups.len(),
                 suppressed_groups: 0,
             },
             groups,
-            suppressed: Vec::new(),
+            suppressed_count: 0,
         }
     }
 
-    fn group(
-        id: &str,
-        priority: ReviewPriority,
-        blockers: Vec<&str>,
-        evidence_mode: ReviewEvidenceMode,
-    ) -> RankedGroup {
-        RankedGroup {
+    fn queue(hidden: AuditHiddenGroupCounts) -> AuditQueueSummary {
+        AuditQueueSummary {
+            visible: 0,
+            total: hidden.total,
+            hidden,
+        }
+    }
+
+    fn group(id: &str, evidence_mode: &str, visible: bool) -> AuditGroup {
+        AuditGroup {
             id: id.to_owned(),
             pair_id: id.to_owned(),
-            relation: ReviewRelation::ExactStatement,
+            relation: "exact-statement".to_owned(),
             members: Vec::new(),
             evidence: Vec::new(),
             signals: Vec::new(),
-            blockers: blockers.into_iter().map(str::to_owned).collect(),
-            confidence: ConfidenceTier::High,
-            review_priority: priority,
-            recommended_action: ReviewAction::ManualReview,
+            blockers: Vec::new(),
+            confidence: "high".to_owned(),
+            review_priority: "high".to_owned(),
+            recommended_action: "manual-review".to_owned(),
             target_decl: None,
             target_module: None,
-            evidence_mode,
+            evidence_mode: evidence_mode.to_owned(),
             probe_summary: None,
             local_caller_count: 0,
             replacement_hint: None,
+            visibility: AuditVisibility {
+                visible,
+                reason: if visible { "visible" } else { "hidden" }.to_owned(),
+                hidden_reason: None,
+            },
         }
     }
 }

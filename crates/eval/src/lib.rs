@@ -10,7 +10,7 @@ mod error;
 mod eval;
 
 pub use error::{Error, Result};
-pub use eval::{EvalRequest, EvaluationReport, peak_rss_bytes, render_metrics, run};
+pub use eval::{CountMetric, EvalOutput, EvalRequest, EvaluationMetrics, EvaluationRunReport, peak_rss_bytes, run};
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]

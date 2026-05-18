@@ -224,16 +224,15 @@ impl DeclarationHandle {
 /// Callers may compare and store the keys Lean emitted, but must not parse
 /// them or reconstruct them from display text.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[allow(dead_code)]
-pub struct IndexQuery {
-    pub fingerprints: Vec<FingerprintQuery>,
-    pub role_features: Vec<RoleFeatureQuery>,
+struct SemanticFeatureQuery {
+    pub fingerprints: Vec<SemanticFingerprintFeature>,
+    pub role_features: Vec<SemanticRoleFeature>,
 }
 
 /// One requested opaque fingerprint key.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[allow(dead_code)]
-pub struct FingerprintQuery {
+pub struct SemanticFingerprintFeature {
     pub kind: FingerprintKind,
     pub key: String,
 }
@@ -251,7 +250,7 @@ pub enum FingerprintKind {
 /// One requested opaque role-feature key.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[allow(dead_code)]
-pub struct RoleFeatureQuery {
+pub struct SemanticRoleFeature {
     pub role: String,
     pub key: String,
 }
@@ -262,9 +261,9 @@ pub struct RoleFeatureQuery {
 /// value remains opaque and display text must not be used as a replacement key.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[allow(dead_code)]
-pub enum PostingKey {
-    Fingerprint(FingerprintQuery),
-    RoleFeature(RoleFeatureQuery),
+pub enum SemanticFeatureKey {
+    Fingerprint(SemanticFingerprintFeature),
+    RoleFeature(SemanticRoleFeature),
 }
 
 /// The number of declarations matched by one requested semantic key.
@@ -273,8 +272,8 @@ pub enum PostingKey {
 /// without hydrating declarations first.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
-pub struct PostingCount {
-    pub key: PostingKey,
+pub struct FeatureMatchCount {
+    pub key: SemanticFeatureKey,
     pub count: usize,
 }
 
@@ -284,8 +283,8 @@ pub struct PostingCount {
 /// returned without reopening the declaration or inspecting storage.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
-pub struct MatchedPosting {
-    pub key: PostingKey,
+pub struct FeatureMatch {
+    pub key: SemanticFeatureKey,
     pub handle: DeclarationHandle,
 }
 
@@ -568,21 +567,21 @@ impl OpenedIndex {
     }
 
     /// Count matches for each requested semantic key without hydrating rows.
-    pub fn posting_counts(&self, keys: &[PostingKey]) -> Result<Vec<PostingCount>> {
+    pub fn feature_match_counts(&self, keys: &[SemanticFeatureKey]) -> Result<Vec<FeatureMatchCount>> {
         if keys.is_empty() {
             return Ok(Vec::new());
         }
         perf::record_count(CostClass::SqliteIndex, "sqlite.posting_count.keys", keys.len() as u64);
-        perf::measure_result(CostClass::SqliteIndex, "sqlite.posting_counts", || {
+        perf::measure_result(CostClass::SqliteIndex, "sqlite.feature_match_counts", || {
             let connection = open_readonly(&self.path)?;
             let mut counts = Vec::with_capacity(keys.len());
             for key in keys {
                 if key.is_empty() {
                     continue;
                 }
-                counts.push(PostingCount {
+                counts.push(FeatureMatchCount {
                     key: key.clone(),
-                    count: posting_count(&connection, key)?,
+                    count: feature_match_count(&connection, key)?,
                 });
             }
             Ok(counts)
@@ -593,12 +592,12 @@ impl OpenedIndex {
     ///
     /// The returned handles remain opaque; callers hydrate only the handles
     /// they decide to keep.
-    pub fn matched_postings(&self, keys: &[PostingKey]) -> Result<Vec<MatchedPosting>> {
+    pub fn matched_feature_handles(&self, keys: &[SemanticFeatureKey]) -> Result<Vec<FeatureMatch>> {
         if keys.is_empty() {
             return Ok(Vec::new());
         }
         perf::record_count(CostClass::SqliteIndex, "sqlite.matched_posting.keys", keys.len() as u64);
-        perf::measure_result(CostClass::SqliteIndex, "sqlite.matched_postings", || {
+        perf::measure_result(CostClass::SqliteIndex, "sqlite.matched_feature_handles", || {
             let connection = open_readonly(&self.path)?;
             let mut postings = Vec::new();
             for key in keys {
@@ -606,9 +605,9 @@ impl OpenedIndex {
                     continue;
                 }
                 postings.extend(
-                    posting_handles(&connection, key)?
+                    feature_match_handles(&connection, key)?
                         .into_iter()
-                        .map(|handle| MatchedPosting {
+                        .map(|handle| FeatureMatch {
                             key: key.clone(),
                             handle,
                         }),
@@ -636,7 +635,7 @@ impl OpenedIndex {
         Ok(handles)
     }
 
-    pub fn matching_handles(&self, query: IndexQuery) -> Result<Vec<DeclarationHandle>> {
+    fn matching_handles(&self, query: SemanticFeatureQuery) -> Result<Vec<DeclarationHandle>> {
         let connection = open_readonly(&self.path)?;
         let mut handles = BTreeSet::new();
         for fingerprint in query.fingerprints {
@@ -722,7 +721,7 @@ impl OpenedIndex {
     }
 }
 
-impl PostingKey {
+impl SemanticFeatureKey {
     pub fn is_empty(&self) -> bool {
         match self {
             Self::Fingerprint(query) => query.key.is_empty(),
@@ -1305,14 +1304,14 @@ fn metadata_value(connection: &Connection, key: &str) -> Result<Option<String>> 
         .optional()?)
 }
 
-fn posting_count(connection: &Connection, key: &PostingKey) -> Result<usize> {
+fn feature_match_count(connection: &Connection, key: &SemanticFeatureKey) -> Result<usize> {
     let count = match key {
-        PostingKey::Fingerprint(query) => connection.query_row(
+        SemanticFeatureKey::Fingerprint(query) => connection.query_row(
             "SELECT COUNT(*) FROM fingerprint_postings WHERE kind = ?1 AND key = ?2",
             params![query.kind.as_str(), query.key],
             |row| row.get::<_, i64>(0),
         )?,
-        PostingKey::RoleFeature(query) => connection.query_row(
+        SemanticFeatureKey::RoleFeature(query) => connection.query_row(
             "SELECT COUNT(*) FROM role_feature_postings WHERE role = ?1 AND key = ?2",
             params![query.role, query.key],
             |row| row.get::<_, i64>(0),
@@ -1321,10 +1320,10 @@ fn posting_count(connection: &Connection, key: &PostingKey) -> Result<usize> {
     Ok(count as usize)
 }
 
-fn posting_handles(connection: &Connection, key: &PostingKey) -> Result<Vec<DeclarationHandle>> {
+fn feature_match_handles(connection: &Connection, key: &SemanticFeatureKey) -> Result<Vec<DeclarationHandle>> {
     let mut handles = Vec::new();
     match key {
-        PostingKey::Fingerprint(query) => {
+        SemanticFeatureKey::Fingerprint(query) => {
             let mut statement = connection
                 .prepare("SELECT declaration_handle FROM fingerprint_postings WHERE kind = ?1 AND key = ?2")?;
             let rows = statement.query_map(params![query.kind.as_str(), query.key], |row| row.get::<_, String>(0))?;
@@ -1332,7 +1331,7 @@ fn posting_handles(connection: &Connection, key: &PostingKey) -> Result<Vec<Decl
                 handles.push(DeclarationHandle(row?));
             }
         }
-        PostingKey::RoleFeature(query) => {
+        SemanticFeatureKey::RoleFeature(query) => {
             let mut statement = connection
                 .prepare("SELECT declaration_handle FROM role_feature_postings WHERE role = ?1 AND key = ?2")?;
             let rows = statement.query_map(params![query.role, query.key], |row| row.get::<_, String>(0))?;
@@ -1620,8 +1619,9 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        CacheStatus, FingerprintKind, FingerprintQuery, IndexBuildKind, IndexBuildRequest, IndexProvenanceKind,
-        IndexQuery, IndexReference, IndexStore, RoleFeatureQuery, index_cache_key, safe_label, sqlite_cache_is_current,
+        CacheStatus, FingerprintKind, IndexBuildKind, IndexBuildRequest, IndexProvenanceKind, IndexReference,
+        IndexStore, SemanticFeatureQuery, SemanticFingerprintFeature, SemanticRoleFeature, index_cache_key, safe_label,
+        sqlite_cache_is_current,
     };
     use lean_dup_diagnostics::progress::Reporter;
     use lean_dup_project::workspace::{ResolvedWorkspace, WorkspaceRequest, resolve};
@@ -1690,8 +1690,8 @@ mod tests {
         let by_path = store.resolve(IndexReference::Path(first.index_dir.clone())).unwrap();
 
         let handles = by_label
-            .matching_handles(IndexQuery {
-                fingerprints: vec![FingerprintQuery {
+            .matching_handles(SemanticFeatureQuery {
+                fingerprints: vec![SemanticFingerprintFeature {
                     kind: FingerprintKind::Statement,
                     key: "missing-key".to_owned(),
                 }],
@@ -1701,9 +1701,9 @@ mod tests {
         assert!(handles.is_empty());
 
         let all = by_path
-            .matching_handles(IndexQuery {
+            .matching_handles(SemanticFeatureQuery {
                 fingerprints: vec![],
-                role_features: vec![RoleFeatureQuery {
+                role_features: vec![SemanticRoleFeature {
                     role: "const".to_owned(),
                     key: "Prop".to_owned(),
                 }],

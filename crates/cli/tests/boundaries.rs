@@ -109,6 +109,33 @@ fn old_file_shaped_modules_are_not_public_api() {
     ] {
         assert!(!search_lib.contains(forbidden), "search exposes {forbidden}");
     }
+    let search_audit = fs::read_to_string(root.join("crates/search/src/audit.rs")).expect("read search audit facade");
+    for forbidden in [
+        "pub use crate::ranking",
+        "pub use crate::retrieval",
+        "pub use crate::semantic_verification",
+        "pub group: RankedGroup",
+        "pub review: RankedReview",
+        "pub retrieval: RetrievalDiagnostics",
+        "pub semantic_verification: ProbeDiagnostics",
+    ] {
+        assert!(
+            !search_audit.contains(forbidden),
+            "search audit facade exposes {forbidden}"
+        );
+    }
+    for allowed_public_name in [
+        "pub struct AuditReview",
+        "pub struct AuditGroup",
+        "pub struct AuditRetrievalSummary",
+        "pub struct AuditProbeSummary",
+        "pub struct SearchBaselineDiff",
+    ] {
+        assert!(
+            search_audit.contains(allowed_public_name),
+            "search audit facade is missing {allowed_public_name}"
+        );
+    }
 
     let index_lib = fs::read_to_string(root.join("crates/index/src/lib.rs")).expect("read index lib");
     for forbidden in [
@@ -116,6 +143,11 @@ fn old_file_shaped_modules_are_not_public_api() {
         "pub mod cache",
         "pub mod cache_lifecycle",
         "pub mod external_provenance",
+        "pub use index::*",
+        "Posting",
+        "IndexQuery",
+        "FingerprintQuery",
+        "RoleFeatureQuery",
     ] {
         assert!(!index_lib.contains(forbidden), "index exposes {forbidden}");
     }
@@ -131,14 +163,35 @@ fn old_file_shaped_modules_are_not_public_api() {
 
     let reports = fs::read_to_string(root.join("crates/report/src/reports.rs")).expect("read report DTOs");
     for forbidden in [
+        "RankedGroup",
+        "RankedReview",
+        "ReviewFilter",
+        "RetrievalDiagnostics",
+        "ProbeDiagnostics",
+        "EvaluationReport",
         "pub retrieval: RetrievalDiagnostics",
         "pub semantic_verification: ProbeDiagnostics",
         "pub review: RankedReview",
         "pub group: RankedGroup",
         "pub cache: CacheDiagnostics,",
         "CacheCleanup(CacheCleanupReport)",
+        "Eval(EvalOutput)",
     ] {
         assert!(!reports.contains(forbidden), "report DTO exposes {forbidden}");
+    }
+    let report_contract =
+        fs::read_to_string(root.join("crates/report/src/report_contract.rs")).expect("read report contract");
+    for forbidden in [
+        "RankedGroup",
+        "RankedReview",
+        "ReviewFilter",
+        "RetrievalDiagnostics",
+        "ProbeDiagnostics",
+    ] {
+        assert!(
+            !report_contract.contains(forbidden),
+            "report contract depends on search internals: {forbidden}"
+        );
     }
 }
 
