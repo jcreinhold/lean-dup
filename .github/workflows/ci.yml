@@ -32,4 +32,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo test --workspace --locked
+      # Library + bin unit tests across the workspace, plus the static-manifest
+      # boundaries check. The crates/cli/tests/cli.rs integration suite shells
+      # out to `lake` and is intentionally skipped in CI — run it locally with
+      # `cargo test -p lean-dup-cli --test cli`.
+      - run: cargo test --workspace --locked --lib --bins
+      - run: cargo test -p lean-dup-cli --test boundaries --locked
