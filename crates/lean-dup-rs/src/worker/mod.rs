@@ -149,6 +149,8 @@ impl WorkerClient {
         perf::record_count(CostClass::LeanSemantic, "worker.probe.batch", 1);
         perf::record_count(CostClass::LeanSemantic, "worker.probe.pairs", batch.pairs.len() as u64);
         let mut payload = protocol::modules_payload(&batch.workspace_root_string(), &batch.modules);
+        payload["include_private"] = Value::Bool(batch.include_private);
+        payload["include_generated"] = Value::Bool(batch.include_generated);
         payload["pairs"] = serde_json::json!(batch.pairs);
         if let Some(max_pairs) = batch.max_pairs {
             payload["max_pairs"] = serde_json::json!(max_pairs);
@@ -384,6 +386,8 @@ impl FeaturesBatch {
 pub struct ProbeBatch {
     pub workspace_root: PathBuf,
     pub modules: Vec<ModuleDescriptor>,
+    pub include_private: bool,
+    pub include_generated: bool,
     pub pairs: Vec<ProbePair>,
     pub max_pairs: Option<u64>,
 }
@@ -531,7 +535,12 @@ fn request_id() -> String {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
+    use super::protocol::ProtocolOutput;
+    use super::transport::{CallControl, WorkerTransport};
     use super::{ExtractBatch, FeaturesBatch, ModuleDescriptor, ProbeBatch, ProbePair, WorkerClient};
 
     fn repo_root() -> PathBuf {
@@ -637,6 +646,8 @@ mod tests {
             .probe_batch(ProbeBatch {
                 workspace_root: tiny_root(),
                 modules: tiny_basic(),
+                include_private: true,
+                include_generated: false,
                 pairs: vec![ProbePair {
                     pair_id: "p1".to_owned(),
                     left_declaration_id: left,
@@ -647,5 +658,71 @@ mod tests {
             .unwrap();
         assert_eq!(call.rows.len(), 1);
         assert_eq!(call.rows[0].pair_id, "p1");
+    }
+
+    #[test]
+    fn probe_batch_serializes_extraction_filters() {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let client = WorkerClient {
+            transport: Box::new(CapturingTransport {
+                requests: requests.clone(),
+            }),
+            timeout: Duration::from_secs(1),
+            cancelled: Arc::new(AtomicBool::new(false)),
+        };
+
+        let call = client
+            .probe_batch(ProbeBatch {
+                workspace_root: tiny_root(),
+                modules: tiny_basic(),
+                include_private: true,
+                include_generated: false,
+                pairs: vec![ProbePair {
+                    pair_id: "p1".to_owned(),
+                    left_declaration_id: "left".to_owned(),
+                    right_declaration_id: "right".to_owned(),
+                }],
+                max_pairs: Some(1),
+            })
+            .unwrap();
+
+        assert!(call.rows.is_empty());
+        let captured = requests.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        assert_eq!(captured[0]["include_private"], true);
+        assert_eq!(captured[0]["include_generated"], false);
+    }
+
+    struct CapturingTransport {
+        requests: Arc<Mutex<Vec<serde_json::Value>>>,
+    }
+
+    impl WorkerTransport for CapturingTransport {
+        fn call(
+            &self,
+            request: super::protocol::Request,
+            _control: CallControl,
+        ) -> Result<ProtocolOutput, super::WorkerError> {
+            self.requests.lock().unwrap().push(request.to_json());
+            Ok(ProtocolOutput {
+                rows: Vec::new(),
+                events: Vec::new(),
+                diagnostics: Vec::new(),
+            })
+        }
+
+        fn call_stream(
+            &self,
+            request: super::protocol::Request,
+            _control: CallControl,
+            _sink: &mut dyn FnMut(super::protocol::ProtocolItem) -> Result<(), super::WorkerError>,
+        ) -> Result<ProtocolOutput, super::WorkerError> {
+            self.requests.lock().unwrap().push(request.to_json());
+            Ok(ProtocolOutput {
+                rows: Vec::new(),
+                events: Vec::new(),
+                diagnostics: Vec::new(),
+            })
+        }
     }
 }

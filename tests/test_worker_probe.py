@@ -160,6 +160,18 @@ def test_reducible_definition_match_below_guard(worker_bin: Path) -> None:
     assert row["same_statement"] is False
 
 
+def test_private_declarations_are_available_when_requested(worker_bin: Path) -> None:
+    row = _probe_row(
+        worker_bin,
+        "private",
+        "_private.Tiny.Basic.0.Tiny.private_dup_left",
+        "_private.Tiny.Basic.0.Tiny.private_dup_right",
+    )
+
+    assert row["status"] == "ok"
+    assert row["same_statement"] is True
+
+
 def test_opaque_definition_is_unavailable_with_bounded_message(worker_bin: Path) -> None:
     row = _probe_row(
         worker_bin,
@@ -250,9 +262,9 @@ def _probe_envelopes(worker_bin: Path, pairs: list[dict[str, str]]) -> list[dict
     assert envelopes
     assert envelopes[-1]["kind"] == "complete"
     assert sum(envelope["kind"] == "complete" for envelope in envelopes) == 1
-    assert all(envelope["kind"] == "probe_result" for envelope in envelopes[:-1])
+    assert all(envelope["kind"] in {"progress", "probe_result", "complete"} for envelope in envelopes)
     assert envelopes[-1]["payload"]["row_counts"]["probe_result"] == len(pairs)
-    return envelopes
+    return [envelope for envelope in envelopes if envelope["kind"] in {"probe_result", "complete"}]
 
 
 def _pair(pair_id: str, left: str, right: str) -> dict[str, str]:

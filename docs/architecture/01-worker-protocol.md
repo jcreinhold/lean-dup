@@ -282,6 +282,8 @@ Request payload fields:
 
 - `workspace_root`: display path for diagnostics.
 - `modules`: nonempty array of module descriptors needed to import both sides of each pair.
+- `include_private`: boolean. It must match the declaration universe used by the index that produced the pair ids.
+- `include_generated`: boolean. It must match the declaration universe used by the index that produced the pair ids.
 - `pairs`: array of pair descriptors with `pair_id`, `left_declaration_id`, and `right_declaration_id`.
 - `max_pairs`: optional positive integer. Rust owns batching; this field is a defensive limit, not retrieval policy.
 

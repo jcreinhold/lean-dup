@@ -45,7 +45,7 @@ pub(crate) enum Report {
     Doctor(DoctorReport),
     Index(IndexReport),
     IndexMathlib(IndexReport),
-    Audit(AuditReport),
+    Audit(Box<AuditReport>),
     Eval(EvaluationReport),
     Perf(crate::perf::PerfReport),
     Show(ShowReport),
@@ -185,7 +185,7 @@ pub(crate) fn run(cli: Cli) -> Result<Outcome> {
         ),
         Command::Audit(args) => {
             let format = args.format;
-            (Report::Audit(audit(args, &mut reporter)?), format, None)
+            (Report::Audit(Box::new(audit(args, &mut reporter)?)), format, None)
         }
         Command::Eval(args) => {
             let format = if args.format == EvalFormat::Json {
@@ -430,6 +430,8 @@ fn compute_audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditComput
             workspace: &foundation.workspace,
             comparison_policy: &compare.provenance.policy,
             enabled: args.semantic_probes,
+            include_private,
+            include_generated: args.include_generated,
             settings: ProbeSettings {
                 policy: args.probe_policy,
                 budget: args.probe_budget,

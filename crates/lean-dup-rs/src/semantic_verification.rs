@@ -15,8 +15,8 @@ use crate::retrieval::{CandidateSet, RetrievedCandidate};
 use crate::worker::{ModuleDescriptor, ProbeBatch, ProbePair, ProbeResult, WorkerClient, WorkerError};
 use crate::workspace::ResolvedWorkspace;
 
-const PROBE_CACHE_VERSION: &str = "semantic-probe-cache.v2";
-const PROBE_POLICY_VERSION: &str = "semantic-probe-policy.v1";
+const PROBE_CACHE_VERSION: &str = "semantic-probe-cache.v3";
+const PROBE_POLICY_VERSION: &str = "semantic-probe-policy.v2";
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// User-independent settings for bounded semantic verification.
@@ -43,6 +43,8 @@ pub(crate) struct SemanticVerificationInput<'a> {
     pub(crate) workspace: &'a ResolvedWorkspace,
     pub(crate) comparison_policy: &'a ComparisonEvidencePolicy,
     pub(crate) enabled: bool,
+    pub(crate) include_private: bool,
+    pub(crate) include_generated: bool,
     pub(crate) settings: ProbeSettings,
 }
 
@@ -146,6 +148,10 @@ pub(crate) struct ProbeDiagnostics {
     pub(crate) unavailable_missing: usize,
     pub(crate) unavailable_timeout: usize,
     pub(crate) unavailable_internal: usize,
+    pub(crate) unavailable_by_reason: BTreeMap<String, usize>,
+    pub(crate) unavailable_by_obligation: BTreeMap<String, usize>,
+    pub(crate) unavailable_by_module: BTreeMap<String, usize>,
+    pub(crate) unavailable_by_origin: BTreeMap<String, usize>,
     pub(crate) verified_results: usize,
 }
 
@@ -177,6 +183,10 @@ impl Default for ProbeDiagnostics {
             unavailable_missing: 0,
             unavailable_timeout: 0,
             unavailable_internal: 0,
+            unavailable_by_reason: BTreeMap::new(),
+            unavailable_by_obligation: BTreeMap::new(),
+            unavailable_by_module: BTreeMap::new(),
+            unavailable_by_origin: BTreeMap::new(),
             verified_results: 0,
         }
     }
@@ -235,21 +245,21 @@ pub(crate) fn verify_candidate_probes(
         });
     }
 
-    let planned = plan_probes(&input, &mut diagnostics);
+    let plan = plan_probes(&input, &mut diagnostics);
     reporter.event(
         "semantic.probe.plan",
-        Some(planned.len() as u64),
+        Some(plan.planned.len() as u64),
         Some(input.settings.budget as u64),
-        format!("planned {} semantic probe pairs", planned.len()),
+        format!("planned {} semantic probe pairs", plan.planned.len()),
     );
 
-    let mut evidence = BTreeMap::new();
+    let mut evidence = plan.preflight_evidence;
     let mut missing = Vec::new();
-    for planned_probe in planned {
+    for planned_probe in plan.planned {
         if let Some(cached) = input.local_index.index.cached_probe_result(&planned_probe.cache_key)? {
             diagnostics.cached_hits += 1;
             let semantic = semantic_evidence(&planned_probe, &cached);
-            record_evidence_diagnostic(&semantic, &mut diagnostics);
+            record_evidence_diagnostic(&semantic, &planned_probe, &mut diagnostics);
             evidence.insert(semantic.pair_id.clone(), semantic);
         } else {
             missing.push(planned_probe);
@@ -275,6 +285,8 @@ struct PlannedProbe {
     right_origin: String,
     left_module: String,
     left_origin: String,
+    include_private: bool,
+    include_generated: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -287,7 +299,88 @@ enum ProbeObligation {
     LocalDuplicate,
 }
 
-fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDiagnostics) -> Vec<PlannedProbe> {
+#[derive(Debug, Clone, Default)]
+struct ProbePlan {
+    planned: Vec<PlannedProbe>,
+    preflight_evidence: BTreeMap<String, SemanticEvidence>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProbeDecision {
+    Worker(ProbeObligation),
+    Unavailable(UnavailableReason),
+}
+
+impl ProbeDecision {
+    fn order_key(self) -> ProbeObligation {
+        match self {
+            Self::Worker(obligation) => obligation,
+            Self::Unavailable(_) => ProbeObligation::LocalDuplicate,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnavailableReason {
+    MissingDeclaration,
+    Unsupported,
+    OpaqueOrUnreducible,
+    Timeout,
+    InternalError,
+}
+
+impl UnavailableReason {
+    fn label(self) -> &'static str {
+        match self {
+            Self::MissingDeclaration => "missing-declaration",
+            Self::Unsupported => "unsupported",
+            Self::OpaqueOrUnreducible => "opaque-or-unreducible",
+            Self::Timeout => "timeout",
+            Self::InternalError => "internal-error",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DeclarationProbeSummary {
+    origin: String,
+    module: String,
+    kind: String,
+    visibility: String,
+    generated: bool,
+    importable: bool,
+}
+
+impl DeclarationProbeSummary {
+    fn from_declaration(declaration: &HydratedDeclaration, policy: &ComparisonEvidencePolicy) -> Self {
+        Self {
+            origin: declaration.origin.clone(),
+            module: declaration.module.clone(),
+            kind: declaration.kind.clone(),
+            visibility: declaration.visibility.clone(),
+            generated: declaration.status_flags.iter().any(|flag| flag == "generated"),
+            importable: probe_supported_origin(declaration, policy),
+        }
+    }
+
+    fn theorem_like(&self) -> bool {
+        matches!(self.kind.as_str(), "theorem" | "axiom")
+    }
+
+    fn definition_like(&self) -> bool {
+        matches!(self.kind.as_str(), "def" | "abbrev")
+    }
+
+    fn probe_supported_kind(&self) -> bool {
+        matches!(self.kind.as_str(), "theorem" | "axiom" | "def" | "abbrev")
+    }
+
+    fn needs_private_filter(&self) -> bool {
+        self.visibility == "private"
+    }
+}
+
+fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDiagnostics) -> ProbePlan {
     let groups = input
         .cheap_review
         .groups
@@ -302,31 +395,46 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
                 diagnostics.skipped_by_policy += 1;
                 continue;
             };
-            if !probe_supported_origin(&candidate.declaration, input.comparison_policy)
-                || !probe_supported_origin(&set.anchor, input.comparison_policy)
-            {
-                diagnostics.skipped_by_policy += 1;
-                continue;
-            }
-            if !probe_supported_kind(&candidate.declaration) || !probe_supported_kind(&set.anchor) {
-                diagnostics.skipped_by_policy += 1;
-                continue;
-            }
             if !eligible_for_policy(input.settings.policy, candidate, group) {
                 diagnostics.skipped_by_policy += 1;
                 continue;
             }
-            let Some(obligation) = probe_obligation(input.settings.policy, &set.anchor, candidate, group) else {
+            let left = DeclarationProbeSummary::from_declaration(&set.anchor, input.comparison_policy);
+            let right = DeclarationProbeSummary::from_declaration(&candidate.declaration, input.comparison_policy);
+            if !left.importable || !right.importable {
+                candidates.push((
+                    set,
+                    candidate,
+                    *group,
+                    ProbeDecision::Unavailable(UnavailableReason::MissingDeclaration),
+                    left,
+                    right,
+                ));
+                continue;
+            }
+            if !left.probe_supported_kind() || !right.probe_supported_kind() {
+                candidates.push((
+                    set,
+                    candidate,
+                    *group,
+                    ProbeDecision::Unavailable(UnavailableReason::Unsupported),
+                    left,
+                    right,
+                ));
+                continue;
+            }
+            let Some(obligation) = probe_obligation(input.settings.policy, &left, &right, candidate, group) else {
                 diagnostics.cheap_summary_rejects += 1;
                 continue;
             };
-            candidates.push((set, candidate, *group, obligation));
+            candidates.push((set, candidate, *group, ProbeDecision::Worker(obligation), left, right));
         }
     }
 
     candidates.sort_by(|left, right| {
         left.3
-            .cmp(&right.3)
+            .order_key()
+            .cmp(&right.3.order_key())
             .then_with(|| left.2.review_priority.cmp(&right.2.review_priority))
             .then_with(|| left.2.confidence.cmp(&right.2.confidence))
             .then_with(|| {
@@ -340,8 +448,9 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
     });
 
     let mut planned = Vec::new();
+    let mut preflight_evidence = BTreeMap::new();
     let mut per_declaration = HashMap::<String, usize>::default();
-    for (set, candidate, _, obligation) in candidates {
+    for (set, candidate, _, decision, left, right) in candidates {
         if planned.len() >= input.settings.budget {
             diagnostics.skipped_by_budget += 1;
             continue;
@@ -357,25 +466,58 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
             left_declaration_id: set.anchor.declaration_id.clone(),
             right_declaration_id: candidate.declaration.declaration_id.clone(),
         };
-        record_planned_obligation(obligation, diagnostics);
-        planned.push(PlannedProbe {
-            cache_key: probe_cache_key(
-                &pair,
-                &set.anchor,
-                &candidate.declaration,
-                input.settings.policy,
-                obligation,
-            ),
-            pair,
-            obligation,
-            right_module: candidate.declaration.module.clone(),
-            right_origin: candidate.declaration.origin.clone(),
-            left_module: set.anchor.module.clone(),
-            left_origin: set.anchor.origin.clone(),
-        });
+        match decision {
+            ProbeDecision::Worker(obligation) => {
+                record_planned_obligation(obligation, diagnostics);
+                let include_private =
+                    input.include_private || left.needs_private_filter() || right.needs_private_filter();
+                let include_generated = input.include_generated || left.generated || right.generated;
+                planned.push(PlannedProbe {
+                    cache_key: probe_cache_key(
+                        &pair,
+                        &set.anchor,
+                        &candidate.declaration,
+                        input.settings.policy,
+                        obligation,
+                    ),
+                    pair,
+                    obligation,
+                    right_module: right.module,
+                    right_origin: right.origin,
+                    left_module: left.module,
+                    left_origin: left.origin,
+                    include_private,
+                    include_generated,
+                });
+            }
+            ProbeDecision::Unavailable(reason) => {
+                let synthetic = PlannedProbe {
+                    cache_key: String::new(),
+                    pair: pair.clone(),
+                    obligation: ProbeObligation::LocalDuplicate,
+                    right_module: right.module,
+                    right_origin: right.origin,
+                    left_module: left.module,
+                    left_origin: left.origin,
+                    include_private: false,
+                    include_generated: false,
+                };
+                let semantic = SemanticEvidence {
+                    pair_id: pair.pair_id,
+                    kind: EvidenceKind::Unavailable,
+                    status: EvidenceStatus::Unavailable,
+                    summary: Some(reason.label().to_owned()),
+                };
+                record_unavailable_reason(reason, &synthetic, diagnostics);
+                preflight_evidence.insert(semantic.pair_id.clone(), semantic);
+            }
+        }
     }
     diagnostics.planned_pairs = planned.len();
-    planned
+    ProbePlan {
+        planned,
+        preflight_evidence,
+    }
 }
 
 fn run_probe_chunk(
@@ -399,6 +541,8 @@ fn run_probe_chunk(
     match worker.probe_batch(ProbeBatch {
         workspace_root: input.workspace.root.clone(),
         modules,
+        include_private: input.include_private || chunk.iter().any(|planned| planned.include_private),
+        include_generated: input.include_generated || chunk.iter().any(|planned| planned.include_generated),
         pairs,
         max_pairs: Some(chunk.len() as u64),
     }) {
@@ -422,7 +566,7 @@ fn run_probe_chunk(
             for result in call.rows {
                 if let Some(planned) = by_pair.get(result.pair_id.as_str()) {
                     let semantic = semantic_evidence(planned, &result);
-                    record_evidence_diagnostic(&semantic, diagnostics);
+                    record_evidence_diagnostic(&semantic, planned, diagnostics);
                     evidence.insert(semantic.pair_id.clone(), semantic);
                 }
             }
@@ -444,7 +588,7 @@ fn run_probe_chunk(
                 result: result.clone(),
             }])?;
             let semantic = semantic_evidence(planned, &result);
-            record_evidence_diagnostic(&semantic, diagnostics);
+            record_evidence_diagnostic(&semantic, planned, diagnostics);
             evidence.insert(semantic.pair_id.clone(), semantic);
             Ok(())
         }
@@ -457,26 +601,31 @@ fn probe_modules_for(
     comparison_policy: &ComparisonEvidencePolicy,
     chunk: &[PlannedProbe],
 ) -> Vec<ModuleDescriptor> {
-    let mut modules = workspace
+    let workspace_modules = workspace
         .source_files
         .iter()
-        .map(|source| ModuleDescriptor {
-            module: source.module.clone(),
-            origin: "workspace".to_owned(),
-            source_root: None,
-        })
-        .collect::<Vec<_>>();
+        .map(|source| (source.module.as_str(), source))
+        .collect::<HashMap<_, _>>();
 
+    let mut modules = Vec::new();
     let mut seen = HashSet::default();
     for planned in chunk {
         for (origin, module) in [
             (planned.left_origin.as_str(), planned.left_module.as_str()),
             (planned.right_origin.as_str(), planned.right_module.as_str()),
         ] {
-            if origin != "workspace"
-                && seen.insert((origin.to_owned(), module.to_owned()))
-                && let Some(descriptor) = comparison_policy.probe_module(origin, module)
-            {
+            if !seen.insert((origin.to_owned(), module.to_owned())) {
+                continue;
+            }
+            if origin == "workspace" {
+                if workspace_modules.contains_key(module) {
+                    modules.push(ModuleDescriptor {
+                        module: module.to_owned(),
+                        origin: "workspace".to_owned(),
+                        source_root: None,
+                    });
+                }
+            } else if let Some(descriptor) = comparison_policy.probe_module(origin, module) {
                 modules.push(descriptor);
             }
         }
@@ -523,11 +672,12 @@ fn eligible_for_policy(
 
 fn probe_obligation(
     policy: ProbePolicy,
-    anchor: &HydratedDeclaration,
+    anchor: &DeclarationProbeSummary,
+    right: &DeclarationProbeSummary,
     candidate: &RetrievedCandidate,
     group: &crate::ranking::RankedGroup,
 ) -> Option<ProbeObligation> {
-    if theorem_like(anchor) && theorem_like(&candidate.declaration) {
+    if anchor.theorem_like() && right.theorem_like() {
         if has_contribution(candidate, "statement-fingerprint") {
             return Some(ProbeObligation::ExactTheorem);
         }
@@ -543,14 +693,17 @@ fn probe_obligation(
             return Some(ProbeObligation::Replacement);
         }
     }
-    if definition_like(anchor) && definition_like(&candidate.declaration) && strong_static_evidence(candidate) {
+    if anchor.definition_like() && right.definition_like() && strong_static_evidence(candidate) {
         return Some(ProbeObligation::ReducibleDefinition);
     }
     (policy == ProbePolicy::Broad).then_some(ProbeObligation::LocalDuplicate)
 }
 
 fn strong_static_evidence(candidate: &RetrievedCandidate) -> bool {
-    if !probe_supported_kind(&candidate.declaration) {
+    if !matches!(
+        candidate.declaration.kind.as_str(),
+        "theorem" | "axiom" | "def" | "abbrev"
+    ) {
         return false;
     }
     candidate.explanation.contributions.iter().any(|contribution| {
@@ -563,18 +716,6 @@ fn strong_static_evidence(candidate: &RetrievedCandidate) -> bool {
 
 fn probe_supported_origin(declaration: &HydratedDeclaration, policy: &ComparisonEvidencePolicy) -> bool {
     declaration.origin == "workspace" || policy.probe_module(&declaration.origin, &declaration.module).is_some()
-}
-
-fn probe_supported_kind(declaration: &HydratedDeclaration) -> bool {
-    matches!(declaration.kind.as_str(), "theorem" | "axiom" | "def" | "abbrev")
-}
-
-fn theorem_like(declaration: &HydratedDeclaration) -> bool {
-    matches!(declaration.kind.as_str(), "theorem" | "axiom")
-}
-
-fn definition_like(declaration: &HydratedDeclaration) -> bool {
-    matches!(declaration.kind.as_str(), "def" | "abbrev")
 }
 
 fn has_contribution(candidate: &RetrievedCandidate, kind: &str) -> bool {
@@ -615,7 +756,21 @@ fn unavailable_probe_result(pair: &ProbePair, error: &WorkerError) -> ProbeResul
         specializes_right_to_left: false,
         mutual_implication_shape: false,
         same_reducible_definition: false,
-        message: Some(format!("probe isolated after worker failure: {error}")),
+        message: Some(format!(
+            "{}: probe isolated after worker failure: {error}",
+            worker_error_reason(error).label()
+        )),
+    }
+}
+
+fn worker_error_reason(error: &WorkerError) -> UnavailableReason {
+    let text = error.to_string();
+    if text.contains("heartbeat") || text.contains("timeout") || text.contains("maximum number of heartbeats") {
+        UnavailableReason::Timeout
+    } else if text.contains("not available") || text.contains("missing") {
+        UnavailableReason::MissingDeclaration
+    } else {
+        UnavailableReason::InternalError
     }
 }
 
@@ -696,24 +851,63 @@ fn record_planned_obligation(obligation: ProbeObligation, diagnostics: &mut Prob
     }
 }
 
-fn record_evidence_diagnostic(evidence: &SemanticEvidence, diagnostics: &mut ProbeDiagnostics) {
+fn record_evidence_diagnostic(evidence: &SemanticEvidence, planned: &PlannedProbe, diagnostics: &mut ProbeDiagnostics) {
     match evidence.status {
         EvidenceStatus::Verified => diagnostics.verified_results += 1,
         EvidenceStatus::Rejected => {}
         EvidenceStatus::Unavailable => {
-            diagnostics.unavailable_results += 1;
             let summary = evidence.summary.as_deref().unwrap_or_default();
-            if summary.contains("not available") || summary.contains("missing") {
-                diagnostics.unavailable_missing += 1;
+            let reason = if summary.contains("missing-declaration")
+                || summary.contains("not available")
+                || summary.contains("missing")
+            {
+                UnavailableReason::MissingDeclaration
             } else if summary.contains("heartbeat") || summary.contains("timeout") {
-                diagnostics.unavailable_timeout += 1;
-            } else if summary.contains("supports") || summary.contains("opaque") || summary.contains("unavailable") {
-                diagnostics.unavailable_unsupported += 1;
+                UnavailableReason::Timeout
+            } else if summary.contains("supports")
+                || summary.contains("opaque")
+                || summary.contains("unavailable")
+                || summary.contains("reducible probe guard")
+                || summary.contains("definition body")
+            {
+                UnavailableReason::OpaqueOrUnreducible
             } else {
-                diagnostics.unavailable_internal += 1;
-            }
+                UnavailableReason::InternalError
+            };
+            record_unavailable_reason(reason, planned, diagnostics);
         }
     }
+}
+
+fn record_unavailable_reason(reason: UnavailableReason, planned: &PlannedProbe, diagnostics: &mut ProbeDiagnostics) {
+    diagnostics.unavailable_results += 1;
+    match reason {
+        UnavailableReason::MissingDeclaration => diagnostics.unavailable_missing += 1,
+        UnavailableReason::Unsupported | UnavailableReason::OpaqueOrUnreducible => {
+            diagnostics.unavailable_unsupported += 1;
+        }
+        UnavailableReason::Timeout => diagnostics.unavailable_timeout += 1,
+        UnavailableReason::InternalError => diagnostics.unavailable_internal += 1,
+    }
+    increment(&mut diagnostics.unavailable_by_reason, reason.label());
+    increment(
+        &mut diagnostics.unavailable_by_obligation,
+        obligation_label(planned.obligation),
+    );
+    increment(
+        &mut diagnostics.unavailable_by_module,
+        &format!("{}:{}", planned.left_origin, planned.left_module),
+    );
+    increment(
+        &mut diagnostics.unavailable_by_module,
+        &format!("{}:{}", planned.right_origin, planned.right_module),
+    );
+    increment(&mut diagnostics.unavailable_by_origin, &planned.left_origin);
+    increment(&mut diagnostics.unavailable_by_origin, &planned.right_origin);
+}
+
+fn increment(map: &mut BTreeMap<String, usize>, key: &str) {
+    *map.entry(key.to_owned()).or_insert(0) += 1;
 }
 
 fn probe_policy_label(policy: ProbePolicy) -> &'static str {
@@ -761,6 +955,7 @@ fn declaration_cache_facts(declaration: &HydratedDeclaration) -> serde_json::Val
         "feature_version": declaration.feature_version,
         "fingerprints": declaration.fingerprints,
         "binder_count": declaration.binder_count,
+        "kind": declaration.kind,
     })
 }
 
@@ -831,6 +1026,8 @@ mod tests {
             workspace: &workspace(),
             comparison_policy: &policy,
             enabled: true,
+            include_private: true,
+            include_generated: false,
             settings: ProbeSettings {
                 policy: ProbePolicy::Broad,
                 budget: 10,
@@ -839,7 +1036,7 @@ mod tests {
             },
         };
 
-        assert_eq!(plan_probes(&input, &mut diagnostics).len(), 1);
+        assert_eq!(plan_probes(&input, &mut diagnostics).planned.len(), 1);
     }
 
     #[test]
@@ -876,6 +1073,8 @@ mod tests {
             workspace: &workspace(),
             comparison_policy: &policy,
             enabled: true,
+            include_private: true,
+            include_generated: false,
             settings: ProbeSettings {
                 policy: ProbePolicy::Actionable,
                 budget: 10,
@@ -884,8 +1083,103 @@ mod tests {
             },
         };
 
-        assert_eq!(plan_probes(&input, &mut diagnostics).len(), 2);
+        assert_eq!(plan_probes(&input, &mut diagnostics).planned.len(), 2);
         assert_eq!(diagnostics.skipped_by_budget, 1);
+    }
+
+    #[test]
+    fn planned_private_pair_requests_private_probe_filter() {
+        let anchor = declaration("workspace:Tiny:Tiny.local", "workspace", "Tiny.local");
+        let mut private = declaration(
+            "mathlib:Mathlib:_private.Mathlib.0.hidden",
+            "mathlib",
+            "_private.Mathlib.0.hidden",
+        );
+        private.visibility = "private".to_owned();
+        let candidate = candidate(private, "statement-fingerprint", 100.0);
+        let candidate_sets = vec![CandidateSet {
+            anchor,
+            candidates: vec![candidate],
+        }];
+        let policy = proof_grade_mathlib_policy();
+        let review = rank_candidates(RankingInput {
+            candidate_sets: &candidate_sets,
+            semantic_evidence: &std::collections::BTreeMap::new(),
+            source_facts: &SourceFacts::empty(),
+            profile: RankingProfile::default(),
+            comparison_policy: &policy,
+        });
+        let mut diagnostics = super::ProbeDiagnostics::default();
+        let index = empty_index();
+        let input = SemanticVerificationInput {
+            candidate_sets: &candidate_sets,
+            cheap_review: &review,
+            local_index: VerificationIndex::new(&index),
+            workspace: &workspace(),
+            comparison_policy: &policy,
+            enabled: true,
+            include_private: false,
+            include_generated: false,
+            settings: ProbeSettings {
+                policy: ProbePolicy::Actionable,
+                budget: 10,
+                per_declaration_cap: 2,
+                chunk_size: 16,
+            },
+        };
+
+        let plan = plan_probes(&input, &mut diagnostics);
+
+        assert_eq!(plan.planned.len(), 1);
+        assert!(plan.planned[0].include_private);
+    }
+
+    #[test]
+    fn unsupported_pairs_are_classified_before_worker_calls() {
+        let mut anchor = declaration("workspace:Tiny:Tiny.local", "workspace", "Tiny.local");
+        anchor.kind = "inductive".to_owned();
+        let candidate = candidate(
+            declaration("mathlib:Mathlib:Mathlib.exact", "mathlib", "Mathlib.exact"),
+            "statement-fingerprint",
+            100.0,
+        );
+        let candidate_sets = vec![CandidateSet {
+            anchor,
+            candidates: vec![candidate],
+        }];
+        let policy = proof_grade_mathlib_policy();
+        let review = rank_candidates(RankingInput {
+            candidate_sets: &candidate_sets,
+            semantic_evidence: &std::collections::BTreeMap::new(),
+            source_facts: &SourceFacts::empty(),
+            profile: RankingProfile::default(),
+            comparison_policy: &policy,
+        });
+        let mut diagnostics = super::ProbeDiagnostics::default();
+        let index = empty_index();
+        let input = SemanticVerificationInput {
+            candidate_sets: &candidate_sets,
+            cheap_review: &review,
+            local_index: VerificationIndex::new(&index),
+            workspace: &workspace(),
+            comparison_policy: &policy,
+            enabled: true,
+            include_private: true,
+            include_generated: false,
+            settings: ProbeSettings {
+                policy: ProbePolicy::Broad,
+                budget: 10,
+                per_declaration_cap: 2,
+                chunk_size: 16,
+            },
+        };
+
+        let plan = plan_probes(&input, &mut diagnostics);
+
+        assert!(plan.planned.is_empty());
+        assert_eq!(plan.preflight_evidence.len(), 1);
+        assert_eq!(diagnostics.unavailable_unsupported, 1);
+        assert_eq!(diagnostics.unavailable_by_reason.get("unsupported"), Some(&1));
     }
 
     fn empty_index() -> crate::index::OpenedIndex {
