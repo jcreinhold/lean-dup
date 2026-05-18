@@ -6,7 +6,7 @@ use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_index::{self, CacheFacts};
 use lean_dup_index::{ComparisonProvenance, ComparisonProvenanceReport};
 use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
-use lean_dup_project::workspace::{ResolvedWorkspace, WorkspaceRequest};
+use lean_dup_project::{ResolvedWorkspace, WorkspaceRequest, resolve, resolve_workspace_mathlib};
 use lean_dup_worker::WorkerClient;
 
 use crate::baseline;
@@ -865,7 +865,7 @@ fn review_filter(profile: ReviewProfile, include_generated: bool, show_noise: bo
 
 fn foundation(requested_root: PathBuf, module_root: Option<String>, reporter: &mut Reporter) -> Result<Foundation> {
     reporter.measure("workspace.resolve", |reporter| {
-        let workspace = lean_dup_project::workspace::resolve(
+        let workspace = resolve(
             WorkspaceRequest {
                 requested_root,
                 module_root,
@@ -889,11 +889,8 @@ fn open_compare_indexes(
         indexes.push(store.resolve(IndexReference::Label(label.clone()))?);
     }
     if request.compare_mathlib {
-        let mathlib = lean_dup_project::mathlib::resolve_for_workspace(
-            project_workspace.clone(),
-            request.mathlib_workspace.clone(),
-            reporter,
-        )?;
+        let mathlib =
+            resolve_workspace_mathlib(project_workspace.clone(), request.mathlib_workspace.clone(), reporter)?;
         let execution_root = mathlib.execution_root();
         store.build_or_reuse(
             IndexBuildRequest {

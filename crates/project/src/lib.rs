@@ -5,8 +5,11 @@
 //! probing and canonicalization rules from indexing, search, and CLI callers.
 
 mod error;
-pub mod mathlib;
-pub mod workspace;
+mod mathlib;
+mod workspace;
 
 pub use error::{Error, Result};
-pub use workspace::{ResolvedWorkspace, WorkspaceRequest, resolve};
+pub use mathlib::{
+    ProjectMathlib, resolve_for_workspace as resolve_workspace_mathlib, resolve_project as resolve_project_mathlib,
+};
+pub use workspace::{ResolvedWorkspace, SourceFile, WorkspaceRequest, resolve};

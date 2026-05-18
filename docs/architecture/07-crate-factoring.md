@@ -53,54 +53,67 @@ rename is accepted.
 
 ## Current Boundary Contract
 
-The boundary-completion pass preserves search behavior while removing the main misleading boundaries:
+The final boundary pass preserves behavior while making crate roots the supported public facades:
 
 - `clap` is confined to `lean-dup-cli`; domain crates expose plain enums and request/result APIs.
-- `lean-dup-search::audit::{run_audit, run_show, run_diff}` owns audit, show, and baseline-diff workflow ordering, so
-  CLI no longer sequences retrieval, probes, ranking, source facts, replacement hints, or baseline storage.
-- `lean-dup-search::observation::observe_search` is the eval-facing observation surface. Eval sees stable pair/origin
-  and feature-family facts, not retrieval keys or semantic-feature storage rows.
-- `lean-dup-search::audit` returns search-owned audit DTOs: review groups, members, evidence, probe summaries, retrieval
-  summaries, visibility facts, and queue counts. It does not publicly re-export ranking, retrieval, or probe structs.
-- `lean-dup-index` exposes a semantic feature corpus facade. Search can ask for feature match counts and matched
-  declaration handles, while SQLite schema, posting-list storage, and SQL query shape stay private.
-- `lean-dup-diagnostics` owns shared plumbing only. Worker, project, index, search, eval, report, and CLI each own their
-  domain errors; `lean-dup-cli` aggregates them for user-facing exits.
-- `lean-dup-report` owns report DTOs. It projects search/index/eval outputs into report-owned JSON-safe structs before
-  rendering; public reports do not embed ranking, retrieval, probe, eval-output, or cache lifecycle structs.
-- Old file-shaped modules such as `search::retrieval`, `search::ranking`, `search::semantic_verification`,
-  `index::index`, and `eval::eval` are private implementation modules with task-level facades.
+- `lean-dup-worker` exposes typed worker capabilities and stable row/progress/diagnostic DTOs. Subprocess transport,
+  JSONL framing, protocol envelopes, request ids, timeout constants, and row dispatch stay private.
+- `lean-dup-project` exposes workspace and project-mathlib concepts from the root. Callers do not import file-shaped
+  `workspace` or `mathlib` modules, and Lake path rules such as module source paths and `.olean` discovery live on
+  `ResolvedWorkspace`.
+- `lean-dup-search` owns audit, show, diff, and eval-observation workflows from its root API. CLI and eval do not import
+  `search::audit` or `search::observation`; retrieval keys, ranking structs, probe planning, source-reference scanning,
+  replacement-hint mechanics, and baseline storage remain private.
+- `lean-dup-index` exposes a semantic corpus facade. Search asks for feature fanout and matched handles through
+  `SemanticFeatureFanout` and `SemanticFeatureMatches`, while SQLite schema, posting-list storage, query shape, and
+  cache pointer layout stay private.
+- `lean-dup-diagnostics` owns shared progress, profile, perf, runtime-memory, and generic file/JSON/write helpers only.
+  Worker, project, index, search, eval, report, and CLI each own domain errors.
+- `lean-dup-report` exposes report DTOs, projection functions, explanations, and text rendering from the root. Callers
+  do not import `report::render` or `report::reports`.
+- `lean-dup-eval` exposes suite/request/output and metric contracts only. Runtime memory measurement lives in
+  diagnostics, and text rendering belongs to report.
 - Misleading audit flags that parsed without reliably changing behavior were removed instead of deprecated:
   `--threshold`, `--include-imports`, `--import-root`, `--min-priority`, and `--replacement-hints`.
 
 ## Approved Public APIs
 
-- `lean-dup-worker`: `WorkerClient`, worker request/result DTOs, version/build policy, and worker errors.
-- `lean-dup-project`: workspace and mathlib resolution requests/results plus project errors.
+- `lean-dup-worker`: `WorkerClient`, worker request/result DTOs, stream row/progress/diagnostic DTOs, version/build
+  policy, and worker errors. These DTOs are semantic worker facts after transport framing has been hidden, not raw JSONL
+  protocol objects.
+- `lean-dup-project`: `WorkspaceRequest`, `ResolvedWorkspace`, `SourceFile`, `resolve`, `ProjectMathlib`,
+  `resolve_project_mathlib`, `resolve_workspace_mathlib`, and project errors.
 - `lean-dup-index`: `IndexStore`, build/open/hydrate request and result types, semantic feature match queries,
-  provenance summaries, cache diagnostics, and safe cleanup reports. SQLite schema, posting-list layout, SQL queries,
-  and latest-pointer layout stay private.
-- `lean-dup-search`: `ReviewProfile`, `ProbePolicy`, `audit::{AuditRequest, AuditOutput, AuditReview, AuditGroup,
-  AuditRetrievalSummary, AuditProbeSummary, ShowOutput, DiffOutput, run_audit, run_show, run_diff}`, and
-  `observation::{SearchObservationRequest, SearchObservation, observe_search}`. Retrieval keys, ranking constants,
-  probe obligations, and baseline storage helpers stay private.
-- `lean-dup-report`: report DTOs, projection functions, explanation facts, and text rendering.
-- `lean-dup-eval`: `EvalRequest`, `EvalOutput`, suite execution, stage metrics, and quality denominators. Text
-  rendering belongs to `lean-dup-report`.
+  provenance summaries, cache diagnostics, and safe cleanup reports. Semantic feature keys are opaque Lean-owned keys;
+  SQLite schema, posting-list layout, SQL queries, and latest-pointer layout stay private.
+- `lean-dup-search`: `ReviewProfile`, `ProbePolicy`, `AuditRequest`, `AuditOutput`, audit DTOs, `ShowOutput`,
+  `DiffOutput`, `run_audit`, `run_show`, `run_diff`, `SearchObservationRequest`, `SearchObservation`, and
+  `observe_search`. Retrieval keys, ranking constants, probe obligations, source scan policy, replacement-hint
+  internals, and baseline storage helpers stay private.
+- `lean-dup-report`: report DTOs, projection functions, explanation facts, and `render_text`.
+- `lean-dup-eval`: `EvalSuite`, `EvalRequest`, `EvalOutput`, suite execution, stage metrics, and quality denominators.
+  Text rendering belongs to `lean-dup-report`; runtime memory measurement belongs to `lean-dup-diagnostics`.
 - `lean-dup-cli`: clap argument types, command dispatch, stdout/stderr/file I/O, and final app error aggregation.
 
 ## Red Flag Review
 
-- **Shallow module:** improved. Diagnostics, report projection, and audit workflow now hide real decisions rather than
-  exposing old source-file modules.
-- **Pass-through wrapper:** mitigated. Crates own files and behavior, not only re-export old modules.
-- **Temporal decomposition:** mitigated. Audit sequencing is inside `lean-dup-search::audit`, not hand-wired by CLI.
+- **Shallow module:** mitigated. Crate roots now expose curated capabilities rather than old file-shaped modules or
+  wildcard facades.
+- **Pass-through wrapper:** mitigated. The remaining facades translate to stable workflow, project, corpus, worker, and
+  report concepts; they do not re-export implementation modules wholesale.
+- **Temporal decomposition:** mitigated. Audit sequencing is inside `lean-dup-search`, not hand-wired by CLI, and
+  project/source path ordering is owned by `lean-dup-project`.
 - **Information leakage:** mitigated. SQLite, posting-list storage, retrieval keys, ranking structs, probe diagnostics,
-  worker transport, CLI parsing, report wording, and diagnostic plumbing are separated and enforced by boundary tests.
-- **Special-general mixture:** mitigated. Evaluation and CLI sit above production search/indexing.
+  worker transport, CLI parsing, report wording, diagnostic plumbing, and Lake path layout are separated and enforced by
+  boundary tests.
+- **Overexposure:** mitigated. Public submodules for report, project, search audit, and search observation are private;
+  eval no longer exports runtime-memory helpers.
+- **Special-general mixture:** mitigated. Evaluation and CLI sit above production search/indexing, and diagnostics owns
+  general runtime/perf plumbing instead of eval owning memory measurement.
 - **Conjoined methods:** mitigated for audit. `show` and `diff` reuse the search audit output instead of duplicating
   phase sequencing.
 - **Hard-to-describe public API:** improved. Public module surfaces are now curated workflow and DTO exports, and
-  implementation-shaped records stay private.
-- **Implementation details contaminating interface comments:** mitigated in crate-level docs; some moved item comments
-  predate the split and should be reviewed opportunistically.
+  implementation-shaped records stay private or semantic.
+- **Implementation details contaminating interface comments:** mitigated. Interface comments describe caller-facing
+  contracts: semantic worker facts, project paths, corpus feature queries, report DTOs, and evaluation metrics rather
+  than subprocess frames, SQL rows, or private module layout.

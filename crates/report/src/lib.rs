@@ -4,16 +4,24 @@
 //! It must not own CLI parsing, worker transport, or storage internals.
 
 mod error;
-pub mod render;
+mod render;
 mod report_contract;
-pub mod reports;
+mod reports;
 
 pub use error::{Error, Result};
+pub use render::render_text;
 pub use report_contract::{
     AuditExplanations, ComparisonProvenanceEntry, ComparisonProvenanceExplanation, GroupExplanation,
     HiddenGroupExplanation, REPORT_SCHEMA_VERSION, SemanticProbeExplanation, VisibleQueueExplanation,
 };
 pub use reports::{
-    AuditReport, CacheCleanupReportDto, DiffReport, DoctorReport, IndexReport, PerfReport, PerfWorkloadReport, Report,
-    ReviewProfileCounts, ShowReport,
+    AuditReport, BaselineChangeReport, BaselineDiffReport, BaselineGroupReport, CacheCleanupEntryReport,
+    CacheCleanupReportDto, CacheDiagnosticsReport, CacheEntryDiagnosticsReport, CacheLabelDiagnosticsReport,
+    CacheLatestDiagnosticsReport, ComparisonProvenanceReportDto, DiffReport, DoctorReport, EvalCountAtKDto,
+    EvalCountMetricDto, EvalHardNegativeSurvivalDto, EvalMetricsDto, EvalRecallAtKDto, EvalReportDto, EvalRunReportDto,
+    EvalSemanticVerificationStageMetricsDto, EvalStageMetricsDto, EvalTimingMetricsDto, IndexReport, PerfReport,
+    PerfWorkloadReport, Report, RetrievalReport, ReviewDiagnosticsReport, ReviewEvidenceReport, ReviewGroupReport,
+    ReviewMemberReport, ReviewProfileCounts, ReviewReport, SemanticVerificationReport, ShowReport, SourcePointReport,
+    SourceReferenceReport, SourceSpanReport, audit_report, cache_cleanup_report, cache_diagnostics_report, diff_report,
+    eval_report, show_report,
 };

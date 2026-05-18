@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
@@ -10,7 +10,7 @@ use walkdir::WalkDir;
 use lean_dup_diagnostics::perf::{self, CostClass};
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_diagnostics::{read, read_to_string};
-use lean_dup_project::workspace::{self, ResolvedWorkspace};
+use lean_dup_project::ResolvedWorkspace;
 use lean_dup_worker::{
     DeclarationRow, ExtractBatch, FeatureRow, FeaturesBatch, Fingerprints, IndexBatch, IndexStreamItem,
     ModuleDescriptor, ProbePair, ProbeResult, RoleFeature, SourceSpan, WorkerClient, WorkerDiagnostic, WorkerError,
@@ -266,26 +266,56 @@ pub enum SemanticFeatureKey {
     RoleFeature(SemanticRoleFeature),
 }
 
-/// The number of declarations matched by one requested semantic key.
+/// Match counts for requested semantic keys.
 ///
-/// Retrieval uses this to distinguish selective evidence from broad evidence
-/// without hydrating declarations first.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Retrieval uses fanout to distinguish selective evidence from broad evidence
+/// without learning posting storage or hydrating declarations first.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[allow(dead_code)]
-pub struct FeatureMatchCount {
-    pub key: SemanticFeatureKey,
-    pub count: usize,
+pub struct SemanticFeatureFanout {
+    counts: BTreeMap<SemanticFeatureKey, usize>,
 }
 
-/// One declaration handle matched by one requested semantic key.
+impl SemanticFeatureFanout {
+    pub fn count(&self, key: &SemanticFeatureKey) -> usize {
+        self.counts.get(key).copied().unwrap_or(0)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.counts.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&SemanticFeatureKey, usize)> {
+        self.counts.iter().map(|(key, count)| (key, *count))
+    }
+}
+
+/// Declaration handles matched by requested semantic keys.
 ///
-/// The matched key is included so retrieval can explain why a candidate was
-/// returned without reopening the declaration or inspecting storage.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Callers receive opaque handles grouped by the semantic key that matched.
+/// The index keeps storage rows and posting layout private.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[allow(dead_code)]
-pub struct FeatureMatch {
-    pub key: SemanticFeatureKey,
-    pub handle: DeclarationHandle,
+pub struct SemanticFeatureMatches {
+    matches: BTreeMap<SemanticFeatureKey, Vec<DeclarationHandle>>,
+}
+
+impl SemanticFeatureMatches {
+    pub fn handles_for(&self, key: &SemanticFeatureKey) -> &[DeclarationHandle] {
+        self.matches.get(key).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&SemanticFeatureKey, &[DeclarationHandle])> {
+        self.matches.iter().map(|(key, handles)| (key, handles.as_slice()))
+    }
+
+    pub fn total_handles(&self) -> usize {
+        self.matches.values().map(Vec::len).sum()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.matches.is_empty()
+    }
 }
 
 /// A declaration hydrated from an index by handle.
@@ -567,24 +597,21 @@ impl OpenedIndex {
     }
 
     /// Count matches for each requested semantic key without hydrating rows.
-    pub fn feature_match_counts(&self, keys: &[SemanticFeatureKey]) -> Result<Vec<FeatureMatchCount>> {
+    pub fn feature_fanout(&self, keys: &[SemanticFeatureKey]) -> Result<SemanticFeatureFanout> {
         if keys.is_empty() {
-            return Ok(Vec::new());
+            return Ok(SemanticFeatureFanout::default());
         }
         perf::record_count(CostClass::SqliteIndex, "sqlite.posting_count.keys", keys.len() as u64);
         perf::measure_result(CostClass::SqliteIndex, "sqlite.feature_match_counts", || {
             let connection = open_readonly(&self.path)?;
-            let mut counts = Vec::with_capacity(keys.len());
+            let mut counts = BTreeMap::new();
             for key in keys {
                 if key.is_empty() {
                     continue;
                 }
-                counts.push(FeatureMatchCount {
-                    key: key.clone(),
-                    count: feature_match_count(&connection, key)?,
-                });
+                counts.insert(key.clone(), feature_match_count(&connection, key)?);
             }
-            Ok(counts)
+            Ok(SemanticFeatureFanout { counts })
         })
     }
 
@@ -592,33 +619,26 @@ impl OpenedIndex {
     ///
     /// The returned handles remain opaque; callers hydrate only the handles
     /// they decide to keep.
-    pub fn matched_feature_handles(&self, keys: &[SemanticFeatureKey]) -> Result<Vec<FeatureMatch>> {
+    pub fn handles_matching_features(&self, keys: &[SemanticFeatureKey]) -> Result<SemanticFeatureMatches> {
         if keys.is_empty() {
-            return Ok(Vec::new());
+            return Ok(SemanticFeatureMatches::default());
         }
         perf::record_count(CostClass::SqliteIndex, "sqlite.matched_posting.keys", keys.len() as u64);
         perf::measure_result(CostClass::SqliteIndex, "sqlite.matched_feature_handles", || {
             let connection = open_readonly(&self.path)?;
-            let mut postings = Vec::new();
+            let mut matches = BTreeMap::new();
             for key in keys {
                 if key.is_empty() {
                     continue;
                 }
-                postings.extend(
-                    feature_match_handles(&connection, key)?
-                        .into_iter()
-                        .map(|handle| FeatureMatch {
-                            key: key.clone(),
-                            handle,
-                        }),
-                );
+                matches.insert(key.clone(), feature_match_handles(&connection, key)?);
             }
             perf::record_count(
                 CostClass::SqliteIndex,
                 "sqlite.matched_posting.rows",
-                postings.len() as u64,
+                matches.values().map(Vec::len).sum::<usize>() as u64,
             );
-            Ok(postings)
+            Ok(SemanticFeatureMatches { matches })
         })
     }
 
@@ -752,9 +772,8 @@ fn require_oleans_if_requested(request: &IndexBuildRequest) -> Result<()> {
     };
     let missing = request
         .workspace
-        .source_files
-        .iter()
-        .filter(|source| !workspace::olean_exists(&olean_root, &source.module))
+        .missing_olean_sources(&olean_root, &request.workspace.source_files)
+        .into_iter()
         .map(|source| source.module.clone())
         .collect::<Vec<_>>();
     if missing.is_empty() {
@@ -1624,7 +1643,7 @@ mod tests {
         sqlite_cache_is_current,
     };
     use lean_dup_diagnostics::progress::Reporter;
-    use lean_dup_project::workspace::{ResolvedWorkspace, WorkspaceRequest, resolve};
+    use lean_dup_project::{ResolvedWorkspace, WorkspaceRequest, resolve};
     use lean_dup_worker::{ProbePair, ProbeResult, WorkerClient, WorkerVersion};
 
     fn repo_root() -> PathBuf {

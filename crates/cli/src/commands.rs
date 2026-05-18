@@ -10,9 +10,9 @@ use lean_dup_eval::EvalRequest;
 use lean_dup_index::CleanupPolicy;
 use lean_dup_index::{self, CacheFacts};
 use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexStore, IndexSummary};
-use lean_dup_project::workspace::{self, ResolvedWorkspace, WorkspaceRequest};
+use lean_dup_project::{ResolvedWorkspace, WorkspaceRequest, resolve, resolve_project_mathlib};
 use lean_dup_report::{AuditReport, CacheCleanupReportDto, DiffReport, DoctorReport, IndexReport, Report, ShowReport};
-use lean_dup_search::audit::{AuditRequest, run_audit, run_diff, run_show};
+use lean_dup_search::{AuditRequest, run_audit, run_diff, run_show};
 use lean_dup_worker::WorkerClient;
 
 use crate::error::{AppError, Result};
@@ -106,7 +106,7 @@ fn doctor(args: DoctorArgs, reporter: &mut Reporter) -> Result<DoctorReport> {
         },
         &worker_version,
     )?;
-    let cache_diagnostics = lean_dup_report::reports::cache_diagnostics_report(lean_dup_index::diagnose_cache(
+    let cache_diagnostics = lean_dup_report::cache_diagnostics_report(lean_dup_index::diagnose_cache(
         foundation.cache.root.clone(),
         &[current_index],
         &store,
@@ -140,7 +140,7 @@ fn cache_cleanup(args: CacheCleanupArgs, reporter: &mut Reporter) -> Result<Cach
     let cache_root = args.cache_root.unwrap_or_else(lean_dup_index::cache_root);
     let store = IndexStore::new(cache_root.clone());
     let expected_entries = if let Some(workspace_root) = args.workspace {
-        let workspace = workspace::resolve(
+        let workspace = resolve(
             WorkspaceRequest {
                 requested_root: workspace_root,
                 module_root: args.module_root,
@@ -169,9 +169,11 @@ fn cache_cleanup(args: CacheCleanupArgs, reporter: &mut Reporter) -> Result<Cach
     } else {
         Vec::new()
     };
-    Ok(lean_dup_report::reports::cache_cleanup_report(
-        lean_dup_index::cleanup_cache(cache_root, &expected_entries, CleanupPolicy { execute: args.execute })?,
-    ))
+    Ok(lean_dup_report::cache_cleanup_report(lean_dup_index::cleanup_cache(
+        cache_root,
+        &expected_entries,
+        CleanupPolicy { execute: args.execute },
+    )?))
 }
 
 fn index(args: IndexArgs, reporter: &mut Reporter) -> Result<IndexReport> {
@@ -207,8 +209,7 @@ fn index_mathlib(args: IndexMathlibArgs, reporter: &mut Reporter) -> Result<Inde
     let requested_workspace = args
         .workspace
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let project_mathlib =
-        lean_dup_project::mathlib::resolve_project(requested_workspace, args.mathlib_workspace, reporter)?;
+    let project_mathlib = resolve_project_mathlib(requested_workspace, args.mathlib_workspace, reporter)?;
     let project_workspace = project_mathlib.project.clone();
     let mathlib_source = project_mathlib.source.clone();
     let cache = lean_dup_index::resolve_cache(&project_workspace)?;
@@ -240,7 +241,7 @@ fn index_mathlib(args: IndexMathlibArgs, reporter: &mut Reporter) -> Result<Inde
 
 fn audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditReport> {
     let output = run_audit(audit_request(args), reporter)?;
-    Ok(lean_dup_report::reports::audit_report(output))
+    Ok(lean_dup_report::audit_report(output))
 }
 
 fn audit_request(args: AuditArgs) -> AuditRequest {
@@ -263,8 +264,8 @@ fn audit_request(args: AuditArgs) -> AuditRequest {
     }
 }
 
-fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<lean_dup_report::reports::EvalReportDto> {
-    Ok(lean_dup_report::reports::eval_report(lean_dup_eval::run(
+fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<lean_dup_report::EvalReportDto> {
+    Ok(lean_dup_report::eval_report(lean_dup_eval::run(
         EvalRequest {
             suite: args.suite.into(),
             workspace: args.workspace,
@@ -282,7 +283,7 @@ fn show(args: ShowArgs, reporter: &mut Reporter) -> Result<ShowReport> {
         &requested_group,
         reporter,
     )?;
-    Ok(lean_dup_report::reports::show_report(output))
+    Ok(lean_dup_report::show_report(output))
 }
 
 fn diff(args: DiffArgs, reporter: &mut Reporter) -> Result<DiffReport> {
@@ -292,12 +293,12 @@ fn diff(args: DiffArgs, reporter: &mut Reporter) -> Result<DiffReport> {
         baseline_name,
         reporter,
     )?;
-    Ok(lean_dup_report::reports::diff_report(output))
+    Ok(lean_dup_report::diff_report(output))
 }
 
 fn foundation(requested_root: PathBuf, module_root: Option<String>, reporter: &mut Reporter) -> Result<Foundation> {
     reporter.measure("workspace.resolve", |reporter| {
-        let workspace = workspace::resolve(
+        let workspace = resolve(
             WorkspaceRequest {
                 requested_root,
                 module_root,
@@ -387,9 +388,8 @@ fn default_audit_args(workspace: PathBuf, module_root: Option<String>) -> AuditA
 
 fn missing_oleans(workspace: &ResolvedWorkspace) -> Vec<String> {
     workspace
-        .source_files
-        .iter()
-        .filter(|source| !workspace::olean_exists(&workspace.root, &source.module))
+        .missing_olean_sources(&workspace.root, &workspace.source_files)
+        .into_iter()
         .map(|source| source.module.clone())
         .collect()
 }

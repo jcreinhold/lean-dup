@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use lean_dup_index::{ComparisonEvidenceMode, ComparisonProvenanceReport};
-use lean_dup_search::audit::{AuditGroup, AuditProbeSummary, AuditQueueSummary, AuditReview};
+use lean_dup_search::{AuditGroup, AuditProbeSummary, AuditQueueSummary, AuditReview};
 
 pub const REPORT_SCHEMA_VERSION: &str = "lean-dup.report.v1";
 
@@ -278,7 +278,7 @@ fn replacement_summary(group: &AuditGroup) -> String {
 mod tests {
     use super::{explain_audit, explain_group};
     use lean_dup_index::{ComparisonEvidenceMode, ComparisonProvenanceReport};
-    use lean_dup_search::audit::{
+    use lean_dup_search::{
         AuditGroup, AuditHiddenGroupCounts, AuditProbeSummary, AuditQueueSummary, AuditReview, AuditReviewDiagnostics,
         AuditVisibility,
     };

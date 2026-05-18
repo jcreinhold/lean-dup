@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 
@@ -126,14 +124,4 @@ fn feature_family(contribution: &KeyContribution) -> String {
         },
         _ => "other".to_owned(),
     }
-}
-
-pub fn count_by_feature_family(pairs: &[SearchObservedPair]) -> BTreeMap<String, usize> {
-    let mut counts = BTreeMap::new();
-    for pair in pairs {
-        for family in &pair.feature_families {
-            *counts.entry(family.clone()).or_insert(0) += 1;
-        }
-    }
-    counts
 }

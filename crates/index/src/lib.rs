@@ -21,8 +21,8 @@ pub use external_provenance::{
     resolve as resolve_comparison_provenance,
 };
 pub use index::{
-    CacheStatus, DeclarationHandle, ExpectedIndexEntry, FeatureMatch, FeatureMatchCount, FingerprintKind,
-    HydratedDeclaration, INDEX_SCHEMA_VERSION, IndexBuildKind, IndexBuildRequest, IndexProvenance, IndexProvenanceKind,
-    IndexReference, IndexStore, IndexSummary, OpenedIndex, OpenedIndexFacts, ProbeCacheEntry, SemanticFeatureKey,
+    CacheStatus, DeclarationHandle, ExpectedIndexEntry, FingerprintKind, HydratedDeclaration, INDEX_SCHEMA_VERSION,
+    IndexBuildKind, IndexBuildRequest, IndexProvenance, IndexProvenanceKind, IndexReference, IndexStore, IndexSummary,
+    OpenedIndex, OpenedIndexFacts, ProbeCacheEntry, SemanticFeatureFanout, SemanticFeatureKey, SemanticFeatureMatches,
     SemanticFingerprintFeature, SemanticRoleFeature,
 };

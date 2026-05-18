@@ -37,6 +37,23 @@ fn dependency_names(manifest: &toml::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn rust_files_under(path: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(path) = stack.pop() {
+        for entry in fs::read_dir(&path).expect("read directory") {
+            let entry = entry.expect("read entry");
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+                files.push(path);
+            }
+        }
+    }
+    files
+}
+
 #[test]
 fn only_cli_depends_on_clap() {
     for (name, manifest) in crate_manifests() {
@@ -93,6 +110,8 @@ fn old_file_shaped_modules_are_not_public_api() {
     let root = repo_root();
     let search_lib = fs::read_to_string(root.join("crates/search/src/lib.rs")).expect("read search lib");
     for forbidden in [
+        "pub mod audit",
+        "pub mod observation",
         "pub mod retrieval",
         "pub mod ranking",
         "pub mod semantic_verification",
@@ -148,14 +167,40 @@ fn old_file_shaped_modules_are_not_public_api() {
         "IndexQuery",
         "FingerprintQuery",
         "RoleFeatureQuery",
+        "FeatureMatch,",
+        "FeatureMatchCount",
     ] {
         assert!(!index_lib.contains(forbidden), "index exposes {forbidden}");
     }
 
     let eval_lib = fs::read_to_string(root.join("crates/eval/src/lib.rs")).expect("read eval lib");
     assert!(!eval_lib.contains("pub mod eval"), "eval exposes old eval module");
+    assert!(
+        !eval_lib.contains("peak_rss_bytes"),
+        "eval exposes runtime memory measurement"
+    );
+
+    let worker_lib = fs::read_to_string(root.join("crates/worker/src/lib.rs")).expect("read worker lib");
+    assert!(
+        !worker_lib.contains("pub use worker::*"),
+        "worker exposes a wildcard facade"
+    );
+    for allowed_stable_dto in ["IndexStreamItem", "WorkerEvent", "WorkerDiagnostic"] {
+        assert!(
+            worker_lib.contains(allowed_stable_dto),
+            "worker stable DTO allowlist is missing {allowed_stable_dto}"
+        );
+    }
+
+    let project_lib = fs::read_to_string(root.join("crates/project/src/lib.rs")).expect("read project lib");
+    for forbidden in ["pub mod workspace", "pub mod mathlib"] {
+        assert!(!project_lib.contains(forbidden), "project exposes {forbidden}");
+    }
 
     let report_lib = fs::read_to_string(root.join("crates/report/src/lib.rs")).expect("read report lib");
+    for forbidden in ["pub mod render", "pub mod reports"] {
+        assert!(!report_lib.contains(forbidden), "report exposes {forbidden}");
+    }
     assert!(
         !report_lib.contains("pub mod report_contract"),
         "report exposes report_contract as an implementation module"
@@ -192,6 +237,29 @@ fn old_file_shaped_modules_are_not_public_api() {
             !report_contract.contains(forbidden),
             "report contract depends on search internals: {forbidden}"
         );
+    }
+
+    for path in rust_files_under(&root.join("crates")) {
+        if path.ends_with("crates/cli/tests/boundaries.rs") {
+            continue;
+        }
+        let contents = fs::read_to_string(&path).expect("read rust file");
+        let display = path.display();
+        if !path.starts_with(root.join("crates/project")) {
+            for forbidden in ["lean_dup_project::workspace", "lean_dup_project::mathlib"] {
+                assert!(!contents.contains(forbidden), "{display} imports {forbidden}");
+            }
+        }
+        if !path.starts_with(root.join("crates/report")) {
+            for forbidden in ["lean_dup_report::render::", "lean_dup_report::reports::"] {
+                assert!(!contents.contains(forbidden), "{display} imports {forbidden}");
+            }
+        }
+        if !path.starts_with(root.join("crates/search")) {
+            for forbidden in ["lean_dup_search::audit::", "lean_dup_search::observation::"] {
+                assert!(!contents.contains(forbidden), "{display} imports {forbidden}");
+            }
+        }
     }
 }
 

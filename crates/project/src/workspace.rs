@@ -39,6 +39,46 @@ impl ResolvedWorkspace {
     pub fn manifest_path(&self) -> PathBuf {
         self.root.join("lake-manifest.json")
     }
+
+    /// Return the source path for a Lean module in this workspace.
+    ///
+    /// Project owns the module-to-path convention so callers do not duplicate
+    /// Lake layout rules when they need diagnostics or source-backed probes.
+    pub fn source_path_for_module(&self, module: &str) -> PathBuf {
+        module_to_file(&self.root, module)
+    }
+
+    /// Return the compiled `.olean` path for a module in an execution root.
+    ///
+    /// Source-backed comparisons may import declarations from an execution root
+    /// different from the source workspace. Callers provide that root but do not
+    /// learn the `.lake/build*/lib/lean` search convention.
+    pub fn olean_path_for_module_in(&self, execution_root: &Path, module: &str) -> Option<PathBuf> {
+        olean_path(execution_root, module)
+    }
+
+    pub fn olean_path_for_module(&self, module: &str) -> Option<PathBuf> {
+        self.olean_path_for_module_in(&self.root, module)
+    }
+
+    pub fn olean_exists_in(&self, execution_root: &Path, module: &str) -> bool {
+        self.olean_path_for_module_in(execution_root, module).is_some()
+    }
+
+    pub fn olean_exists(&self, module: &str) -> bool {
+        self.olean_exists_in(&self.root, module)
+    }
+
+    pub fn missing_olean_sources<'a>(
+        &'a self,
+        execution_root: &Path,
+        sources: impl IntoIterator<Item = &'a SourceFile>,
+    ) -> Vec<&'a SourceFile> {
+        sources
+            .into_iter()
+            .filter(|source| !self.olean_exists_in(execution_root, &source.module))
+            .collect()
+    }
 }
 
 pub fn resolve(request: WorkspaceRequest, reporter: &mut Reporter) -> Result<ResolvedWorkspace> {
@@ -83,7 +123,7 @@ pub fn resolve(request: WorkspaceRequest, reporter: &mut Reporter) -> Result<Res
     })
 }
 
-pub fn module_to_file(root: &Path, module: &str) -> PathBuf {
+fn module_to_file(root: &Path, module: &str) -> PathBuf {
     let mut path = root.to_path_buf();
     for part in module.split('.') {
         path.push(part);
@@ -92,7 +132,7 @@ pub fn module_to_file(root: &Path, module: &str) -> PathBuf {
     path
 }
 
-pub fn olean_exists(root: &Path, module: &str) -> bool {
+fn olean_path(root: &Path, module: &str) -> Option<PathBuf> {
     let mut relative = PathBuf::new();
     for part in module.split('.') {
         relative.push(part);
@@ -101,7 +141,7 @@ pub fn olean_exists(root: &Path, module: &str) -> bool {
 
     let build = root.join(".lake");
     let Ok(entries) = std::fs::read_dir(build) else {
-        return false;
+        return None;
     };
     entries
         .filter_map(std::result::Result::ok)
@@ -111,7 +151,8 @@ pub fn olean_exists(root: &Path, module: &str) -> bool {
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.starts_with("build"))
         })
-        .any(|path| path.join("lib").join("lean").join(&relative).exists())
+        .map(|path| path.join("lib").join("lean").join(&relative))
+        .find(|path| path.exists())
 }
 
 fn normalize_existing_or_candidate(path: &Path) -> Result<PathBuf> {

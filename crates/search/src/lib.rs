@@ -6,17 +6,26 @@
 
 use serde::Serialize;
 
-pub mod audit;
+mod audit;
 mod baseline;
 mod error;
-pub mod observation;
+mod observation;
 mod ranking;
 mod replacement_hints;
 mod retrieval;
 mod semantic_verification;
 mod source_refs;
 
+pub use audit::{
+    AuditEvidence, AuditGroup, AuditHiddenGroupCounts, AuditHiddenReason, AuditMember, AuditOutput, AuditProbeSummary,
+    AuditProfileCounts, AuditQueueSummary, AuditReplacementHint, AuditRequest, AuditRetrievalSummary, AuditReview,
+    AuditReviewDiagnostics, AuditSourceReference, AuditVisibility, DiffOutput, SearchBaselineChange,
+    SearchBaselineDiff, SearchBaselineGroup, ShowOutput, run_audit, run_diff, run_show,
+};
 pub use error::{Error, Result};
+pub use observation::{
+    SearchObservation, SearchObservationRequest, SearchObservedPair, SearchRetrievalObservation, observe_search,
+};
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]

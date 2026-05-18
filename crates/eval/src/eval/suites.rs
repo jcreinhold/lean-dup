@@ -6,15 +6,15 @@ use serde::Serialize;
 
 use crate::EvalSuite;
 use crate::eval::labels::{GoldLabels, load_builtin};
-use crate::eval::memory;
 use crate::eval::scoring::{
     CountMetric, EvaluationMetrics, GoldPair, ObservedPair, ObservedRun, RecallAtK, TimingMetrics, score_run,
 };
 use crate::eval::stage_metrics::SemanticVerificationStageMetrics;
+use lean_dup_diagnostics::perf;
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
-use lean_dup_project::workspace::{WorkspaceRequest, resolve};
-use lean_dup_search::observation::{SearchObservation, SearchObservationRequest, observe_search};
+use lean_dup_project::{WorkspaceRequest, resolve, resolve_project_mathlib};
+use lean_dup_search::{SearchObservation, SearchObservationRequest, observe_search};
 use lean_dup_worker::WorkerClient;
 
 use crate::{Error, Result};
@@ -157,7 +157,7 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
             probe_ms: 0,
             total_ms: total_started.elapsed().as_millis(),
         },
-        peak_memory_bytes: memory::peak_rss_bytes(),
+        peak_memory_bytes: perf::peak_rss_bytes(),
     };
     let metrics = score_run(&labels, &observed, &k_values);
     enforce_suite_gates(&definition, &labels, &metrics)?;
@@ -431,7 +431,7 @@ fn build_or_load_project_mathlib_index(
     cache_root: &Path,
     reporter: &mut Reporter,
 ) -> Result<OpenedIndex> {
-    let mathlib = lean_dup_project::mathlib::resolve_project(
+    let mathlib = resolve_project_mathlib(
         definition.workspace.clone(),
         definition.mathlib_source_override.clone(),
         reporter,

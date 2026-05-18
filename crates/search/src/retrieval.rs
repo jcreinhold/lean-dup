@@ -437,8 +437,8 @@ fn external_counts(
     let keys = unique_keys(workspace_plans);
     let mut counts = HashMap::default();
     for (index, opened) in indexes.iter().enumerate() {
-        for count in opened.feature_match_counts(&keys)? {
-            counts.insert((index, count.key), count.count);
+        for (key, count) in opened.feature_fanout(&keys)?.iter() {
+            counts.insert((index, key.clone()), count);
         }
     }
     Ok(counts)
@@ -460,11 +460,11 @@ fn external_postings(
             })
             .cloned()
             .collect::<Vec<_>>();
-        for posting in opened.matched_feature_handles(&selected)? {
+        for (key, handles) in opened.handles_matching_features(&selected)?.iter() {
             postings
-                .entry((index, posting.key))
+                .entry((index, key.clone()))
                 .or_insert_with(Vec::new)
-                .push(posting.handle);
+                .extend(handles.iter().cloned());
         }
     }
     Ok(postings)
@@ -731,7 +731,7 @@ mod tests {
     use super::retrieve_candidates;
     use lean_dup_diagnostics::progress::Reporter;
     use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore};
-    use lean_dup_project::workspace::{WorkspaceRequest, resolve};
+    use lean_dup_project::{WorkspaceRequest, resolve};
     use lean_dup_worker::{Fingerprints, WorkerClient};
 
     fn repo_root() -> PathBuf {

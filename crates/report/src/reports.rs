@@ -3,10 +3,9 @@ use std::path::PathBuf;
 use lean_dup_diagnostics::perf::{PerfEvent, PerfSummary};
 use lean_dup_eval::EvalOutput;
 use lean_dup_index::{CacheCleanupReport, CacheDiagnostics, CacheStatus, ComparisonEvidenceMode};
-use lean_dup_search::ReviewProfile;
-use lean_dup_search::audit::{
+use lean_dup_search::{
     AuditEvidence, AuditGroup, AuditMember, AuditOutput, AuditProbeSummary, AuditReplacementHint, AuditReview,
-    DiffOutput, ShowOutput,
+    DiffOutput, ReviewProfile, SearchBaselineDiff, SearchBaselineGroup, ShowOutput,
 };
 use serde::{Deserialize, Serialize};
 
@@ -828,7 +827,7 @@ fn replacement_hint_report(hint: &AuditReplacementHint) -> ReplacementHintReport
     }
 }
 
-fn baseline_diff_report(diff: &lean_dup_search::audit::SearchBaselineDiff) -> BaselineDiffReport {
+fn baseline_diff_report(diff: &SearchBaselineDiff) -> BaselineDiffReport {
     BaselineDiffReport {
         baseline: diff.baseline.clone(),
         baseline_path: diff.baseline_path.clone(),
@@ -846,7 +845,7 @@ fn baseline_diff_report(diff: &lean_dup_search::audit::SearchBaselineDiff) -> Ba
     }
 }
 
-fn baseline_group_report(group: &lean_dup_search::audit::SearchBaselineGroup) -> BaselineGroupReport {
+fn baseline_group_report(group: &SearchBaselineGroup) -> BaselineGroupReport {
     BaselineGroupReport {
         id: group.id.clone(),
         relation: group.relation.clone(),

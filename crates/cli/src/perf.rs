@@ -91,7 +91,7 @@ fn run_workload(args: PerfArgs, cache_root: &Path) -> Result<PerfWorkloadReport>
         cache_state,
         exit_code,
         elapsed_ms,
-        peak_memory_bytes: lean_dup_eval::peak_rss_bytes(),
+        peak_memory_bytes: lean_dup_diagnostics::perf::peak_rss_bytes(),
         stdout_bytes: stdout.len(),
         stderr_bytes: stderr.len(),
         stdout_tail: text_tail(&stdout),

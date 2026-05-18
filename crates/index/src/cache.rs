@@ -5,7 +5,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use lean_dup_diagnostics::{read, read_to_string};
-use lean_dup_project::workspace::ResolvedWorkspace;
+use lean_dup_project::ResolvedWorkspace;
 
 use crate::Result;
 
@@ -126,7 +126,7 @@ mod tests {
 
     use super::{cache_root_from, workspace_fingerprint};
     use lean_dup_diagnostics::progress::Reporter;
-    use lean_dup_project::workspace::{WorkspaceRequest, resolve};
+    use lean_dup_project::{WorkspaceRequest, resolve};
 
     #[test]
     fn cache_root_uses_env_override() {

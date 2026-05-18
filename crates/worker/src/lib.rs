@@ -2,11 +2,17 @@
 //!
 //! This crate owns the protocol, subprocess transport, worker version policy,
 //! and request/response data exchanged with Lean. Callers should not know the
-//! JSONL framing, stdout/stderr parsing, or timeout mechanics.
+//! JSONL framing, stdout/stderr parsing, request envelopes, or timeout
+//! mechanics. Public row, progress, and diagnostic DTOs are stable worker
+//! capability facts after transport framing has already been hidden.
 
 mod worker;
 
-pub use worker::*;
+pub use worker::{
+    DeclarationRow, ExtractBatch, FeatureRow, FeaturesBatch, Fingerprints, IndexBatch, IndexStreamItem,
+    ModuleDescriptor, ProbeBatch, ProbePair, ProbeResult, RoleFeature, SourcePoint, SourceSpan, WorkerCall,
+    WorkerClient, WorkerDiagnostic, WorkerError, WorkerEvent, WorkerVersion,
+};
 
 mod perf {
     #[derive(Debug, Clone, Copy)]

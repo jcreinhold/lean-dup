@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::index::{IndexProvenanceKind, OpenedIndex, OpenedIndexFacts};
-use lean_dup_project::workspace::ResolvedWorkspace;
+use lean_dup_project::ResolvedWorkspace;
 use lean_dup_worker::ModuleDescriptor;
 
 /// Evidence mode available for one comparison origin in the current audit.
@@ -163,7 +163,7 @@ mod tests {
 
     use super::{ComparisonEvidenceMode, resolve_facts};
     use crate::index::{IndexProvenance, IndexProvenanceKind, OpenedIndexFacts};
-    use lean_dup_project::workspace::ResolvedWorkspace;
+    use lean_dup_project::ResolvedWorkspace;
 
     #[test]
     fn missing_provenance_defaults_to_static_policy() {

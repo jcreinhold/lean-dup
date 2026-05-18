@@ -11,7 +11,7 @@ use crate::{ProbePolicy, Result, ReviewProfile};
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_index::ComparisonEvidencePolicy;
 use lean_dup_index::{HydratedDeclaration, OpenedIndex, ProbeCacheEntry};
-use lean_dup_project::workspace::ResolvedWorkspace;
+use lean_dup_project::ResolvedWorkspace;
 use lean_dup_worker::{ModuleDescriptor, ProbeBatch, ProbePair, ProbeResult, WorkerClient, WorkerError};
 
 const PROBE_CACHE_VERSION: &str = "semantic-probe-cache.v3";
@@ -967,7 +967,7 @@ mod tests {
     use crate::{ProbePolicy, ReviewProfile};
     use lean_dup_index::{ComparisonEvidenceMode, ComparisonEvidencePolicy};
     use lean_dup_index::{DeclarationHandle, HydratedDeclaration};
-    use lean_dup_project::workspace::ResolvedWorkspace;
+    use lean_dup_project::ResolvedWorkspace;
     use lean_dup_worker::Fingerprints;
 
     #[test]
