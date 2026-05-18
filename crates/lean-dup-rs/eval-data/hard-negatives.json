@@ -27,5 +27,73 @@
       "left": "VojtaConjectureRankOne",
       "right": "RiemannHypothesis"
     }
+  ],
+  "typed_pairs": [
+    {
+      "left": "Tiny.same_left",
+      "right": "External.same_as_tiny",
+      "polarity": "positive",
+      "match_class": "replacement-candidate",
+      "expected_stage_visibility": "visible",
+      "adjudication_source": "fixture-intent",
+      "confidence": "high",
+      "semantic_verification_required": true,
+      "static_evidence_acceptable": true
+    },
+    {
+      "left": "Tiny.same_conclusion_nat_domain",
+      "right": "Tiny.same_conclusion_bool_domain",
+      "polarity": "hard-negative",
+      "match_class": "hard-negative",
+      "expected_stage_visibility": "hidden",
+      "adjudication_source": "fixture-intent",
+      "confidence": "high",
+      "semantic_verification_required": false,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "Tiny.broad_eq_only",
+      "right": "Tiny.symmetric_eq_left",
+      "polarity": "hard-negative",
+      "match_class": "hard-negative",
+      "expected_stage_visibility": "hidden",
+      "adjudication_source": "fixture-intent",
+      "confidence": "high",
+      "semantic_verification_required": false,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "Height.WeilHeight",
+      "right": "Stream'.Seq1",
+      "polarity": "hard-negative",
+      "match_class": "hard-negative",
+      "expected_stage_visibility": "hidden",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "high",
+      "semantic_verification_required": false,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "Height.WeilHeight",
+      "right": "Topology.WithLawson",
+      "polarity": "hard-negative",
+      "match_class": "hard-negative",
+      "expected_stage_visibility": "hidden",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "high",
+      "semantic_verification_required": false,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "VojtaConjectureRankOne",
+      "right": "RiemannHypothesis",
+      "polarity": "hard-negative",
+      "match_class": "hard-negative",
+      "expected_stage_visibility": "hidden",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "high",
+      "semantic_verification_required": false,
+      "static_evidence_acceptable": false
+    }
   ]
 }

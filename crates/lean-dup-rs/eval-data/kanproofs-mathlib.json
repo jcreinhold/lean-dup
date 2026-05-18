@@ -55,5 +55,172 @@
       "left": "VojtaConjectureRankOne",
       "right": "RiemannHypothesis"
     }
+  ],
+  "typed_pairs": [
+    {
+      "left": "quasicategory_iff_from_innerFibration",
+      "right": "quasicategory_of_innerFibration_quasicategory",
+      "polarity": "positive",
+      "match_class": "replacement-candidate",
+      "expected_stage_visibility": "visible",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "medium",
+      "semantic_verification_required": true,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "quasicategory_iff_from_innerFibration",
+      "right": "innerFibration_iff",
+      "polarity": "positive",
+      "match_class": "replacement-candidate",
+      "expected_stage_visibility": "visible",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "medium",
+      "semantic_verification_required": true,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "quasicategory_of_innerFibration_quasicategory",
+      "right": "innerFibration_iff",
+      "polarity": "positive",
+      "match_class": "replacement-candidate",
+      "expected_stage_visibility": "visible",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "medium",
+      "semantic_verification_required": true,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "innerAnodyneExtensions_eq_llp_rlp",
+      "right": "innerAnodyneExtensions_le",
+      "polarity": "positive",
+      "match_class": "replacement-candidate",
+      "expected_stage_visibility": "visible",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "medium",
+      "semantic_verification_required": true,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "innerAnodyneExtensions_eq_llp_rlp",
+      "right": "innerAnodyneExtensions_eq_retracts_transfiniteCompositions",
+      "polarity": "positive",
+      "match_class": "replacement-candidate",
+      "expected_stage_visibility": "visible",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "medium",
+      "semantic_verification_required": true,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "innerAnodyneExtensions_le",
+      "right": "innerAnodyneExtensions_eq_retracts_transfiniteCompositions",
+      "polarity": "positive",
+      "match_class": "replacement-candidate",
+      "expected_stage_visibility": "visible",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "medium",
+      "semantic_verification_required": true,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "whiskerLeft_isoOfNatIso_ι_hom",
+      "right": "whiskerLeft_isoOfNatIso_ι_hom_assoc",
+      "polarity": "positive",
+      "match_class": "replacement-candidate",
+      "expected_stage_visibility": "visible",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "medium",
+      "semantic_verification_required": true,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "whiskerLeft_isoOfNatIso_ι_hom",
+      "right": "isoOfNatIso_ι_hom_whiskerRight",
+      "polarity": "positive",
+      "match_class": "replacement-candidate",
+      "expected_stage_visibility": "visible",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "medium",
+      "semantic_verification_required": true,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "whiskerLeft_isoOfNatIso_ι_hom_assoc",
+      "right": "isoOfNatIso_ι_hom_whiskerRight",
+      "polarity": "positive",
+      "match_class": "replacement-candidate",
+      "expected_stage_visibility": "visible",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "medium",
+      "semantic_verification_required": true,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "SSet.Subcomplex.Pairing.toAnodynePresentation",
+      "right": "SSet.Subcomplex.Pairing.anodyneExtensions",
+      "polarity": "positive",
+      "match_class": "replacement-candidate",
+      "expected_stage_visibility": "visible",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "medium",
+      "semantic_verification_required": true,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "IsLocalRing.isUnit_of_residue_isUnit",
+      "right": "IsLocalRing.residue_ne_zero_iff_isUnit",
+      "polarity": "positive",
+      "match_class": "replacement-candidate",
+      "expected_stage_visibility": "visible",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "medium",
+      "semantic_verification_required": true,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "IsSaturated.toIsStableUnderComposition",
+      "right": "MorphismProperty.IsMultiplicative.toIsStableUnderComposition",
+      "polarity": "hard-negative",
+      "match_class": "hard-negative",
+      "expected_stage_visibility": "hidden",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "high",
+      "semantic_verification_required": false,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "Height.WeilHeight",
+      "right": "Stream'.Seq1",
+      "polarity": "hard-negative",
+      "match_class": "hard-negative",
+      "expected_stage_visibility": "hidden",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "high",
+      "semantic_verification_required": false,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "Height.WeilHeight",
+      "right": "Topology.WithLawson",
+      "polarity": "hard-negative",
+      "match_class": "hard-negative",
+      "expected_stage_visibility": "hidden",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "high",
+      "semantic_verification_required": false,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "VojtaConjectureRankOne",
+      "right": "RiemannHypothesis",
+      "polarity": "hard-negative",
+      "match_class": "hard-negative",
+      "expected_stage_visibility": "hidden",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "high",
+      "semantic_verification_required": false,
+      "static_evidence_acceptable": false
+    }
   ]
 }

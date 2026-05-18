@@ -42,5 +42,106 @@
       "left": "WeierstrassCurve.valuation_c₄_aux",
       "right": "WeierstrassCurve.valuation_Δ_aux"
     }
+  ],
+  "typed_pairs": [
+    {
+      "left": "mem",
+      "right": "mem_innerFibrations",
+      "polarity": "positive",
+      "match_class": "exact-theorem-duplicate",
+      "expected_stage_visibility": "visible",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "medium",
+      "semantic_verification_required": true,
+      "static_evidence_acceptable": true
+    },
+    {
+      "left": "ext",
+      "right": "ext_of_mem_iff",
+      "polarity": "positive",
+      "match_class": "exact-theorem-duplicate",
+      "expected_stage_visibility": "visible",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "medium",
+      "semantic_verification_required": true,
+      "static_evidence_acceptable": true
+    },
+    {
+      "left": "omega_map",
+      "right": "integer_omega_map",
+      "polarity": "positive",
+      "match_class": "exact-theorem-duplicate",
+      "expected_stage_visibility": "visible",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "medium",
+      "semantic_verification_required": true,
+      "static_evidence_acceptable": true
+    },
+    {
+      "left": "zfSet_models_delta0Theory",
+      "right": "instZFSetModelsDelta0Theory",
+      "polarity": "positive",
+      "match_class": "replacement-candidate",
+      "expected_stage_visibility": "visible",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "medium",
+      "semantic_verification_required": true,
+      "static_evidence_acceptable": true
+    },
+    {
+      "left": "naturality_component",
+      "right": "naturality_component_source_order",
+      "polarity": "positive",
+      "match_class": "binder-permutation-duplicate",
+      "expected_stage_visibility": "visible",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "medium",
+      "semantic_verification_required": true,
+      "static_evidence_acceptable": true
+    },
+    {
+      "left": "SSet.Subcomplex.Pairing.toAnodynePresentation",
+      "right": "SSet.Subcomplex.PairingCore.toAnodynePresentation",
+      "polarity": "positive",
+      "match_class": "specialization-generalization",
+      "expected_stage_visibility": "ranked",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "medium",
+      "semantic_verification_required": true,
+      "static_evidence_acceptable": true
+    },
+    {
+      "left": "omegaRecursiveGraph_functional",
+      "right": "naturality_component",
+      "polarity": "hard-negative",
+      "match_class": "hard-negative",
+      "expected_stage_visibility": "hidden",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "high",
+      "semantic_verification_required": false,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "VojtaConjectureRankOne",
+      "right": "RiemannHypothesis",
+      "polarity": "hard-negative",
+      "match_class": "hard-negative",
+      "expected_stage_visibility": "hidden",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "high",
+      "semantic_verification_required": false,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "WeierstrassCurve.valuation_c₄_aux",
+      "right": "WeierstrassCurve.valuation_Δ_aux",
+      "polarity": "hard-negative",
+      "match_class": "hard-negative",
+      "expected_stage_visibility": "hidden",
+      "adjudication_source": "prompt27-evidence",
+      "confidence": "high",
+      "semantic_verification_required": false,
+      "static_evidence_acceptable": false
+    }
   ]
 }

@@ -214,6 +214,7 @@ mod tests {
             suite: "unit".to_owned(),
             positives,
             hard_negatives,
+            typed_pairs: Vec::new(),
         }
     }
 

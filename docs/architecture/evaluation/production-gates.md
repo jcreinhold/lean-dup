@@ -4,6 +4,8 @@ This document records the evaluation boundary added by prompt 21 and updated thr
 retrieval look good; it is to make audit quality measurable before release work continues. For the current end-to-end
 pipeline, see
 [../06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md).
+For the Prompt 29 typed adjudication schema, see
+[search-labels.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/evaluation/search-labels.md).
 
 ## Design Note
 
