@@ -366,6 +366,95 @@ fn review_profiles_filter_one_ranked_audit_result() {
 }
 
 #[test]
+fn audit_json_includes_stable_report_explanations() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let tiny = repo_root().join("tests/fixtures/tiny");
+
+    let assert = Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--no-semantic-probes", "--format", "json"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(payload["report_schema_version"], "lean-dup.report.v1");
+    assert_eq!(
+        payload["explanations"]["visible_queue"]["visible"],
+        payload["visible_group_count"]
+    );
+    assert!(
+        payload["explanations"]["visible_queue"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("groups match")
+    );
+    assert!(payload["explanations"]["hidden_groups"]["total"].is_u64());
+    assert_eq!(
+        payload["explanations"]["semantic_probes"]["summary"],
+        "semantic probes disabled"
+    );
+    assert_eq!(
+        payload["explanations"]["comparison_provenance"]["summary"],
+        "no comparison indexes"
+    );
+}
+
+#[test]
+fn audit_text_reports_queue_probe_and_provenance_explanations() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let tiny = repo_root().join("tests/fixtures/tiny");
+
+    let assert = Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--no-semantic-probes"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+
+    assert!(stdout.contains("report schema: lean-dup.report.v1"));
+    assert!(stdout.contains("visible queue:"));
+    assert!(stdout.contains("hidden groups: total="));
+    assert!(stdout.contains("probe summary: semantic probes disabled"));
+    assert!(stdout.contains("comparison provenance: no comparison indexes"));
+    assert!(!stdout.contains("feature_row"));
+    assert!(!stdout.contains("declaration_row"));
+    assert!(!stdout.contains("probe_result"));
+}
+
+#[test]
+fn json_stdout_stays_clean_with_progress_and_profile() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let tiny = repo_root().join("tests/fixtures/tiny");
+
+    let assert = Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["--progress", "--profile", "audit", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--no-semantic-probes", "--format", "json"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(payload["command"], "audit");
+    assert!(stderr.contains("profile."));
+    assert!(!stdout.contains("profile."));
+    assert!(!stdout.contains("progress."));
+}
+
+#[test]
 fn audit_fixture_mathlib_label_produces_actionable_hints() {
     let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();
@@ -552,9 +641,14 @@ fn show_renders_evidence_blockers_probe_hint_and_callers_for_group() {
         .stdout(predicate::str::contains("command: show"))
         .stdout(predicate::str::contains(format!("group: {group_id}")))
         .stdout(predicate::str::contains("evidence:"))
+        .stdout(predicate::str::contains("explanation:"))
+        .stdout(predicate::str::contains("why visible or hidden:"))
+        .stdout(predicate::str::contains("static/proof evidence:"))
+        .stdout(predicate::str::contains("semantic evidence:"))
         .stdout(predicate::str::contains("blockers:"))
         .stdout(predicate::str::contains("probe:"))
         .stdout(predicate::str::contains("replacement:"))
+        .stdout(predicate::str::contains("replacement/import/callers:"))
         .stdout(predicate::str::contains("callers:"));
     let stdout = String::from_utf8(show.get_output().stdout.clone()).unwrap();
     assert!(!stdout.contains("feature_row"));

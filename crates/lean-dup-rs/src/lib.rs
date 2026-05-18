@@ -13,6 +13,7 @@ mod progress;
 mod ranking;
 mod render;
 mod replacement_hints;
+mod report_contract;
 mod retrieval;
 mod semantic_verification;
 mod source_refs;

@@ -24,6 +24,7 @@ use crate::ranking::{
     rank_candidates,
 };
 use crate::replacement_hints::{ReplacementHintProfile, attach_replacement_hints, reference_declarations_for_hints};
+use crate::report_contract::{AuditExplanations, GroupExplanation};
 use crate::retrieval::{RetrievalDiagnostics, retrieve_candidates};
 use crate::semantic_verification::{
     ProbeDiagnostics, ProbeSettings, SemanticVerificationInput, VerificationIndex, candidate_sets_for_review,
@@ -92,6 +93,7 @@ pub(crate) struct IndexReport {
 
 #[derive(Debug, Serialize)]
 pub(crate) struct AuditReport {
+    pub(crate) report_schema_version: &'static str,
     pub(crate) status: &'static str,
     pub(crate) requested_workspace: PathBuf,
     pub(crate) lake_root: PathBuf,
@@ -113,6 +115,7 @@ pub(crate) struct AuditReport {
     pub(crate) retrieval: RetrievalDiagnostics,
     pub(crate) comparison_provenance: Vec<ComparisonProvenanceReport>,
     pub(crate) semantic_verification: ProbeDiagnostics,
+    pub(crate) explanations: AuditExplanations,
     pub(crate) review: RankedReview,
     pub(crate) visible_groups: Vec<RankedGroup>,
     pub(crate) visible_group_count: usize,
@@ -138,6 +141,7 @@ pub(crate) struct ShowReport {
     pub(crate) cache_root: PathBuf,
     pub(crate) cache_fingerprint: String,
     pub(crate) group: RankedGroup,
+    pub(crate) explanation: GroupExplanation,
 }
 
 #[derive(Debug, Serialize)]
@@ -396,6 +400,13 @@ fn audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditReport> {
         .collect::<Vec<_>>();
     let visible_group_count = visible_groups.len();
     let profile_counts = profile_counts(&computation.review);
+    let explanations = crate::report_contract::explain_audit(
+        &computation.review,
+        &visible_groups,
+        filter,
+        &computation.semantic_verification,
+        &computation.comparison_provenance,
+    );
     let saved_baseline = if let Some(name) = save_baseline {
         let snapshot = baseline::snapshot(&computation.review, computation.foundation.cache.fingerprint.clone());
         Some(baseline::save(&computation.foundation.cache.root, &name, &snapshot)?)
@@ -403,6 +414,7 @@ fn audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditReport> {
         None
     };
     Ok(AuditReport {
+        report_schema_version: crate::report_contract::REPORT_SCHEMA_VERSION,
         status: "ok",
         requested_workspace: computation.foundation.workspace.requested_root,
         lake_root: computation.foundation.workspace.root,
@@ -424,6 +436,7 @@ fn audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditReport> {
         retrieval: computation.retrieval,
         comparison_provenance: computation.comparison_provenance,
         semantic_verification: computation.semantic_verification,
+        explanations,
         review: computation.review,
         visible_groups,
         visible_group_count,
@@ -659,6 +672,12 @@ fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<EvaluationReport> {
 fn show(args: ShowArgs, reporter: &mut Reporter) -> Result<ShowReport> {
     let requested_group = args.group.clone();
     let computation = compute_audit(default_audit_args(args.workspace, args.module_root), reporter)?;
+    let filter = profile_filter(
+        computation.review_profile,
+        computation.include_generated,
+        computation.show_noise,
+        computation.min_priority,
+    );
     let group = computation
         .review
         .groups
@@ -668,6 +687,7 @@ fn show(args: ShowArgs, reporter: &mut Reporter) -> Result<ShowReport> {
         .ok_or_else(|| crate::error::Error::Index {
             message: format!("unknown audit group: {requested_group}"),
         })?;
+    let explanation = crate::report_contract::explain_group(&group, filter);
     Ok(ShowReport {
         status: "ok",
         requested_workspace: computation.foundation.workspace.requested_root,
@@ -677,6 +697,7 @@ fn show(args: ShowArgs, reporter: &mut Reporter) -> Result<ShowReport> {
         cache_root: computation.foundation.cache.root,
         cache_fingerprint: computation.foundation.cache.fingerprint,
         group,
+        explanation,
     })
 }
 

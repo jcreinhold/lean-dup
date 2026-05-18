@@ -4,10 +4,10 @@ use crate::cache_lifecycle::CacheCleanupReport;
 use crate::cli::{OutputFormat, ReviewProfile};
 use crate::commands::{AuditReport, DiffReport, DoctorReport, IndexReport, Outcome, Report, ShowReport};
 use crate::error::Result;
-use crate::external_provenance::ComparisonEvidenceMode;
 use crate::perf::{self, CostClass};
 use crate::progress::{Reporter, format_progress_event};
 use crate::ranking::{RankedGroup, ReviewAction, ReviewEvidenceMode, ReviewPriority, ReviewRelation};
+use crate::report_contract::GroupExplanation;
 
 pub(crate) fn write_outcome<O: Write, E: Write>(mut outcome: Outcome, stdout: &mut O, stderr: &mut E) -> Result<()> {
     perf::measure_result(CostClass::Reporting, "report.render", || {
@@ -182,6 +182,7 @@ fn render_show(report: &ShowReport) -> String {
     ];
     lines.push(String::new());
     push_group_detail(&mut lines, &report.group);
+    push_group_explanation(&mut lines, &report.explanation);
     lines.join("\n")
 }
 
@@ -241,6 +242,7 @@ fn render_index(command: &str, report: &IndexReport) -> String {
 fn render_audit(report: &AuditReport) -> String {
     let mut lines = vec![
         "command: audit".to_owned(),
+        format!("report schema: {}", report.report_schema_version),
         format!("status: {}", report.status),
         format!("requested workspace: {}", report.requested_workspace.display()),
         format!("resolved Lake root: {}", report.lake_root.display()),
@@ -256,7 +258,7 @@ fn render_audit(report: &AuditReport) -> String {
         format!("candidates: {}", report.retrieval.candidate_count),
         format!(
             "comparison provenance: {}",
-            comparison_provenance_summary(&report.comparison_provenance)
+            report.explanations.comparison_provenance.summary
         ),
         format!(
             "semantic probes: planned={} cached={} worker={} unavailable={}",
@@ -267,6 +269,17 @@ fn render_audit(report: &AuditReport) -> String {
         ),
         format!("review groups: {}", report.review.groups.len()),
         format!("visible groups: {}", report.visible_group_count),
+        format!("visible queue: {}", report.explanations.visible_queue.reason),
+        format!(
+            "hidden groups: total={} profile/noise={} generated={} unverified-proof-grade={} unavailable-probe={} other={}",
+            report.explanations.hidden_groups.total,
+            report.explanations.hidden_groups.noise_or_profile,
+            report.explanations.hidden_groups.generated,
+            report.explanations.hidden_groups.unverified_proof_grade,
+            report.explanations.hidden_groups.unavailable_probe,
+            report.explanations.hidden_groups.other_blockers
+        ),
+        format!("probe summary: {}", report.explanations.semantic_probes.summary),
         format!(
             "profile counts: mathlib={} internal={} api-design={} noise={}",
             report.profile_counts.mathlib,
@@ -309,32 +322,6 @@ fn render_audit(report: &AuditReport) -> String {
         ));
     }
     lines.join("\n")
-}
-
-fn comparison_provenance_summary(reports: &[crate::external_provenance::ComparisonProvenanceReport]) -> String {
-    if reports.is_empty() {
-        return "none".to_owned();
-    }
-    reports
-        .iter()
-        .map(|report| {
-            let label = report.label.as_deref().unwrap_or("-");
-            format!(
-                "{label}/{}={}",
-                report.origin,
-                comparison_evidence_mode_label(report.evidence_mode)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-fn comparison_evidence_mode_label(mode: ComparisonEvidenceMode) -> &'static str {
-    match mode {
-        ComparisonEvidenceMode::Static => "static",
-        ComparisonEvidenceMode::SourceBackedNotImportable => "source-backed-not-importable",
-        ComparisonEvidenceMode::ProofGrade => "proof-grade",
-    }
 }
 
 fn review_evidence_mode_label(mode: ReviewEvidenceMode) -> &'static str {
@@ -412,6 +399,23 @@ fn push_group_detail(lines: &mut Vec<String>, group: &RankedGroup) {
         lines.push("replacement: manual review".to_owned());
         lines.push(format!("callers: {}", group.local_caller_count));
     }
+}
+
+fn push_group_explanation(lines: &mut Vec<String>, explanation: &GroupExplanation) {
+    lines.push("explanation:".to_owned());
+    lines.push(format!("  visibility: {}", explanation.visibility));
+    lines.push(format!("  why visible or hidden: {}", explanation.visibility_reason));
+    lines.push(format!(
+        "  evidence mode: {}",
+        review_evidence_mode_label(explanation.evidence_mode)
+    ));
+    lines.push(format!("  static/proof evidence: {}", explanation.evidence_summary));
+    lines.push(format!("  semantic evidence: {}", explanation.semantic_summary));
+    lines.push(format!("  blockers: {}", explanation.blocker_summary));
+    lines.push(format!(
+        "  replacement/import/callers: {}",
+        explanation.replacement_summary
+    ));
 }
 
 fn priority_label(priority: ReviewPriority) -> &'static str {
