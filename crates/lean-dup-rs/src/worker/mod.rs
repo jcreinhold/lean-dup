@@ -19,6 +19,8 @@ use self::subprocess::SubprocessTransport;
 use self::transport::{CallControl, WorkerTransport};
 
 static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
+const DEFAULT_WORKER_TIMEOUT: Duration = Duration::from_secs(60);
+const INDEX_WORKER_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 /// Client for Lean semantic worker capabilities.
 ///
@@ -52,9 +54,18 @@ impl WorkerClient {
     pub fn new() -> Self {
         Self {
             transport: Box::new(SubprocessTransport::new()),
-            timeout: Duration::from_secs(60),
+            timeout: DEFAULT_WORKER_TIMEOUT,
             cancelled: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Create a worker client for index builds over large imported environments.
+    ///
+    /// Indexing can legitimately spend minutes importing and streaming rows for
+    /// mathlib-sized workspaces. Callers use this policy for index construction
+    /// without learning transport timeout constants or adding user-facing knobs.
+    pub(crate) fn for_indexing() -> Self {
+        Self::with_timeout(INDEX_WORKER_TIMEOUT)
     }
 
     /// Create a worker client with an explicit per-call timeout.
@@ -572,6 +583,13 @@ mod tests {
         for command in ["extract", "features", "probe", "doctor", "version"] {
             assert!(version.supported_commands.iter().any(|value| value == command));
         }
+    }
+
+    #[test]
+    fn indexing_client_uses_long_timeout_policy() {
+        assert_eq!(WorkerClient::new().timeout, super::DEFAULT_WORKER_TIMEOUT);
+        assert_eq!(WorkerClient::for_indexing().timeout, super::INDEX_WORKER_TIMEOUT);
+        assert!(WorkerClient::for_indexing().timeout > WorkerClient::new().timeout);
     }
 
     #[test]

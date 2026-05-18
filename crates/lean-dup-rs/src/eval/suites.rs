@@ -449,7 +449,7 @@ fn build_or_load_project_mathlib_index(
             force: false,
             kind: IndexBuildKind::ProjectMathlib,
         },
-        &WorkerClient::new(),
+        &WorkerClient::for_indexing(),
         reporter,
     )?;
     store.resolve(IndexReference::Label(external.label.clone()))
@@ -484,7 +484,7 @@ fn build_or_load_index(
             force: false,
             kind: request.kind,
         },
-        &WorkerClient::new(),
+        &WorkerClient::for_indexing(),
         reporter,
     )?;
     store.resolve(IndexReference::Label(request.label.to_owned()))

@@ -7,13 +7,28 @@ is intentionally local and deterministic: no network services, no embeddings, an
 
 ## Usage
 
+Build the Rust binary and Lean worker first:
+
 ```sh
-uv run lean-dup doctor --workspace /path/to/lake/workspace
-uv run lean-dup audit --workspace /path/to/lake/workspace --format text
-uv run lean-dup audit --workspace /path/to/lake/workspace --format json
-uv run lean-dup audit --workspace /Users/jcreinhold/Code/kan --compare-mathlib --progress
-uv run lean-dup show --workspace /path/to/lake/workspace --group exact-statement-1
-uv run lean-dup show --workspace /Users/jcreinhold/Code/kan --group exact-statement-1
+cargo build -p lean-dup-rs
+cd lean && lake build
+```
+
+For local development, run the Rust CLI through Cargo:
+
+```sh
+cargo run -p lean-dup-rs -- doctor --workspace /path/to/lake/workspace
+cargo run -p lean-dup-rs -- audit --workspace /path/to/lake/workspace --format text
+cargo run -p lean-dup-rs -- audit --workspace /path/to/lake/workspace --format json
+cargo run -p lean-dup-rs -- audit --workspace /path/to/lake/workspace --compare-mathlib --progress
+cargo run -p lean-dup-rs -- show --workspace /path/to/lake/workspace --group exact-statement-1
+```
+
+For production-style local runs, use the release binary:
+
+```sh
+cargo build --release -p lean-dup-rs
+target/release/lean-dup-rs audit --workspace /path/to/lake/workspace --compare-mathlib --progress
 ```
 
 By default, `audit` scans the inferred local Lake workspace roots and includes private theorem-like declarations when
@@ -30,6 +45,10 @@ Useful audit flags:
 - `--profile`: include extraction and classification timings in the report.
 - `--no-replacement-hints`: skip import/replacement hint generation.
 
-Reports are cached under the audited workspace at `.lean-dup/cache/`. For confirmed external matches, text and JSON
-reports include read-only replacement hints: the target declaration, the specific import line, direct-import status, and
-bounded local source references to replace or preserve behind a transitional alias.
+Project and mathlib indexes are cached under the resolved `lean-dup` cache root; shared project-pinned mathlib indexes
+default to `~/.cache/lean-dup`. For confirmed external matches, text and JSON reports include read-only replacement
+hints: the target declaration, the specific import line, direct-import status, and bounded local source references to
+replace or preserve behind a transitional alias.
+
+The Python implementation has been retired. Historical Python modules and tests were used as regression evidence during
+the Rust/Lean rewrite; the production command surface is the Rust `lean-dup-rs` binary.

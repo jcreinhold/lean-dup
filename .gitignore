@@ -1,15 +1,5 @@
-.venv/
-__pycache__/
-.pytest_cache/
-.ruff_cache/
-*.egg-info/
-
 # Rust build outputs.
 target/
-
-# Python build outputs.
-build/
-dist/
 
 # lean-dup audit caches and Lake build outputs, including fixture workspaces.
 **/.lean-dup/

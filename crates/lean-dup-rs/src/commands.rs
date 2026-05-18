@@ -179,8 +179,6 @@ struct AuditComputation {
     review: RankedReview,
 }
 
-const INDEX_WORKER_TIMEOUT: Duration = Duration::from_secs(30 * 60);
-
 pub(crate) fn run(cli: Cli) -> Result<Outcome> {
     let mut reporter = Reporter::new_live(cli.progress, cli.profile);
     let (report, output_format, output_path) = match cli.command {
@@ -341,7 +339,7 @@ fn index(args: IndexArgs, reporter: &mut Reporter) -> Result<IndexReport> {
                 force,
                 kind: IndexBuildKind::External,
             },
-            &WorkerClient::with_timeout(INDEX_WORKER_TIMEOUT),
+            &WorkerClient::for_indexing(),
             reporter,
         )
     })?;
@@ -376,7 +374,7 @@ fn index_mathlib(args: IndexMathlibArgs, reporter: &mut Reporter) -> Result<Inde
                 force,
                 kind: IndexBuildKind::ProjectMathlib,
             },
-            &WorkerClient::with_timeout(INDEX_WORKER_TIMEOUT),
+            &WorkerClient::for_indexing(),
             reporter,
         )
     })?;
@@ -469,7 +467,7 @@ fn compute_audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditComput
                 force,
                 kind: IndexBuildKind::Local,
             },
-            &WorkerClient::with_timeout(INDEX_WORKER_TIMEOUT),
+            &WorkerClient::for_indexing(),
             reporter,
         )
     })?;
@@ -616,7 +614,7 @@ fn open_compare_indexes(
                 force: false,
                 kind: IndexBuildKind::ProjectMathlib,
             },
-            &WorkerClient::with_timeout(INDEX_WORKER_TIMEOUT),
+            &WorkerClient::for_indexing(),
             reporter,
         )?;
         indexes.push(store.resolve(IndexReference::Label("mathlib".to_owned()))?);
