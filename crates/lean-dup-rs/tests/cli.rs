@@ -39,6 +39,10 @@ fn help_lists_foundation_commands() {
         !stdout.contains("perf"),
         "hidden perf command leaked into help:\n{stdout}"
     );
+    assert!(
+        !stdout.contains("cache-cleanup"),
+        "hidden cache cleanup command leaked into help:\n{stdout}"
+    );
 }
 
 #[test]
@@ -76,6 +80,85 @@ fn hidden_perf_fixture_workload_emits_json_metrics() {
     assert!(payload["report"]["elapsed_ms"].as_u64().unwrap() > 0);
     assert!(payload["report"]["events"].as_array().unwrap().len() > 1);
     assert!(output.path().exists());
+}
+
+#[test]
+fn doctor_json_reports_cache_lifecycle_diagnostics() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let tiny = repo_root().join("tests/fixtures/tiny");
+
+    let assert = Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["doctor", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--format", "json"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["command"], "doctor");
+    assert_eq!(payload["status"], "ok");
+    assert_eq!(
+        payload["cache"]["cache_root"].as_str().unwrap(),
+        cache.path().to_string_lossy()
+    );
+    let labels = payload["cache"]["labels"].as_array().unwrap();
+    assert!(labels.iter().any(|label| label["label"] == "audit-workspace"));
+    let audit_workspace = labels.iter().find(|label| label["label"] == "audit-workspace").unwrap();
+    assert_eq!(audit_workspace["latest"]["status"], "missing");
+    assert!(
+        audit_workspace["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| { entry["expected_current"] == true && entry["status"] == "missing" })
+    );
+}
+
+#[test]
+fn hidden_cache_cleanup_dry_run_and_execute_preserve_latest_entry() {
+    let cache = tempfile::TempDir::new().unwrap();
+    let label_dir = cache.path().join("indexes/fixture");
+    let active = label_dir.join("active");
+    let stale = label_dir.join("stale");
+    fs::create_dir_all(&active).unwrap();
+    fs::create_dir_all(&stale).unwrap();
+    fs::write(active.join("index.sqlite"), "active").unwrap();
+    fs::write(stale.join("index.sqlite"), "stale").unwrap();
+    fs::write(
+        label_dir.join("latest.json"),
+        serde_json::to_string(&serde_json::json!({ "index_dir": &active })).unwrap(),
+    )
+    .unwrap();
+
+    let dry_run = Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["cache-cleanup", "--format", "json"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(dry_run.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["command"], "cache-cleanup");
+    assert_eq!(payload["executed"], false);
+    assert_eq!(payload["removable_count"], 1);
+    assert!(active.exists());
+    assert!(stale.exists());
+
+    Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["cache-cleanup", "--execute"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("executed: true"))
+        .stdout(predicate::str::contains("removable entries: 1"));
+
+    assert!(active.exists());
+    assert!(!stale.exists());
 }
 
 #[test]

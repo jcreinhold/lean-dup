@@ -1,5 +1,6 @@
 mod baseline;
 mod cache;
+mod cache_lifecycle;
 mod cli;
 mod commands;
 mod error;

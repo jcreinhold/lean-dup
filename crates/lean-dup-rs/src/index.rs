@@ -1,6 +1,5 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use rustc_hash::FxHashMap as HashMap;
@@ -18,7 +17,7 @@ use crate::worker::{
 };
 use crate::workspace::{self, ResolvedWorkspace};
 
-const INDEX_SCHEMA_VERSION: &str = "lean-dup.index.sqlite.v1";
+pub(crate) const INDEX_SCHEMA_VERSION: &str = "lean-dup.index.sqlite.v1";
 const INDEX_PROVENANCE_VERSION: &str = "lean-dup.index.provenance.v1";
 const MATHLIB_DECLARATION_CHUNK_SIZE: usize = 32;
 const MAX_MATHLIB_INDEX_THREADS: usize = 2;
@@ -93,6 +92,31 @@ pub(crate) struct IndexSummary {
 pub(crate) enum CacheStatus {
     Hit,
     Miss,
+}
+
+/// The cache entry an index build request would publish if it were current.
+///
+/// Cache lifecycle callers use this to compare active cache entries with the
+/// current workspace/toolchain/source fingerprint. They do not receive the
+/// cache key JSON or any SQLite storage detail.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct ExpectedIndexEntry {
+    pub(crate) label: String,
+    pub(crate) index_dir: PathBuf,
+    pub(crate) index_path: PathBuf,
+    cache_key_json: String,
+}
+
+#[cfg(test)]
+impl ExpectedIndexEntry {
+    pub(crate) fn for_test(label: impl Into<String>, index_dir: PathBuf, cache_key_json: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            index_path: index_dir.join("index.sqlite"),
+            index_dir,
+            cache_key_json: cache_key_json.into(),
+        }
+    }
 }
 
 /// User-facing ways to locate an existing index.
@@ -327,8 +351,6 @@ struct IndexCacheKey {
     lean_toolchain: Option<String>,
     lakefile: Option<FileDigest>,
     lake_manifest: Option<FileDigest>,
-    git_head: Option<String>,
-    git_dirty: Option<String>,
     sources: Vec<SourceDigest>,
 }
 
@@ -370,13 +392,11 @@ impl IndexStore {
             message: "worker version returned no rows".to_owned(),
         })?;
 
-        let cache_key = index_cache_key(&request, &version)?;
-        let cache_key_json = serde_json::to_string(&cache_key)?;
-        let cache_id = hex_digest(cache_key_json.as_bytes());
-        let index_dir = self.label_dir(&request.label).join(cache_id);
-        let index_path = index_dir.join("index.sqlite");
+        let expected = self.expected_entry(&request, &version)?;
+        let index_dir = expected.index_dir.clone();
+        let index_path = expected.index_path.clone();
 
-        if index_path.exists() && !request.force && sqlite_cache_is_current(&index_path, &cache_key_json)? {
+        if index_path.exists() && !request.force && sqlite_cache_is_current(&index_path, &expected.cache_key_json)? {
             let declaration_count = declaration_count(&index_path)?;
             self.write_latest(&request.label, &index_dir)?;
             reporter.event(
@@ -397,7 +417,14 @@ impl IndexStore {
 
         let mut diagnostics = diagnostics_to_strings(version_call.diagnostics);
         if request.kind == IndexBuildKind::ProjectMathlib {
-            let build = write_batched_sqlite_index(&index_path, &cache_key_json, &request, &version, worker, reporter)?;
+            let build = write_batched_sqlite_index(
+                &index_path,
+                &expected.cache_key_json,
+                &request,
+                &version,
+                worker,
+                reporter,
+            )?;
             diagnostics.extend(build.diagnostics);
         } else {
             let modules = modules_for(&request);
@@ -424,7 +451,7 @@ impl IndexStore {
 
             write_sqlite_index(
                 &index_path,
-                &cache_key_json,
+                &expected.cache_key_json,
                 &request,
                 &version,
                 declarations.rows,
@@ -451,6 +478,27 @@ impl IndexStore {
             declaration_count,
             diagnostics,
         })
+    }
+
+    pub(crate) fn expected_entry(
+        &self,
+        request: &IndexBuildRequest,
+        version: &WorkerVersion,
+    ) -> Result<ExpectedIndexEntry> {
+        let cache_key = index_cache_key(request, version)?;
+        let cache_key_json = serde_json::to_string(&cache_key)?;
+        let cache_id = hex_digest(cache_key_json.as_bytes());
+        let index_dir = self.label_dir(&request.label).join(cache_id);
+        Ok(ExpectedIndexEntry {
+            label: request.label.clone(),
+            index_path: index_dir.join("index.sqlite"),
+            index_dir,
+            cache_key_json,
+        })
+    }
+
+    pub(crate) fn cache_entry_is_current(&self, entry: &ExpectedIndexEntry) -> Result<bool> {
+        sqlite_cache_is_current(&entry.index_path, &entry.cache_key_json)
     }
 
     #[allow(dead_code)]
@@ -783,8 +831,6 @@ fn index_cache_key(request: &IndexBuildRequest, version: &WorkerVersion) -> Resu
         } else {
             file_digest(request.workspace.manifest_path())?
         },
-        git_head: git_output(&request.workspace.root, &["rev-parse", "HEAD"]),
-        git_dirty: git_output(&request.workspace.root, &["status", "--porcelain"]),
         sources: request
             .workspace
             .source_files
@@ -1485,14 +1531,6 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn git_output(root: &Path, args: &[&str]) -> Option<String> {
-    let output = Command::new("git").arg("-C").arg(root).args(args).output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    Some(String::from_utf8_lossy(&output.stdout).trim().to_owned())
-}
-
 fn record_worker_events(reporter: &mut Reporter, events: &[WorkerEvent]) {
     for event in events {
         reporter.event(
@@ -1791,6 +1829,53 @@ name = "B"
         let changed_source =
             serde_json::to_string(&index_cache_key(&request_for(workspace_a, "A"), &version).unwrap()).unwrap();
         assert_ne!(first, changed_source);
+    }
+
+    #[test]
+    fn cache_key_ignores_unrelated_files_and_tracks_lake_inputs() {
+        let temp = TempDir::new().unwrap();
+        fs::write(temp.path().join("lakefile.toml"), "[[lean_lib]]\nname = \"A\"\n").unwrap();
+        fs::write(temp.path().join("lean-toolchain"), "leanprover/lean4:v4.30.0-rc2\n").unwrap();
+        fs::write(temp.path().join("lake-manifest.json"), "{\"packages\":[]}\n").unwrap();
+        fs::write(temp.path().join("A.lean"), "#check Nat\n").unwrap();
+
+        let workspace = resolve(
+            WorkspaceRequest {
+                requested_root: temp.path().to_path_buf(),
+                module_root: Some("A".to_owned()),
+            },
+            &mut Reporter::new(false, false),
+        )
+        .unwrap();
+        let version = fake_version("features.v1");
+        let first =
+            serde_json::to_string(&index_cache_key(&request_for(workspace.clone(), "A"), &version).unwrap()).unwrap();
+
+        fs::write(temp.path().join("README.md"), "not part of the Lean cache key\n").unwrap();
+        let after_unrelated =
+            serde_json::to_string(&index_cache_key(&request_for(workspace.clone(), "A"), &version).unwrap()).unwrap();
+        assert_eq!(first, after_unrelated);
+
+        fs::write(temp.path().join("lean-toolchain"), "leanprover/lean4:v4.31.0\n").unwrap();
+        let changed_toolchain =
+            serde_json::to_string(&index_cache_key(&request_for(workspace.clone(), "A"), &version).unwrap()).unwrap();
+        assert_ne!(first, changed_toolchain);
+
+        fs::write(temp.path().join("lean-toolchain"), "leanprover/lean4:v4.30.0-rc2\n").unwrap();
+        fs::write(temp.path().join("lake-manifest.json"), "{\"packages\":[\"mathlib\"]}\n").unwrap();
+        let changed_manifest =
+            serde_json::to_string(&index_cache_key(&request_for(workspace.clone(), "A"), &version).unwrap()).unwrap();
+        assert_ne!(first, changed_manifest);
+
+        fs::write(temp.path().join("lake-manifest.json"), "{\"packages\":[]}\n").unwrap();
+        fs::write(
+            temp.path().join("lakefile.toml"),
+            "[[lean_lib]]\nname = \"A\"\nmoreLinkArgs = []\n",
+        )
+        .unwrap();
+        let changed_lakefile =
+            serde_json::to_string(&index_cache_key(&request_for(workspace, "A"), &version).unwrap()).unwrap();
+        assert_ne!(first, changed_lakefile);
     }
 
     #[test]

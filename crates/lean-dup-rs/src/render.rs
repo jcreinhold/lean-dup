@@ -1,5 +1,6 @@
 use std::io::Write;
 
+use crate::cache_lifecycle::CacheCleanupReport;
 use crate::cli::{OutputFormat, ReviewProfile};
 use crate::commands::{AuditReport, DiffReport, DoctorReport, IndexReport, Outcome, Report, ShowReport};
 use crate::error::Result;
@@ -53,6 +54,7 @@ fn write_report<E: Write>(reporter: &mut Reporter, stderr: &mut E) -> Result<()>
 fn render_text(report: &Report) -> String {
     match report {
         Report::Doctor(report) => render_doctor(report),
+        Report::CacheCleanup(report) => render_cache_cleanup(report),
         Report::Index(report) => render_index("index", report),
         Report::IndexMathlib(report) => render_index("index-mathlib", report),
         Report::Show(report) => render_show(report),
@@ -92,8 +94,31 @@ fn render_doctor(report: &DoctorReport) -> String {
         format!("source files: {}", report.source_count),
         format!("cache root: {}", report.cache_root.display()),
         format!("cache fingerprint: {}", report.cache_fingerprint),
+        format!("cache labels: {}", report.cache.labels.len()),
+        format!("cache disk bytes: {}", report.cache.total_disk_bytes),
         format!("lean: {}", report.lean_version),
     ];
+    for label in &report.cache.labels {
+        lines.push(format!(
+            "cache label {}: latest={:?} entries={} bytes={}",
+            label.label,
+            label.latest.status,
+            label.entries.len(),
+            label.disk_bytes
+        ));
+        for entry in &label.entries {
+            lines.push(format!(
+                "  {}: status={:?} active={} expected={} schema={} provenance={:?} bytes={}",
+                entry.index_dir.display(),
+                entry.status,
+                entry.active_latest,
+                entry.expected_current,
+                entry.schema_version.as_deref().unwrap_or("missing"),
+                entry.provenance_kind,
+                entry.disk_bytes
+            ));
+        }
+    }
     if report.require_oleans {
         if report.missing_oleans.is_empty() {
             lines.push("oleans: ok".to_owned());
@@ -110,6 +135,36 @@ fn render_doctor(report: &DoctorReport) -> String {
                     .join(", ")
             ));
         }
+    }
+    lines.join("\n")
+}
+
+fn render_cache_cleanup(report: &CacheCleanupReport) -> String {
+    let mut lines = vec![
+        "command: cache-cleanup".to_owned(),
+        format!("status: {}", report.status),
+        format!("cache root: {}", report.cache_root.display()),
+        format!("executed: {}", report.executed),
+        format!("removable entries: {}", report.removable_count),
+        format!("protected entries: {}", report.protected_count),
+        format!("bytes to remove: {}", report.bytes_to_remove),
+        format!("bytes removed: {}", report.bytes_removed),
+    ];
+    for entry in &report.removed_entries {
+        lines.push(format!(
+            "  removable {} {} bytes ({})",
+            entry.index_dir.display(),
+            entry.disk_bytes,
+            entry.reason
+        ));
+    }
+    for entry in &report.protected_entries {
+        lines.push(format!(
+            "  protected {} {} bytes ({})",
+            entry.index_dir.display(),
+            entry.disk_bytes,
+            entry.reason
+        ));
     }
     lines.join("\n")
 }

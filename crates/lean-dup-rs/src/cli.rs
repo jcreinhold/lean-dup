@@ -20,6 +20,8 @@ pub(crate) struct Cli {
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
     Doctor(DoctorArgs),
+    #[command(name = "cache-cleanup", hide = true)]
+    CacheCleanup(CacheCleanupArgs),
     Index(IndexArgs),
     #[command(name = "index-mathlib")]
     IndexMathlib(IndexMathlibArgs),
@@ -39,8 +41,29 @@ pub(crate) struct DoctorArgs {
     #[arg(long = "module")]
     pub(crate) module_root: Option<String>,
 
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub(crate) format: OutputFormat,
+
     #[arg(long)]
     pub(crate) require_oleans: bool,
+}
+
+#[derive(Debug, Clone, clap::Args)]
+pub(crate) struct CacheCleanupArgs {
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub(crate) format: OutputFormat,
+
+    #[arg(long)]
+    pub(crate) cache_root: Option<PathBuf>,
+
+    #[arg(long)]
+    pub(crate) workspace: Option<PathBuf>,
+
+    #[arg(long = "module")]
+    pub(crate) module_root: Option<String>,
+
+    #[arg(long)]
+    pub(crate) execute: bool,
 }
 
 #[derive(Debug, Clone, clap::Args)]

@@ -5,9 +5,10 @@ use serde::Serialize;
 
 use crate::baseline::{self, BaselineDiff};
 use crate::cache::{self, CacheFacts};
+use crate::cache_lifecycle::{CacheCleanupReport, CacheDiagnostics, CleanupPolicy};
 use crate::cli::{
-    AuditArgs, Cli, Command, DiffArgs, DoctorArgs, EvalArgs, EvalFormat, IndexArgs, IndexMathlibArgs, OutputFormat,
-    ReviewProfile, ShowArgs,
+    AuditArgs, CacheCleanupArgs, Cli, Command, DiffArgs, DoctorArgs, EvalArgs, EvalFormat, IndexArgs, IndexMathlibArgs,
+    OutputFormat, ReviewProfile, ShowArgs,
 };
 use crate::error::Result;
 use crate::eval::{EvalRequest, EvaluationReport};
@@ -43,6 +44,7 @@ pub(crate) struct Outcome {
 #[serde(tag = "command", rename_all = "kebab-case")]
 pub(crate) enum Report {
     Doctor(DoctorReport),
+    CacheCleanup(CacheCleanupReport),
     Index(IndexReport),
     IndexMathlib(IndexReport),
     Audit(Box<AuditReport>),
@@ -63,6 +65,7 @@ pub(crate) struct DoctorReport {
     pub(crate) source_count: usize,
     pub(crate) cache_root: PathBuf,
     pub(crate) cache_fingerprint: String,
+    pub(crate) cache: CacheDiagnostics,
     pub(crate) lean_version: String,
     pub(crate) require_oleans: bool,
     pub(crate) missing_oleans: Vec<String>,
@@ -176,7 +179,14 @@ const INDEX_WORKER_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 pub(crate) fn run(cli: Cli) -> Result<Outcome> {
     let mut reporter = Reporter::new_live(cli.progress, cli.profile);
     let (report, output_format, output_path) = match cli.command {
-        Command::Doctor(args) => (Report::Doctor(doctor(args, &mut reporter)?), OutputFormat::Text, None),
+        Command::Doctor(args) => {
+            let format = args.format;
+            (Report::Doctor(doctor(args, &mut reporter)?), format, None)
+        }
+        Command::CacheCleanup(args) => {
+            let format = args.format;
+            (Report::CacheCleanup(cache_cleanup(args, &mut reporter)?), format, None)
+        }
         Command::Index(args) => (Report::Index(index(args, &mut reporter)?), OutputFormat::Text, None),
         Command::IndexMathlib(args) => (
             Report::IndexMathlib(index_mathlib(args, &mut reporter)?),
@@ -222,6 +232,24 @@ fn doctor(args: DoctorArgs, reporter: &mut Reporter) -> Result<DoctorReport> {
         .into_iter()
         .next()
         .expect("worker version returns one version row");
+    let store = IndexStore::new(foundation.cache.root.clone());
+    let current_index = store.expected_entry(
+        &IndexBuildRequest {
+            workspace: foundation.workspace.clone(),
+            execution_root: None,
+            label: "audit-workspace".to_owned(),
+            module_root: foundation.workspace.selected_roots.join(","),
+            origin: "workspace".to_owned(),
+            include_private: true,
+            include_generated: false,
+            require_oleans: false,
+            force: false,
+            kind: IndexBuildKind::Local,
+        },
+        &worker_version,
+    )?;
+    let cache_diagnostics =
+        crate::cache_lifecycle::diagnose_cache(foundation.cache.root.clone(), &[current_index], &store)?;
     let missing_oleans = if args.require_oleans {
         missing_oleans(&foundation.workspace)
     } else {
@@ -238,12 +266,53 @@ fn doctor(args: DoctorArgs, reporter: &mut Reporter) -> Result<DoctorReport> {
         source_count: foundation.workspace.source_files.len(),
         cache_root: foundation.cache.root,
         cache_fingerprint: foundation.cache.fingerprint,
+        cache: cache_diagnostics,
         lean_version: worker_version
             .lean_version
             .unwrap_or_else(|| "unknown Lean version".to_owned()),
         require_oleans: args.require_oleans,
         missing_oleans,
     })
+}
+
+fn cache_cleanup(args: CacheCleanupArgs, reporter: &mut Reporter) -> Result<CacheCleanupReport> {
+    let cache_root = args.cache_root.unwrap_or_else(cache::cache_root);
+    let store = IndexStore::new(cache_root.clone());
+    let expected_entries = if let Some(workspace_root) = args.workspace {
+        let workspace = workspace::resolve(
+            WorkspaceRequest {
+                requested_root: workspace_root,
+                module_root: args.module_root,
+            },
+            reporter,
+        )?;
+        let version_call = WorkerClient::with_timeout(Duration::from_secs(60)).version(workspace.root.clone())?;
+        let worker_version = version_call
+            .rows
+            .into_iter()
+            .next()
+            .ok_or_else(|| crate::error::Error::Index {
+                message: "worker version returned no rows".to_owned(),
+            })?;
+        vec![store.expected_entry(
+            &IndexBuildRequest {
+                workspace: workspace.clone(),
+                execution_root: None,
+                label: "audit-workspace".to_owned(),
+                module_root: workspace.selected_roots.join(","),
+                origin: "workspace".to_owned(),
+                include_private: true,
+                include_generated: false,
+                require_oleans: false,
+                force: false,
+                kind: IndexBuildKind::Local,
+            },
+            &worker_version,
+        )?]
+    } else {
+        Vec::new()
+    };
+    crate::cache_lifecycle::cleanup_cache(cache_root, &expected_entries, CleanupPolicy { execute: args.execute })
 }
 
 fn index(args: IndexArgs, reporter: &mut Reporter) -> Result<IndexReport> {
