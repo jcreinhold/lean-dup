@@ -1,0 +1,122 @@
+use std::collections::BTreeMap;
+
+use rustc_hash::FxHashSet;
+use serde::Serialize;
+
+use lean_dup_index::{HydratedDeclaration, OpenedIndex};
+
+use crate::Result;
+use crate::retrieval::{CandidateExplanation, KeyContribution, RetrievalDiagnostics, retrieve_candidates};
+
+/// Request for search-stage observations used by offline evaluation.
+///
+/// The search crate owns retrieval keys and contribution mapping. Evaluation
+/// receives stable pair, origin, queue, and feature-family facts without
+/// depending on retrieval internals.
+pub struct SearchObservationRequest<'a> {
+    pub workspace: &'a [HydratedDeclaration],
+    pub comparison_indexes: &'a [OpenedIndex],
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SearchObservation {
+    pub pairs: Vec<SearchObservedPair>,
+    pub visible_groups_found: usize,
+    pub visible_groups_total: usize,
+    pub retrieval: RetrievalDiagnostics,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SearchObservedPair {
+    pub left: String,
+    pub right: String,
+    pub rank: usize,
+    pub shown: bool,
+    pub origin: String,
+    pub feature_families: Vec<String>,
+    pub survived_shown_filter: bool,
+}
+
+pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObservation> {
+    let output = retrieve_candidates(request.workspace, request.comparison_indexes)?;
+    let mut pairs = Vec::new();
+    for set in &output.candidate_sets {
+        for (index, candidate) in set.candidates.iter().enumerate() {
+            let shown = is_shown_queue_candidate(&candidate.explanation);
+            pairs.push(SearchObservedPair {
+                left: set.anchor.qualified_name.clone(),
+                right: candidate.declaration.qualified_name.clone(),
+                rank: index + 1,
+                shown,
+                origin: candidate.declaration.origin.clone(),
+                feature_families: feature_families(&candidate.explanation.contributions),
+                survived_shown_filter: shown,
+            });
+        }
+    }
+    let visible_groups_found = output
+        .candidate_sets
+        .iter()
+        .filter(|set| {
+            set.candidates
+                .iter()
+                .any(|candidate| is_shown_queue_candidate(&candidate.explanation))
+        })
+        .count();
+    let visible_groups_total = output.candidate_sets.len();
+    Ok(SearchObservation {
+        pairs,
+        visible_groups_found,
+        visible_groups_total,
+        retrieval: output.diagnostics,
+    })
+}
+
+fn is_shown_queue_candidate(explanation: &CandidateExplanation) -> bool {
+    explanation.contributions.iter().any(|contribution| {
+        matches!(
+            contribution.kind.as_str(),
+            "statement-fingerprint" | "safe-permutation-fingerprint" | "connective-fingerprint"
+        )
+    })
+}
+
+fn feature_families(contributions: &[KeyContribution]) -> Vec<String> {
+    let mut families = contributions
+        .iter()
+        .map(feature_family)
+        .collect::<FxHashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if families.is_empty() {
+        families.push("unknown".to_owned());
+    }
+    families.sort();
+    families
+}
+
+fn feature_family(contribution: &KeyContribution) -> String {
+    match contribution.kind.as_str() {
+        "statement-fingerprint" => "statement_fingerprint".to_owned(),
+        "safe-permutation-fingerprint" => "safe_permutation_fingerprint".to_owned(),
+        "connective-fingerprint" => "connective_fingerprint".to_owned(),
+        "conclusion-fingerprint" => "conclusion_fingerprint".to_owned(),
+        "role-feature" => match contribution.role.as_deref() {
+            Some("conclusion_const") => "role_conclusion_const".to_owned(),
+            Some("hypothesis_const") => "role_hypothesis_const".to_owned(),
+            Some("conclusion_head" | "hypothesis_head" | "binder_domain_head") => "role_head".to_owned(),
+            _ => "role_other".to_owned(),
+        },
+        _ => "other".to_owned(),
+    }
+}
+
+pub fn count_by_feature_family(pairs: &[SearchObservedPair]) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for pair in pairs {
+        for family in &pair.feature_families {
+            *counts.entry(family.clone()).or_insert(0) += 1;
+        }
+    }
+    counts
+}

@@ -118,12 +118,6 @@ pub struct AuditArgs {
     #[arg(long = "no-include-private", action = clap::ArgAction::SetFalse)]
     pub no_include_private: bool,
 
-    #[arg(long)]
-    pub include_imports: bool,
-
-    #[arg(long = "import-root")]
-    pub import_roots: Vec<String>,
-
     #[arg(long = "compare-index")]
     pub compare_indexes: Vec<String>,
 
@@ -133,17 +127,11 @@ pub struct AuditArgs {
     #[arg(long)]
     pub mathlib_workspace: Option<PathBuf>,
 
-    #[arg(long, default_value_t = 0.78)]
-    pub threshold: f64,
-
     #[arg(long)]
     pub include_generated: bool,
 
     #[arg(long)]
     pub show_noise: bool,
-
-    #[arg(long, value_enum, default_value_t = ReviewPriority::Low)]
-    pub min_priority: ReviewPriority,
 
     #[arg(long = "review-profile", value_enum, default_value_t = CliReviewProfile::Mathlib)]
     pub review_profile: CliReviewProfile,
@@ -162,9 +150,6 @@ pub struct AuditArgs {
 
     #[arg(long = "probe-chunk-size", hide = true, default_value_t = 16)]
     pub probe_chunk_size: usize,
-
-    #[arg(long = "no-replacement-hints", action = clap::ArgAction::SetFalse)]
-    pub replacement_hints: bool,
 }
 
 #[derive(Debug, Clone, clap::Args)]
@@ -238,15 +223,6 @@ pub struct DiffArgs {
 pub enum OutputFormat {
     Text,
     Json,
-}
-
-#[derive(Debug, Clone, Copy, ValueEnum, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ReviewPriority {
-    High,
-    Medium,
-    Low,
-    Noise,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]

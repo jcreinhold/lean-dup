@@ -404,6 +404,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror",
  "toml",
 ]
 
@@ -411,12 +412,9 @@ dependencies = [
 name = "lean-dup-diagnostics"
 version = "0.1.0"
 dependencies = [
- "lean-dup-worker",
- "rusqlite",
  "serde",
  "serde_json",
  "thiserror",
- "toml",
 ]
 
 [[package]]
@@ -432,6 +430,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror",
  "walkdir",
 ]
 
@@ -448,6 +447,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+ "thiserror",
  "toml",
  "walkdir",
 ]
@@ -459,6 +459,7 @@ dependencies = [
  "lean-dup-diagnostics",
  "serde",
  "tempfile",
+ "thiserror",
  "toml",
  "walkdir",
 ]
@@ -473,6 +474,7 @@ dependencies = [
  "lean-dup-search",
  "serde",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -488,6 +490,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+ "thiserror",
 ]
 
 [[package]]

@@ -9,13 +9,15 @@ use walkdir::WalkDir;
 
 use lean_dup_diagnostics::perf::{self, CostClass};
 use lean_dup_diagnostics::progress::Reporter;
-use lean_dup_diagnostics::{Error, Result, read, read_to_string};
+use lean_dup_diagnostics::{read, read_to_string};
 use lean_dup_project::workspace::{self, ResolvedWorkspace};
 use lean_dup_worker::{
     DeclarationRow, ExtractBatch, FeatureRow, FeaturesBatch, Fingerprints, IndexBatch, IndexStreamItem,
     ModuleDescriptor, ProbePair, ProbeResult, RoleFeature, SourceSpan, WorkerClient, WorkerDiagnostic, WorkerError,
     WorkerEvent, WorkerVersion,
 };
+
+use crate::{Error, Result};
 
 pub const INDEX_SCHEMA_VERSION: &str = "lean-dup.index.sqlite.v1";
 const INDEX_PROVENANCE_VERSION: &str = "lean-dup.index.provenance.v1";

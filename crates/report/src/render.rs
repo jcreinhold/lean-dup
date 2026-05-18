@@ -1,9 +1,10 @@
-use lean_dup_index::CacheCleanupReport;
 use lean_dup_search::ReviewProfile;
-use lean_dup_search::{RankedGroup, ReviewAction, ReviewEvidenceMode, ReviewPriority, ReviewRelation};
 
 use crate::report_contract::GroupExplanation;
-use crate::reports::{AuditReport, DiffReport, DoctorReport, IndexReport, PerfReport, Report, ShowReport};
+use crate::reports::{
+    AuditReport, CacheCleanupReportDto, DiffReport, DoctorReport, IndexReport, PerfReport, Report, ReviewGroupReport,
+    ShowReport,
+};
 
 pub fn render_text(report: &Report) -> String {
     match report {
@@ -54,7 +55,7 @@ fn render_doctor(report: &DoctorReport) -> String {
     ];
     for label in &report.cache.labels {
         lines.push(format!(
-            "cache label {}: latest={:?} entries={} bytes={}",
+            "cache label {}: latest={} entries={} bytes={}",
             label.label,
             label.latest.status,
             label.entries.len(),
@@ -62,7 +63,7 @@ fn render_doctor(report: &DoctorReport) -> String {
         ));
         for entry in &label.entries {
             lines.push(format!(
-                "  {}: status={:?} active={} expected={} schema={} provenance={:?} bytes={}",
+                "  {}: status={} active={} expected={} schema={} provenance={} bytes={}",
                 entry.index_dir.display(),
                 entry.status,
                 entry.active_latest,
@@ -93,7 +94,7 @@ fn render_doctor(report: &DoctorReport) -> String {
     lines.join("\n")
 }
 
-fn render_cache_cleanup(report: &CacheCleanupReport) -> String {
+fn render_cache_cleanup(report: &CacheCleanupReportDto) -> String {
     let mut lines = vec![
         "command: cache-cleanup".to_owned(),
         format!("status: {}", report.status),
@@ -205,10 +206,8 @@ fn render_audit(report: &AuditReport) -> String {
         format!("cache root: {}", report.cache_root.display()),
         format!("cache fingerprint: {}", report.cache_fingerprint),
         format!("include private: {}", report.include_private),
-        format!("include imports: {}", report.include_imports),
         format!("compare mathlib: {}", report.compare_mathlib),
         format!("review profile: {}", review_profile_label(report.review_profile)),
-        format!("threshold: {}", report.threshold),
         format!("candidates: {}", report.retrieval.candidate_count),
         format!(
             "comparison provenance: {}",
@@ -241,7 +240,7 @@ fn render_audit(report: &AuditReport) -> String {
             report.profile_counts.api_design,
             report.profile_counts.noise
         ),
-        format!("suppressed groups: {}", report.review.suppressed.len()),
+        format!("suppressed groups: {}", report.review.suppressed_count),
         format!("message: {}", report.message),
     ];
     if let Some(path) = &report.saved_baseline {
@@ -255,52 +254,34 @@ fn render_audit(report: &AuditReport) -> String {
             .unwrap_or_default();
         lines.push(format!(
             "{}: {} {} {}{}",
-            group.id,
-            priority_label(group.review_priority),
-            action_label(group.recommended_action),
-            relation_label(group.relation),
-            target
+            group.id, group.review_priority, group.recommended_action, group.relation, target
         ));
         if let Some(hint) = &group.replacement_hint {
             lines.push(format!(
-                "  hint: import={:?} callers={} target_module={}",
+                "  hint: import={} callers={} target_module={}",
                 hint.import_status, hint.caller_count, hint.target_module
             ));
         }
         if !group.blockers.is_empty() {
             lines.push(format!("  blockers: {}", group.blockers.join(", ")));
         }
-        lines.push(format!(
-            "  evidence mode: {}",
-            review_evidence_mode_label(group.evidence_mode)
-        ));
+        lines.push(format!("  evidence mode: {}", group.evidence_mode));
     }
     lines.join("\n")
 }
 
-fn review_evidence_mode_label(mode: ReviewEvidenceMode) -> &'static str {
-    match mode {
-        ReviewEvidenceMode::Static => "static",
-        ReviewEvidenceMode::SourceBackedNotImportable => "source-backed-not-importable",
-        ReviewEvidenceMode::ProofGrade => "proof-grade",
-    }
-}
-
-fn push_group_detail(lines: &mut Vec<String>, group: &RankedGroup) {
+fn push_group_detail(lines: &mut Vec<String>, group: &ReviewGroupReport) {
     lines.push(format!("group: {}", group.id));
-    lines.push(format!("priority: {}", priority_label(group.review_priority)));
-    lines.push(format!("action: {}", action_label(group.recommended_action)));
-    lines.push(format!("relation: {}", relation_label(group.relation)));
+    lines.push(format!("priority: {}", group.review_priority));
+    lines.push(format!("action: {}", group.recommended_action));
+    lines.push(format!("relation: {}", group.relation));
     if let Some(target) = &group.target_decl {
         lines.push(format!("target: {target}"));
     }
     if let Some(module) = &group.target_module {
         lines.push(format!("target module: {module}"));
     }
-    lines.push(format!(
-        "evidence mode: {}",
-        review_evidence_mode_label(group.evidence_mode)
-    ));
+    lines.push(format!("evidence mode: {}", group.evidence_mode));
     lines.push("members:".to_owned());
     for member in &group.members {
         let span = member
@@ -315,7 +296,7 @@ fn push_group_detail(lines: &mut Vec<String>, group: &RankedGroup) {
     }
     lines.push("evidence:".to_owned());
     for evidence in &group.evidence {
-        lines.push(format!("  {}", evidence.summary()));
+        lines.push(format!("  {}", evidence.summary));
     }
     if !group.signals.is_empty() {
         lines.push(format!("signals: {}", group.signals.join(", ")));
@@ -332,7 +313,7 @@ fn push_group_detail(lines: &mut Vec<String>, group: &RankedGroup) {
     }
     if let Some(hint) = &group.replacement_hint {
         lines.push(format!("replacement: {}", hint.target_decl));
-        lines.push(format!("import status: {:?}", hint.import_status).to_ascii_lowercase());
+        lines.push(format!("import status: {}", hint.import_status));
         lines.push(format!("callers: {}", hint.caller_count));
         for caller in &hint.displayed_callers {
             lines.push(format!(
@@ -359,10 +340,7 @@ fn push_group_explanation(lines: &mut Vec<String>, explanation: &GroupExplanatio
     lines.push("explanation:".to_owned());
     lines.push(format!("  visibility: {}", explanation.visibility));
     lines.push(format!("  why visible or hidden: {}", explanation.visibility_reason));
-    lines.push(format!(
-        "  evidence mode: {}",
-        review_evidence_mode_label(explanation.evidence_mode)
-    ));
+    lines.push(format!("  evidence mode: {}", explanation.evidence_mode));
     lines.push(format!("  static/proof evidence: {}", explanation.evidence_summary));
     lines.push(format!("  semantic evidence: {}", explanation.semantic_summary));
     lines.push(format!("  blockers: {}", explanation.blocker_summary));
@@ -372,44 +350,11 @@ fn push_group_explanation(lines: &mut Vec<String>, explanation: &GroupExplanatio
     ));
 }
 
-fn priority_label(priority: ReviewPriority) -> &'static str {
-    match priority {
-        ReviewPriority::High => "high",
-        ReviewPriority::Medium => "medium",
-        ReviewPriority::Low => "low",
-        ReviewPriority::Noise => "noise",
-    }
-}
-
 fn review_profile_label(profile: ReviewProfile) -> &'static str {
     match profile {
         ReviewProfile::Mathlib => "mathlib",
         ReviewProfile::Internal => "internal",
         ReviewProfile::ApiDesign => "api-design",
         ReviewProfile::Noise => "noise",
-    }
-}
-
-fn action_label(action: ReviewAction) -> &'static str {
-    match action {
-        ReviewAction::AlreadyInMathlib => "already-in-mathlib",
-        ReviewAction::LocalAlias => "local-alias",
-        ReviewAction::ReplaceLocalUses => "replace-local-uses",
-        ReviewAction::MergeGeneralization => "merge-generalization",
-        ReviewAction::SpecializationOf => "specialization-of",
-        ReviewAction::ProbableSourceClone => "probable-source-clone",
-        ReviewAction::ManualReview => "manual-review",
-    }
-}
-
-fn relation_label(relation: ReviewRelation) -> &'static str {
-    match relation {
-        ReviewRelation::ExactStatement => "exact-statement",
-        ReviewRelation::PermutedStatement => "permuted-statement",
-        ReviewRelation::ConnectiveEquivalent => "connective-equivalent",
-        ReviewRelation::Specialization => "specialization",
-        ReviewRelation::SourceClone => "source-clone",
-        ReviewRelation::SubsumptionCandidate => "subsumption-candidate",
-        ReviewRelation::NearStatement => "near-statement",
     }
 }

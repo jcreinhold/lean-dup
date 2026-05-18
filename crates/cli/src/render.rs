@@ -2,9 +2,9 @@ use std::io::Write;
 
 use crate::cli::OutputFormat;
 use crate::commands::Outcome;
+use crate::error::{AppError, Result};
 use lean_dup_diagnostics::perf::{self, CostClass};
 use lean_dup_diagnostics::progress::{Reporter, format_progress_event};
-use lean_dup_diagnostics::{Error, Result};
 
 pub fn write_outcome<O: Write, E: Write>(mut outcome: Outcome, stdout: &mut O, stderr: &mut E) -> Result<()> {
     perf::measure_result(CostClass::Reporting, "report.render", || {
@@ -15,13 +15,13 @@ pub fn write_outcome<O: Write, E: Write>(mut outcome: Outcome, stdout: &mut O, s
         };
         if let Some(path) = outcome.output_path {
             if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).map_err(|source| Error::Io {
+                std::fs::create_dir_all(parent).map_err(|source| AppError::Io {
                     message: "could not create CLI output directory",
                     path: parent.to_path_buf(),
                     source,
                 })?;
             }
-            std::fs::write(&path, format!("{rendered}\n")).map_err(|source| Error::Io {
+            std::fs::write(&path, format!("{rendered}\n")).map_err(|source| AppError::Io {
                 message: "could not write CLI output file",
                 path,
                 source,

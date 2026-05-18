@@ -7,8 +7,7 @@ use sha2::{Digest, Sha256};
 
 use crate::ranking::{ConfidenceTier, RankedReview, ReviewAction, ReviewPriority, ReviewRelation};
 use crate::retrieval::{CandidateSet, RetrievedCandidate};
-use crate::{ProbePolicy, ReviewProfile};
-use lean_dup_diagnostics::Result;
+use crate::{ProbePolicy, Result, ReviewProfile};
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_index::ComparisonEvidencePolicy;
 use lean_dup_index::{HydratedDeclaration, OpenedIndex, ProbeCacheEntry};

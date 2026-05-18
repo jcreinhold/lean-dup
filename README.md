@@ -49,12 +49,9 @@ descendants.
 Useful audit flags:
 
 - `--public-only`: exclude private declarations from the report.
-- `--include-imports`: compare workspace declarations with direct imports.
-- `--import-root Mathlib.Some.Module`: compare with an additional named module.
 - `--compare-mathlib`: compare workspace declarations with the cached mathlib index.
-- `--threshold 0.82`: adjust the near-duplicate threshold.
+- `--compare-index LABEL`: compare workspace declarations with a named cached external index.
 - `--profile`: include extraction and classification timings in the report.
-- `--no-replacement-hints`: skip import/replacement hint generation.
 
 Project and mathlib indexes are cached under the resolved `lean-dup` cache root; shared project-pinned mathlib indexes
 default to `~/.cache/lean-dup`. For confirmed external matches, text and JSON reports include read-only replacement

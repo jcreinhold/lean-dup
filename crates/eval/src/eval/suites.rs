@@ -10,13 +10,14 @@ use crate::eval::memory;
 use crate::eval::scoring::{
     CountMetric, EvaluationMetrics, GoldPair, ObservedPair, ObservedRun, RecallAtK, TimingMetrics, score_run,
 };
-use crate::eval::stage_metrics::{SemanticVerificationStageMetrics, feature_families};
+use crate::eval::stage_metrics::SemanticVerificationStageMetrics;
 use lean_dup_diagnostics::progress::Reporter;
-use lean_dup_diagnostics::{Error, Result};
 use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
 use lean_dup_project::workspace::{WorkspaceRequest, resolve};
-use lean_dup_search::{CandidateExplanation, RetrievalOutput, retrieve_candidates};
+use lean_dup_search::observation::{SearchObservation, SearchObservationRequest, observe_search};
 use lean_dup_worker::WorkerClient;
+
+use crate::{Error, Result};
 
 #[derive(Debug, Clone)]
 pub struct EvalRequest {
@@ -129,9 +130,15 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<Evaluatio
     let index_load_ms = index_started.elapsed().as_millis();
 
     let retrieval_started = Instant::now();
-    let output = match external {
-        Some(external) => retrieve_candidates(&workspace_rows, &[external])?,
-        None => retrieve_candidates(&workspace_rows, &[])?,
+    let output = match &external {
+        Some(external) => observe_search(SearchObservationRequest {
+            workspace: &workspace_rows,
+            comparison_indexes: std::slice::from_ref(external),
+        })?,
+        None => observe_search(SearchObservationRequest {
+            workspace: &workspace_rows,
+            comparison_indexes: &[],
+        })?,
     };
     let retrieval_ms = retrieval_started.elapsed().as_millis();
 
@@ -139,16 +146,8 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<Evaluatio
         suite: labels.suite.clone(),
         pairs: observed_pairs(&output),
         visible_groups: CountMetric {
-            found: output
-                .candidate_sets
-                .iter()
-                .filter(|set| {
-                    set.candidates
-                        .iter()
-                        .any(|candidate| is_shown_queue_candidate(&candidate.explanation))
-                })
-                .count(),
-            total: output.candidate_sets.len(),
+            found: output.visible_groups_found,
+            total: output.visible_groups_total,
         },
         probe_unavailable: CountMetric { found: 0, total: 0 },
         semantic_verification: SemanticVerificationStageMetrics::default(),
@@ -455,7 +454,7 @@ fn build_or_load_project_mathlib_index(
         &WorkerClient::for_indexing(),
         reporter,
     )?;
-    store.resolve(IndexReference::Label(external.label.clone()))
+    Ok(store.resolve(IndexReference::Label(external.label.clone()))?)
 }
 
 fn build_or_load_index(
@@ -490,7 +489,7 @@ fn build_or_load_index(
         &WorkerClient::for_indexing(),
         reporter,
     )?;
-    store.resolve(IndexReference::Label(request.label.to_owned()))
+    Ok(store.resolve(IndexReference::Label(request.label.to_owned()))?)
 }
 
 fn lake_build(workspace_root: &Path) -> Result<()> {
@@ -517,34 +516,19 @@ fn lake_build(workspace_root: &Path) -> Result<()> {
     }
 }
 
-fn observed_pairs(output: &RetrievalOutput) -> Vec<ObservedPair> {
-    let mut pairs = Vec::new();
-    for set in &output.candidate_sets {
-        for (index, candidate) in set.candidates.iter().enumerate() {
-            let shown = is_shown_queue_candidate(&candidate.explanation);
-            pairs.push(ObservedPair {
-                pair: GoldPair::new(
-                    set.anchor.qualified_name.clone(),
-                    candidate.declaration.qualified_name.clone(),
-                ),
-                rank: index + 1,
-                shown,
-                origin: candidate.declaration.origin.clone(),
-                feature_families: feature_families(&candidate.explanation.contributions),
-                survived_shown_filter: shown,
-            });
-        }
-    }
-    pairs
-}
-
-fn is_shown_queue_candidate(explanation: &CandidateExplanation) -> bool {
-    explanation.contributions.iter().any(|contribution| {
-        matches!(
-            contribution.kind.as_str(),
-            "statement-fingerprint" | "safe-permutation-fingerprint" | "connective-fingerprint"
-        )
-    })
+fn observed_pairs(output: &SearchObservation) -> Vec<ObservedPair> {
+    output
+        .pairs
+        .iter()
+        .map(|pair| ObservedPair {
+            pair: GoldPair::new(pair.left.clone(), pair.right.clone()),
+            rank: pair.rank,
+            shown: pair.shown,
+            origin: pair.origin.clone(),
+            feature_families: pair.feature_families.clone(),
+            survived_shown_filter: pair.survived_shown_filter,
+        })
+        .collect()
 }
 
 fn enforce_suite_gates(definition: &SuiteDefinition, labels: &GoldLabels, metrics: &EvaluationMetrics) -> Result<()> {

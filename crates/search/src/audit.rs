@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use lean_dup_diagnostics::Result;
 use lean_dup_diagnostics::perf::{self, CostClass};
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_index::{self, CacheFacts};
@@ -11,15 +10,22 @@ use lean_dup_project::workspace::{ResolvedWorkspace, WorkspaceRequest};
 use lean_dup_worker::WorkerClient;
 
 use crate::baseline;
-use crate::ranking::{RankedReview, RankingInput, RankingProfile, ReviewFilter, ReviewPriority, rank_candidates};
+use crate::ranking::{RankingInput, RankingProfile, rank_candidates};
 use crate::replacement_hints::{ReplacementHintProfile, attach_replacement_hints, reference_declarations_for_hints};
-use crate::retrieval::{RetrievalDiagnostics, retrieve_candidates};
+use crate::retrieval::retrieve_candidates;
 use crate::semantic_verification::{
-    ProbeDiagnostics, ProbeSettings, SemanticVerificationInput, VerificationIndex, candidate_sets_for_review,
-    verify_candidate_probes,
+    ProbeSettings, SemanticVerificationInput, VerificationIndex, candidate_sets_for_review, verify_candidate_probes,
 };
 use crate::source_refs::{SourceFactInput, collect_source_facts};
-use crate::{ProbePolicy, ReviewProfile};
+use crate::{ProbePolicy, Result, ReviewProfile};
+
+pub use crate::ranking::{
+    ConfidenceTier, RankedGroup, RankedReview, RankingDiagnostics, ReviewAction, ReviewEvidence, ReviewEvidenceMode,
+    ReviewFilter, ReviewMember, ReviewPriority, ReviewRelation, SuppressedGroup,
+};
+pub use crate::replacement_hints::ReplacementHint;
+pub use crate::retrieval::RetrievalDiagnostics;
+pub use crate::semantic_verification::ProbeDiagnostics;
 
 /// Request for a complete duplicate-audit computation.
 ///
@@ -32,15 +38,11 @@ pub struct AuditRequest {
     pub workspace: PathBuf,
     pub module_root: Option<String>,
     pub include_private: bool,
-    pub include_imports: bool,
-    pub import_roots: Vec<String>,
     pub compare_indexes: Vec<String>,
     pub compare_mathlib: bool,
     pub mathlib_workspace: Option<PathBuf>,
-    pub threshold: f64,
     pub include_generated: bool,
     pub show_noise: bool,
-    pub min_priority: ReviewPriority,
     pub review_profile: ReviewProfile,
     pub save_baseline: Option<String>,
     pub semantic_probes: bool,
@@ -59,20 +61,62 @@ pub struct AuditOutput {
     pub cache_root: PathBuf,
     pub cache_fingerprint: String,
     pub include_private: bool,
-    pub include_imports: bool,
-    pub import_roots: Vec<String>,
     pub compare_indexes: Vec<String>,
     pub compare_mathlib: bool,
-    pub threshold: f64,
     pub include_generated: bool,
     pub show_noise: bool,
-    pub min_priority: ReviewPriority,
     pub review_profile: ReviewProfile,
     pub retrieval: RetrievalDiagnostics,
     pub comparison_provenance: Vec<ComparisonProvenanceReport>,
     pub semantic_verification: ProbeDiagnostics,
     pub review: RankedReview,
     pub saved_baseline: Option<PathBuf>,
+}
+
+/// Result of resolving one audit group through the search workflow.
+#[derive(Debug)]
+pub struct ShowOutput {
+    pub audit: AuditOutput,
+    pub group: RankedGroup,
+}
+
+/// Result of comparing the current audit queue against a saved baseline.
+#[derive(Debug)]
+pub struct DiffOutput {
+    pub requested_workspace: PathBuf,
+    pub lake_root: PathBuf,
+    pub selected_roots: Vec<String>,
+    pub source_count: usize,
+    pub cache_root: PathBuf,
+    pub cache_fingerprint: String,
+    pub diff: SearchBaselineDiff,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchBaselineDiff {
+    pub baseline: String,
+    pub baseline_path: PathBuf,
+    pub appeared: Vec<SearchBaselineGroup>,
+    pub disappeared: Vec<SearchBaselineGroup>,
+    pub changed: Vec<SearchBaselineChange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchBaselineGroup {
+    pub id: String,
+    pub relation: String,
+    pub review_priority: String,
+    pub recommended_action: String,
+    pub member_ids: Vec<String>,
+    pub evidence_summary: Vec<String>,
+    pub evidence_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchBaselineChange {
+    pub id: String,
+    pub before: SearchBaselineGroup,
+    pub after: SearchBaselineGroup,
 }
 
 struct Foundation {
@@ -170,12 +214,7 @@ pub fn run_audit(request: AuditRequest, reporter: &mut Reporter) -> Result<Audit
             comparison_policy: &compare.provenance.policy,
         })
     });
-    let filter = review_filter(
-        request.review_profile,
-        request.include_generated,
-        request.show_noise,
-        request.min_priority,
-    );
+    let filter = review_filter(request.review_profile, request.include_generated, request.show_noise);
     let reference_ids = reference_declarations_for_hints(&review_without_references, filter)
         .into_iter()
         .collect::<BTreeSet<_>>();
@@ -217,14 +256,10 @@ pub fn run_audit(request: AuditRequest, reporter: &mut Reporter) -> Result<Audit
         cache_root: foundation.cache.root,
         cache_fingerprint: foundation.cache.fingerprint,
         include_private: request.include_private,
-        include_imports: request.include_imports,
-        import_roots: request.import_roots,
         compare_indexes: request.compare_indexes,
         compare_mathlib: request.compare_mathlib,
-        threshold: request.threshold,
         include_generated: request.include_generated,
         show_noise: request.show_noise,
-        min_priority: request.min_priority,
         review_profile: request.review_profile,
         retrieval: retrieval_output.diagnostics,
         comparison_provenance: compare.provenance.reports,
@@ -234,12 +269,69 @@ pub fn run_audit(request: AuditRequest, reporter: &mut Reporter) -> Result<Audit
     })
 }
 
-pub fn review_filter(
-    profile: ReviewProfile,
-    include_generated: bool,
-    show_noise: bool,
-    _min_priority: ReviewPriority,
-) -> ReviewFilter {
+/// Run an audit and return one ranked group by stable group id.
+pub fn run_show(request: AuditRequest, requested_group: &str, reporter: &mut Reporter) -> Result<ShowOutput> {
+    let audit = run_audit(request, reporter)?;
+    let group = audit
+        .review
+        .groups
+        .iter()
+        .find(|group| group.id == requested_group)
+        .cloned()
+        .ok_or_else(|| crate::Error::Search {
+            message: format!("unknown audit group: {requested_group}"),
+        })?;
+    Ok(ShowOutput { audit, group })
+}
+
+/// Run an audit and compare it with a named saved baseline.
+pub fn run_diff(request: AuditRequest, baseline_name: String, reporter: &mut Reporter) -> Result<DiffOutput> {
+    let audit = run_audit(request, reporter)?;
+    let (baseline_path, saved) = baseline::load(&audit.cache_root, &baseline_name)?;
+    let current = baseline::snapshot(&audit.review, audit.cache_fingerprint.clone());
+    let diff = search_baseline_diff(baseline::diff(baseline_name, baseline_path, saved, current));
+    Ok(DiffOutput {
+        requested_workspace: audit.requested_workspace,
+        lake_root: audit.lake_root,
+        selected_roots: audit.selected_roots,
+        source_count: audit.source_count,
+        cache_root: audit.cache_root,
+        cache_fingerprint: audit.cache_fingerprint,
+        diff,
+    })
+}
+
+fn search_baseline_diff(diff: baseline::BaselineDiff) -> SearchBaselineDiff {
+    SearchBaselineDiff {
+        baseline: diff.baseline,
+        baseline_path: diff.baseline_path,
+        appeared: diff.appeared.into_iter().map(search_baseline_group).collect(),
+        disappeared: diff.disappeared.into_iter().map(search_baseline_group).collect(),
+        changed: diff
+            .changed
+            .into_iter()
+            .map(|change| SearchBaselineChange {
+                id: change.id,
+                before: search_baseline_group(change.before),
+                after: search_baseline_group(change.after),
+            })
+            .collect(),
+    }
+}
+
+fn search_baseline_group(group: baseline::BaselineGroup) -> SearchBaselineGroup {
+    SearchBaselineGroup {
+        id: group.id,
+        relation: group.relation,
+        review_priority: group.review_priority,
+        recommended_action: group.recommended_action,
+        member_ids: group.member_ids,
+        evidence_summary: group.evidence_summary,
+        evidence_digest: group.evidence_digest,
+    }
+}
+
+pub fn review_filter(profile: ReviewProfile, include_generated: bool, show_noise: bool) -> ReviewFilter {
     let profile_filter = match profile {
         ReviewProfile::Mathlib => ReviewFilter {
             include_generated: false,

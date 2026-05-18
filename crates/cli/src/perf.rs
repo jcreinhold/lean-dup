@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::cli::{PerfArgs, PerfWorkload};
+use crate::error::{AppError, Result};
 use lean_dup_diagnostics::perf::{summarize, with_collection};
-use lean_dup_diagnostics::{Error, Result};
 use lean_dup_report::{PerfReport, PerfWorkloadReport};
 
 pub fn run(args: PerfArgs) -> Result<PerfReport> {
@@ -24,13 +24,13 @@ pub fn run(args: PerfArgs) -> Result<PerfReport> {
     };
     if let Some(path) = output_path {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|source| Error::Io {
+            fs::create_dir_all(parent).map_err(|source| AppError::Io {
                 message: "could not create directory",
                 path: parent.to_path_buf(),
                 source,
             })?;
         }
-        fs::write(&path, serde_json::to_string_pretty(&response)?).map_err(|source| Error::Io {
+        fs::write(&path, serde_json::to_string_pretty(&response)?).map_err(|source| AppError::Io {
             message: "could not write file",
             path,
             source,
@@ -140,13 +140,13 @@ fn text_tail(bytes: &[u8]) -> Option<String> {
 
 fn prepare_cache(workload: PerfWorkload, cache_root: &Path) -> Result<()> {
     if matches!(workload, PerfWorkload::ColdMathlibIndex) && cache_root.exists() {
-        fs::remove_dir_all(cache_root).map_err(|source| Error::Io {
+        fs::remove_dir_all(cache_root).map_err(|source| AppError::Io {
             message: "could not remove directory",
             path: cache_root.to_path_buf(),
             source,
         })?;
     }
-    fs::create_dir_all(cache_root).map_err(|source| Error::Io {
+    fs::create_dir_all(cache_root).map_err(|source| AppError::Io {
         message: "could not create directory",
         path: cache_root.to_path_buf(),
         source,

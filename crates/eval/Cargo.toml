@@ -13,6 +13,7 @@ lean-dup-worker = { path = "../worker" }
 rustc-hash = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+thiserror = "2"
 walkdir = "2"
 
 [dev-dependencies]

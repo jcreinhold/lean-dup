@@ -55,6 +55,38 @@ fn index_mathlib_help_has_no_standalone_mathlib_default() {
 }
 
 #[test]
+fn audit_help_omits_removed_noop_flags_and_rejects_them() {
+    let help = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .args(["audit", "--help"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(help.get_output().stdout.clone()).unwrap();
+    for removed in [
+        "--threshold",
+        "--include-imports",
+        "--import-root",
+        "--min-priority",
+        "--replacement-hints",
+    ] {
+        assert!(
+            !stdout.contains(removed),
+            "removed flag {removed} appeared in audit help"
+        );
+    }
+
+    let tiny = repo_root().join("tests/fixtures/tiny");
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .args(["audit", "--workspace"])
+        .arg(tiny)
+        .args(["--threshold", "0.8"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unexpected argument"));
+}
+
+#[test]
 fn hidden_perf_fixture_workload_emits_json_metrics() {
     let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();

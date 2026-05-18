@@ -6,6 +6,7 @@
 
 mod cache;
 mod cache_lifecycle;
+mod error;
 mod external_provenance;
 mod index;
 
@@ -14,8 +15,14 @@ pub use cache_lifecycle::{
     CacheCleanupEntry, CacheCleanupReport, CacheDiagnostics, CacheEntryDiagnostics, CacheEntryStatus,
     CacheLabelDiagnostics, CacheLatestDiagnostics, CacheLatestStatus, CleanupPolicy, cleanup_cache, diagnose_cache,
 };
+pub use error::{Error, Result};
 pub use external_provenance::{
     ComparisonEvidenceMode, ComparisonEvidencePolicy, ComparisonProvenance, ComparisonProvenanceReport,
     resolve as resolve_comparison_provenance,
 };
-pub use index::*;
+pub use index::{
+    CacheStatus, DeclarationHandle, ExpectedIndexEntry, FingerprintKind, FingerprintQuery, HydratedDeclaration,
+    INDEX_SCHEMA_VERSION, IndexBuildKind, IndexBuildRequest, IndexProvenance, IndexProvenanceKind, IndexQuery,
+    IndexReference, IndexStore, IndexSummary, MatchedPosting, OpenedIndex, OpenedIndexFacts, PostingCount, PostingKey,
+    ProbeCacheEntry, RoleFeatureQuery,
+};

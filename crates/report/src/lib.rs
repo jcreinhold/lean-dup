@@ -3,13 +3,17 @@
 //! This crate owns JSON-safe report DTOs, explanation facts, and text wording.
 //! It must not own CLI parsing, worker transport, or storage internals.
 
-pub use lean_dup_diagnostics::{Error, Result};
-
+mod error;
 pub mod render;
-pub mod report_contract;
+mod report_contract;
 pub mod reports;
 
+pub use error::{Error, Result};
+pub use report_contract::{
+    AuditExplanations, ComparisonProvenanceEntry, ComparisonProvenanceExplanation, GroupExplanation,
+    HiddenGroupExplanation, REPORT_SCHEMA_VERSION, SemanticProbeExplanation, VisibleQueueExplanation,
+};
 pub use reports::{
-    AuditReport, DiffReport, DoctorReport, IndexReport, PerfReport, PerfWorkloadReport, Report, ReviewProfileCounts,
-    ShowReport,
+    AuditReport, CacheCleanupReportDto, DiffReport, DoctorReport, IndexReport, PerfReport, PerfWorkloadReport, Report,
+    ReviewProfileCounts, ShowReport,
 };

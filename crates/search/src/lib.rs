@@ -8,21 +8,15 @@ use serde::Serialize;
 
 pub mod audit;
 mod baseline;
+mod error;
+pub mod observation;
 mod ranking;
 mod replacement_hints;
 mod retrieval;
 mod semantic_verification;
 mod source_refs;
 
-pub use baseline::{BaselineChange, BaselineDiff, BaselineGroup, BaselineSnapshot, diff, load, save, snapshot};
-pub use ranking::{
-    ConfidenceTier, RankedGroup, RankedReview, RankingDiagnostics, ReviewAction, ReviewEvidence, ReviewEvidenceMode,
-    ReviewFilter, ReviewMember, ReviewPriority, ReviewRelation, SuppressedGroup,
-};
-pub use retrieval::{
-    CandidateExplanation, KeyContribution, RetrievalDiagnostics, RetrievalOutput, retrieve_candidates,
-};
-pub use semantic_verification::ProbeDiagnostics;
+pub use error::{Error, Result};
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]

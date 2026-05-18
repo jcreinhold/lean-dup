@@ -4,12 +4,13 @@ use std::collections::{BTreeMap, BinaryHeap};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use serde::Serialize;
 
-use lean_dup_diagnostics::Result;
 use lean_dup_diagnostics::perf::{self, CostClass};
 use lean_dup_index::{
     DeclarationHandle, FingerprintKind, FingerprintQuery, HydratedDeclaration, OpenedIndex, PostingKey,
     RoleFeatureQuery,
 };
+
+use crate::Result;
 
 const TOP_K_PER_WORKSPACE_DECLARATION: usize = 80;
 const ROLE_POSTING_LIMIT: usize = 512;
@@ -142,7 +143,10 @@ fn retrieve_candidates_inner(workspace: &[HydratedDeclaration], indexes: &[Opene
     let workspace_plans = workspace.iter().map(planned_keys).collect::<Vec<_>>();
     let local_postings = local_postings(&workspace_plans);
     let local_counts = local_counts(&local_postings);
-    let index_facts = indexes.iter().map(OpenedIndex::facts).collect::<Result<Vec<_>>>()?;
+    let index_facts = indexes
+        .iter()
+        .map(OpenedIndex::facts)
+        .collect::<std::result::Result<Vec<_>, _>>()?;
     let external_counts = external_counts(indexes, &workspace_plans)?;
     let external_postings = external_postings(indexes, &workspace_plans, &external_counts)?;
 

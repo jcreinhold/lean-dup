@@ -12,37 +12,6 @@ pub enum Error {
         source: std::io::Error,
     },
 
-    #[error("workspace does not exist: {0}")]
-    WorkspaceMissing(PathBuf),
-
-    #[error("not a Lake workspace: {0}")]
-    NotLakeWorkspace(PathBuf),
-
-    #[error("could not infer Lean module roots in {0}; pass --module")]
-    NoModuleRoots(PathBuf),
-
-    #[error("no Lean source files found for selected module roots in {0}")]
-    NoSourceFiles(PathBuf),
-
-    #[error("invalid lakefile TOML: {path}")]
-    LakefileToml {
-        path: PathBuf,
-        #[source]
-        source: toml::de::Error,
-    },
-
-    #[error("{0}")]
-    Worker(#[from] lean_dup_worker::WorkerError),
-
-    #[error("index error: {message}")]
-    Index { message: String },
-
-    #[error("evaluation error: {message}")]
-    Eval { message: String },
-
-    #[error("sqlite error")]
-    Sqlite(#[from] rusqlite::Error),
-
     #[error("could not render JSON output")]
     Json(#[from] serde_json::Error),
 

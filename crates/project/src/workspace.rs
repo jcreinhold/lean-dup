@@ -5,7 +5,9 @@ use serde::Serialize;
 use walkdir::WalkDir;
 
 use lean_dup_diagnostics::progress::Reporter;
-use lean_dup_diagnostics::{Error, Result, read_to_string};
+use lean_dup_diagnostics::read_to_string;
+
+use crate::{Error, Result};
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceRequest {

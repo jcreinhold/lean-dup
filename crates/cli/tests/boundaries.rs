@@ -75,16 +75,12 @@ fn dependency_direction_keeps_lower_crates_out_of_report_and_cli() {
             );
         }
         if name == "lean-dup-diagnostics" {
-            for forbidden in [
-                "lean-dup-project",
-                "lean-dup-index",
-                "lean-dup-search",
-                "lean-dup-eval",
-                "lean-dup-report",
-                "lean-dup-cli",
-            ] {
+            for forbidden in dependencies
+                .iter()
+                .filter(|dependency| dependency.starts_with("lean-dup-"))
+            {
                 assert!(
-                    !dependencies.iter().any(|dependency| dependency == forbidden),
+                    forbidden == "lean-dup-diagnostics",
                     "diagnostics must not depend on {forbidden}"
                 );
             }
@@ -102,6 +98,14 @@ fn old_file_shaped_modules_are_not_public_api() {
         "pub mod semantic_verification",
         "pub mod source_refs",
         "pub mod replacement_hints",
+        "pub use retrieval",
+        "pub use semantic_verification",
+        "pub use baseline",
+        "retrieve_candidates",
+        "rank_candidates",
+        "CandidateExplanation",
+        "KeyContribution",
+        "RetrievalOutput",
     ] {
         assert!(!search_lib.contains(forbidden), "search exposes {forbidden}");
     }
@@ -118,6 +122,24 @@ fn old_file_shaped_modules_are_not_public_api() {
 
     let eval_lib = fs::read_to_string(root.join("crates/eval/src/lib.rs")).expect("read eval lib");
     assert!(!eval_lib.contains("pub mod eval"), "eval exposes old eval module");
+
+    let report_lib = fs::read_to_string(root.join("crates/report/src/lib.rs")).expect("read report lib");
+    assert!(
+        !report_lib.contains("pub mod report_contract"),
+        "report exposes report_contract as an implementation module"
+    );
+
+    let reports = fs::read_to_string(root.join("crates/report/src/reports.rs")).expect("read report DTOs");
+    for forbidden in [
+        "pub retrieval: RetrievalDiagnostics",
+        "pub semantic_verification: ProbeDiagnostics",
+        "pub review: RankedReview",
+        "pub group: RankedGroup",
+        "pub cache: CacheDiagnostics,",
+        "CacheCleanup(CacheCleanupReport)",
+    ] {
+        assert!(!reports.contains(forbidden), "report DTO exposes {forbidden}");
+    }
 }
 
 #[test]

@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::ranking::{RankedReview, ReviewAction, ReviewPriority, ReviewRelation};
-use lean_dup_diagnostics::{Error, Result, read_to_string};
+use crate::{Error, Result};
+use lean_dup_diagnostics::read_to_string;
 
 const BASELINE_SCHEMA_VERSION: &str = "lean-dup.baseline.v1";
 
@@ -185,7 +186,7 @@ fn safe_name(name: &str) -> Result<String> {
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
     {
-        return Err(Error::Index {
+        return Err(Error::Search {
             message: format!("invalid baseline name: {name}"),
         });
     }

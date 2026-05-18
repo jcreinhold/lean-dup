@@ -3,8 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 
 use lean_dup_index::{ComparisonEvidenceMode, ComparisonProvenanceReport};
-use lean_dup_search::ProbeDiagnostics;
-use lean_dup_search::{RankedGroup, RankedReview, ReviewEvidenceMode, ReviewFilter, ReviewPriority};
+use lean_dup_search::audit::{
+    ProbeDiagnostics, RankedGroup, RankedReview, ReviewEvidenceMode, ReviewFilter, ReviewPriority,
+};
 
 pub const REPORT_SCHEMA_VERSION: &str = "lean-dup.report.v1";
 
@@ -61,7 +62,7 @@ pub struct ComparisonProvenanceExplanation {
 pub struct ComparisonProvenanceEntry {
     pub label: Option<String>,
     pub origin: String,
-    pub evidence_mode: ComparisonEvidenceMode,
+    pub evidence_mode: String,
     pub declaration_count: usize,
     pub reason: String,
 }
@@ -70,7 +71,7 @@ pub struct ComparisonProvenanceEntry {
 pub struct GroupExplanation {
     pub visibility: String,
     pub visibility_reason: String,
-    pub evidence_mode: ReviewEvidenceMode,
+    pub evidence_mode: String,
     pub evidence_summary: String,
     pub semantic_summary: String,
     pub blocker_summary: String,
@@ -116,7 +117,7 @@ pub fn explain_group(group: &RankedGroup, filter: ReviewFilter) -> GroupExplanat
     GroupExplanation {
         visibility,
         visibility_reason,
-        evidence_mode: group.evidence_mode,
+        evidence_mode: evidence_mode_label(group.evidence_mode).to_owned(),
         evidence_summary: evidence_summary(group.evidence_mode),
         semantic_summary: semantic_summary(group),
         blocker_summary: blocker_summary(group),
@@ -270,7 +271,7 @@ fn comparison_provenance(reports: &[ComparisonProvenanceReport]) -> ComparisonPr
         .map(|report| ComparisonProvenanceEntry {
             label: report.label.clone(),
             origin: report.origin.clone(),
-            evidence_mode: report.evidence_mode,
+            evidence_mode: comparison_mode_label(report.evidence_mode).to_owned(),
             declaration_count: report.declaration_count,
             reason: report.reason.clone(),
         })
@@ -281,9 +282,7 @@ fn comparison_provenance(reports: &[ComparisonProvenanceReport]) -> ComparisonPr
             let label = entry.label.as_deref().unwrap_or("-");
             format!(
                 "{label}/{}={} ({} declarations)",
-                entry.origin,
-                comparison_mode_label(entry.evidence_mode),
-                entry.declaration_count
+                entry.origin, entry.evidence_mode, entry.declaration_count
             )
         })
         .collect::<Vec<_>>()
@@ -308,6 +307,14 @@ fn evidence_summary(mode: ReviewEvidenceMode) -> String {
         ReviewEvidenceMode::ProofGrade => {
             "proof-grade source-backed evidence is required for actionable claims".to_owned()
         }
+    }
+}
+
+fn evidence_mode_label(mode: ReviewEvidenceMode) -> &'static str {
+    match mode {
+        ReviewEvidenceMode::Static => "static",
+        ReviewEvidenceMode::SourceBackedNotImportable => "source-backed-not-importable",
+        ReviewEvidenceMode::ProofGrade => "proof-grade",
     }
 }
 
@@ -361,10 +368,9 @@ fn replacement_summary(group: &RankedGroup) -> String {
 mod tests {
     use super::{explain_audit, explain_group};
     use lean_dup_index::{ComparisonEvidenceMode, ComparisonProvenanceReport};
-    use lean_dup_search::ProbeDiagnostics;
-    use lean_dup_search::{
-        ConfidenceTier, RankedGroup, RankedReview, RankingDiagnostics, ReviewAction, ReviewEvidenceMode, ReviewFilter,
-        ReviewPriority, ReviewRelation,
+    use lean_dup_search::audit::{
+        ConfidenceTier, ProbeDiagnostics, RankedGroup, RankedReview, RankingDiagnostics, ReviewAction,
+        ReviewEvidenceMode, ReviewFilter, ReviewPriority, ReviewRelation,
     };
 
     #[test]

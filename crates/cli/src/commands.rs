@@ -5,17 +5,17 @@ use crate::cli::{
     AuditArgs, CacheCleanupArgs, Cli, Command, DiffArgs, DoctorArgs, EvalArgs, EvalFormat, IndexArgs, IndexMathlibArgs,
     OutputFormat, ShowArgs,
 };
-use lean_dup_diagnostics::Result;
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_eval::{EvalRequest, EvaluationReport};
+use lean_dup_index::CleanupPolicy;
 use lean_dup_index::{self, CacheFacts};
-use lean_dup_index::{CacheCleanupReport, CleanupPolicy};
 use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexStore, IndexSummary};
 use lean_dup_project::workspace::{self, ResolvedWorkspace, WorkspaceRequest};
-use lean_dup_report::{AuditReport, DiffReport, DoctorReport, IndexReport, Report, ShowReport};
-use lean_dup_search::ReviewPriority as RankedPriority;
-use lean_dup_search::audit::{AuditRequest, run_audit};
+use lean_dup_report::{AuditReport, CacheCleanupReportDto, DiffReport, DoctorReport, IndexReport, Report, ShowReport};
+use lean_dup_search::audit::{AuditRequest, run_audit, run_diff, run_show};
 use lean_dup_worker::WorkerClient;
+
+use crate::error::{AppError, Result};
 
 #[derive(Debug)]
 pub struct Outcome {
@@ -64,7 +64,11 @@ pub fn run(cli: Cli) -> Result<Outcome> {
             let _format = args.format;
             (Report::Perf(crate::perf::run(args)?), OutputFormat::Json, None)
         }
-        Command::Show(args) => (Report::Show(show(args, &mut reporter)?), OutputFormat::Text, None),
+        Command::Show(args) => (
+            Report::Show(Box::new(show(args, &mut reporter)?)),
+            OutputFormat::Text,
+            None,
+        ),
         Command::Diff(args) => (Report::Diff(diff(args, &mut reporter)?), OutputFormat::Text, None),
     };
 
@@ -102,7 +106,11 @@ fn doctor(args: DoctorArgs, reporter: &mut Reporter) -> Result<DoctorReport> {
         },
         &worker_version,
     )?;
-    let cache_diagnostics = lean_dup_index::diagnose_cache(foundation.cache.root.clone(), &[current_index], &store)?;
+    let cache_diagnostics = lean_dup_report::reports::cache_diagnostics_report(lean_dup_index::diagnose_cache(
+        foundation.cache.root.clone(),
+        &[current_index],
+        &store,
+    )?);
     let missing_oleans = if args.require_oleans {
         missing_oleans(&foundation.workspace)
     } else {
@@ -128,7 +136,7 @@ fn doctor(args: DoctorArgs, reporter: &mut Reporter) -> Result<DoctorReport> {
     })
 }
 
-fn cache_cleanup(args: CacheCleanupArgs, reporter: &mut Reporter) -> Result<CacheCleanupReport> {
+fn cache_cleanup(args: CacheCleanupArgs, reporter: &mut Reporter) -> Result<CacheCleanupReportDto> {
     let cache_root = args.cache_root.unwrap_or_else(lean_dup_index::cache_root);
     let store = IndexStore::new(cache_root.clone());
     let expected_entries = if let Some(workspace_root) = args.workspace {
@@ -140,14 +148,9 @@ fn cache_cleanup(args: CacheCleanupArgs, reporter: &mut Reporter) -> Result<Cach
             reporter,
         )?;
         let version_call = WorkerClient::with_timeout(Duration::from_secs(60)).version(workspace.root.clone())?;
-        let worker_version =
-            version_call
-                .rows
-                .into_iter()
-                .next()
-                .ok_or_else(|| lean_dup_diagnostics::Error::Index {
-                    message: "worker version returned no rows".to_owned(),
-                })?;
+        let worker_version = version_call.rows.into_iter().next().ok_or_else(|| AppError::Cli {
+            message: "worker version returned no rows".to_owned(),
+        })?;
         vec![store.expected_entry(
             &IndexBuildRequest {
                 workspace: workspace.clone(),
@@ -166,7 +169,9 @@ fn cache_cleanup(args: CacheCleanupArgs, reporter: &mut Reporter) -> Result<Cach
     } else {
         Vec::new()
     };
-    lean_dup_index::cleanup_cache(cache_root, &expected_entries, CleanupPolicy { execute: args.execute })
+    Ok(lean_dup_report::reports::cache_cleanup_report(
+        lean_dup_index::cleanup_cache(cache_root, &expected_entries, CleanupPolicy { execute: args.execute })?,
+    ))
 }
 
 fn index(args: IndexArgs, reporter: &mut Reporter) -> Result<IndexReport> {
@@ -244,15 +249,11 @@ fn audit_request(args: AuditArgs) -> AuditRequest {
         workspace: args.workspace,
         module_root: args.module_root,
         include_private,
-        include_imports: args.include_imports,
-        import_roots: args.import_roots,
         compare_indexes: args.compare_indexes,
         compare_mathlib: args.compare_mathlib,
         mathlib_workspace: args.mathlib_workspace,
-        threshold: args.threshold,
         include_generated: args.include_generated,
         show_noise: args.show_noise,
-        min_priority: ranked_priority(args.min_priority),
         review_profile: args.review_profile.into(),
         save_baseline: args.save_baseline,
         semantic_probes: args.semantic_probes,
@@ -263,7 +264,7 @@ fn audit_request(args: AuditArgs) -> AuditRequest {
 }
 
 fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<EvaluationReport> {
-    lean_dup_eval::run(
+    Ok(lean_dup_eval::run(
         EvalRequest {
             suite: args.suite.into(),
             workspace: args.workspace,
@@ -271,25 +272,27 @@ fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<EvaluationReport> {
             k_values: args.k_values,
         },
         reporter,
-    )
+    )?)
 }
 
 fn show(args: ShowArgs, reporter: &mut Reporter) -> Result<ShowReport> {
     let requested_group = args.group.clone();
-    let output = run_audit(
+    let output = run_show(
         audit_request(default_audit_args(args.workspace, args.module_root)),
+        &requested_group,
         reporter,
     )?;
-    lean_dup_report::reports::show_report(output, &requested_group)
+    Ok(lean_dup_report::reports::show_report(output))
 }
 
 fn diff(args: DiffArgs, reporter: &mut Reporter) -> Result<DiffReport> {
     let baseline_name = args.baseline.clone();
-    let output = run_audit(
+    let output = run_diff(
         audit_request(default_audit_args(args.workspace, args.module_root)),
+        baseline_name,
         reporter,
     )?;
-    lean_dup_report::reports::diff_report(output, baseline_name)
+    Ok(lean_dup_report::reports::diff_report(output))
 }
 
 fn foundation(requested_root: PathBuf, module_root: Option<String>, reporter: &mut Reporter) -> Result<Foundation> {
@@ -360,15 +363,6 @@ fn origin_for_label(label: &str) -> String {
     }
 }
 
-fn ranked_priority(priority: crate::cli::ReviewPriority) -> RankedPriority {
-    match priority {
-        crate::cli::ReviewPriority::High => RankedPriority::High,
-        crate::cli::ReviewPriority::Medium => RankedPriority::Medium,
-        crate::cli::ReviewPriority::Low => RankedPriority::Low,
-        crate::cli::ReviewPriority::Noise => RankedPriority::Noise,
-    }
-}
-
 fn default_audit_args(workspace: PathBuf, module_root: Option<String>) -> AuditArgs {
     AuditArgs {
         workspace,
@@ -377,22 +371,17 @@ fn default_audit_args(workspace: PathBuf, module_root: Option<String>) -> AuditA
         public_only: false,
         include_private: true,
         no_include_private: true,
-        include_imports: false,
-        import_roots: Vec::new(),
         compare_indexes: Vec::new(),
         compare_mathlib: false,
         mathlib_workspace: None,
-        threshold: 0.78,
         include_generated: false,
         show_noise: false,
-        min_priority: crate::cli::ReviewPriority::Low,
         review_profile: crate::cli::CliReviewProfile::Mathlib,
         save_baseline: None,
         semantic_probes: true,
         probe_budget: 500,
         probe_policy: crate::cli::CliProbePolicy::Actionable,
         probe_chunk_size: 16,
-        replacement_hints: true,
     }
 }
 

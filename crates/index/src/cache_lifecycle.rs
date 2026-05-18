@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
 use crate::index::{ExpectedIndexEntry, INDEX_SCHEMA_VERSION, IndexProvenance, IndexProvenanceKind, IndexStore};
-use lean_dup_diagnostics::{Error, Result, read_to_string};
+use crate::{Error, Result};
+use lean_dup_diagnostics::read_to_string;
 
 /// Cache diagnostics for all known labels under one cache root.
 ///
@@ -371,6 +372,7 @@ fn latest_diagnostics(label_dir: &Path) -> Result<CacheLatestDiagnostics> {
         });
     }
     let pointer = match read_to_string(pointer_path.clone())
+        .map_err(Error::from)
         .and_then(|text| serde_json::from_str::<LatestPointer>(&text).map_err(Error::from))
     {
         Ok(pointer) => pointer,

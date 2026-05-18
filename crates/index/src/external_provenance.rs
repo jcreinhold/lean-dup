@@ -92,10 +92,7 @@ pub struct ComparisonProvenance {
 }
 
 /// Resolve comparison-index provenance for the current audit workspace.
-pub fn resolve(
-    indexes: &[OpenedIndex],
-    audit_workspace: &ResolvedWorkspace,
-) -> lean_dup_diagnostics::Result<ComparisonProvenance> {
+pub fn resolve(indexes: &[OpenedIndex], audit_workspace: &ResolvedWorkspace) -> crate::Result<ComparisonProvenance> {
     let mut policy = ComparisonEvidencePolicy::default();
     let mut reports = Vec::new();
     for index in indexes {

@@ -4,7 +4,8 @@ use serde::Serialize;
 
 use crate::workspace::{self, ResolvedWorkspace, WorkspaceRequest};
 use lean_dup_diagnostics::progress::Reporter;
-use lean_dup_diagnostics::{Error, Result};
+
+use crate::{Error, Result};
 
 const MATHLIB_PACKAGE_PATH: &[&str] = &[".lake", "packages", "mathlib"];
 

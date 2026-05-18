@@ -4,8 +4,10 @@ use std::path::PathBuf;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use lean_dup_diagnostics::{Result, read, read_to_string};
+use lean_dup_diagnostics::{read, read_to_string};
 use lean_dup_project::workspace::ResolvedWorkspace;
+
+use crate::Result;
 
 pub const CACHE_KEY_VERSION: &str = "rust-cli-cache.v1";
 

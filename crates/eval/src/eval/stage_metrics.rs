@@ -5,7 +5,6 @@ use serde::Serialize;
 
 use crate::eval::labels::GoldLabels;
 use crate::eval::scoring::{CountMetric, GoldPair, ObservedRun, RecallAtK};
-use lean_dup_search::KeyContribution;
 
 /// Stable stage-level denominators for search-quality evaluation.
 ///
@@ -162,41 +161,6 @@ pub fn aggregate(_suite: &str, runs: &[&SearchStageMetrics]) -> SearchStageMetri
     }
 }
 
-/// Convert retrieval evidence into stable feature-family labels for eval.
-///
-/// Families are intentionally coarser than retrieval keys: they let quality
-/// reports explain which kind of evidence produced candidates without exposing
-/// key values, table names, or Lean-owned feature encodings.
-pub fn feature_families(contributions: &[KeyContribution]) -> Vec<String> {
-    let mut families = contributions
-        .iter()
-        .map(feature_family)
-        .collect::<FxHashSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    if families.is_empty() {
-        families.push("unknown".to_owned());
-    }
-    families.sort();
-    families
-}
-
-fn feature_family(contribution: &KeyContribution) -> String {
-    match contribution.kind.as_str() {
-        "statement-fingerprint" => "statement_fingerprint".to_owned(),
-        "safe-permutation-fingerprint" => "safe_permutation_fingerprint".to_owned(),
-        "connective-fingerprint" => "connective_fingerprint".to_owned(),
-        "conclusion-fingerprint" => "conclusion_fingerprint".to_owned(),
-        "role-feature" => match contribution.role.as_deref() {
-            Some("conclusion_const") => "role_conclusion_const".to_owned(),
-            Some("hypothesis_const") => "role_hypothesis_const".to_owned(),
-            Some("conclusion_head" | "hypothesis_head" | "binder_domain_head") => "role_head".to_owned(),
-            _ => "role_other".to_owned(),
-        },
-        _ => "other".to_owned(),
-    }
-}
-
 fn count_by_origin(observed: &ObservedRun) -> BTreeMap<String, usize> {
     let mut counts = BTreeMap::new();
     for pair in &observed.pairs {
@@ -303,10 +267,9 @@ fn sum_maps<'a>(maps: impl Iterator<Item = &'a BTreeMap<String, usize>>) -> BTre
 mod tests {
     use rustc_hash::FxHashSet;
 
-    use super::{SemanticVerificationStageMetrics, feature_families, score};
+    use super::{SemanticVerificationStageMetrics, score};
     use crate::eval::labels::GoldLabels;
     use crate::eval::scoring::{CountMetric, GoldPair, ObservedPair, ObservedRun, TimingMetrics};
-    use lean_dup_search::KeyContribution;
 
     #[test]
     fn stage_metrics_separate_generated_and_top_k_recall() {
@@ -337,25 +300,6 @@ mod tests {
         assert_eq!(metrics.hard_negative_survival.candidate_generation.found, 2);
         assert_eq!(metrics.hard_negative_survival.top_k[0].found, 1);
         assert_eq!(metrics.hard_negative_survival.visible_queue.found, 1);
-    }
-
-    #[test]
-    fn feature_family_names_hide_raw_keys() {
-        let families = feature_families(&[
-            contribution("statement-fingerprint", None, "opaque-statement-key"),
-            contribution("role-feature", Some("conclusion_const"), "opaque-role-key"),
-            contribution("role-feature", Some("binder_domain_head"), "opaque-head-key"),
-        ]);
-
-        assert_eq!(
-            families,
-            vec![
-                "role_conclusion_const".to_owned(),
-                "role_head".to_owned(),
-                "statement_fingerprint".to_owned()
-            ]
-        );
-        assert!(!families.iter().any(|family| family.contains("opaque")));
     }
 
     #[test]
@@ -419,15 +363,5 @@ mod tests {
     fn gold_pair(text: &str) -> GoldPair {
         let (left, right) = text.split_once(':').unwrap();
         GoldPair::new(left, right)
-    }
-
-    fn contribution(kind: &str, role: Option<&str>, key: &str) -> KeyContribution {
-        KeyContribution {
-            kind: kind.to_owned(),
-            role: role.map(str::to_owned),
-            display: None,
-            key: key.to_owned(),
-            score: 1.0,
-        }
     }
 }

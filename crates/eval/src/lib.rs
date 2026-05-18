@@ -6,8 +6,10 @@
 
 use serde::Serialize;
 
+mod error;
 mod eval;
 
+pub use error::{Error, Result};
 pub use eval::{EvalRequest, EvaluationReport, peak_rss_bytes, render_metrics, run};
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
