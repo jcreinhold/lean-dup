@@ -10,3 +10,8 @@ target/
 
 # macOS metadata.
 **/.DS_Store
+
+# Python venv (Python implementation retired in e5b3baf; do not let it
+# leak back into the dependency graph).
+.venv/
+__pycache__/

@@ -1,0 +1,16 @@
+version: 2
+# Repo-level "Dependabot security updates" remains enabled in repo settings,
+# so security-only PRs still fire for real CVEs. This file's job is to make
+# sure nothing else does. open-pull-requests-limit: 0 disables version-update
+# PRs while leaving the ecosystem registered for security routing.
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
