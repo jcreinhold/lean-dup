@@ -174,6 +174,9 @@ pub struct EvalArgs {
 
     #[arg(long, hide = true)]
     pub write_search_dataset: bool,
+
+    #[arg(long, hide = true)]
+    pub write_scorer_ablations: bool,
 }
 
 #[derive(Debug, Clone, clap::Args)]

@@ -125,6 +125,9 @@ fn old_file_shaped_modules_are_not_public_api() {
         "CandidateExplanation",
         "KeyContribution",
         "RetrievalOutput",
+        "ScorerConfig",
+        "ScorerWeights",
+        "ScorerThresholds",
     ] {
         assert!(!search_lib.contains(forbidden), "search exposes {forbidden}");
     }

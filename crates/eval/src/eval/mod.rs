@@ -1,4 +1,5 @@
 mod labels;
+mod scorer_ablations;
 mod scoring;
 mod search_dataset;
 mod stage_metrics;

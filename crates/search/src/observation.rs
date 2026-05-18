@@ -9,6 +9,9 @@ use crate::pair_features::{SearchPairFeatures, feature_families, pair_features};
 use crate::retrieval::{
     CandidateExplanation, GeneratedPairEvidence, RetrievalDiagnostics, generated_pair_evidence, retrieve_candidates,
 };
+use crate::scorer::{
+    SearchPairScoring, SearchScoringSummary, SearchScoringVariant, default_summary, score_observation,
+};
 
 /// Request for search-stage observations used by offline evaluation.
 ///
@@ -19,6 +22,7 @@ pub struct SearchObservationRequest<'a> {
     pub workspace: &'a [HydratedDeclaration],
     pub comparison_indexes: &'a [OpenedIndex],
     pub tracked_pairs: &'a [SearchTrackedPair],
+    pub scoring_variant: SearchScoringVariant,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -32,6 +36,7 @@ pub struct SearchObservation {
     pub pairs: Vec<SearchObservedPair>,
     pub visible_groups_found: usize,
     pub visible_groups_total: usize,
+    pub scoring: SearchScoringSummary,
     pub retrieval: SearchRetrievalObservation,
 }
 
@@ -47,7 +52,7 @@ pub struct SearchRetrievalObservation {
     pub pruned_feature_fanouts: Vec<SearchPrunedFeatureFanout>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SearchObservedPair {
     pub left: String,
     pub right: String,
@@ -60,6 +65,7 @@ pub struct SearchObservedPair {
     pub feature_families: Vec<String>,
     pub survived_shown_filter: bool,
     pub features: SearchPairFeatures,
+    pub scoring: SearchPairScoring,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -78,6 +84,12 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
     for set in &output.candidate_sets {
         for (index, candidate) in set.candidates.iter().enumerate() {
             let shown = is_shown_queue_candidate(&candidate.explanation);
+            let features = pair_features(
+                &set.anchor,
+                &candidate.declaration,
+                &candidate.explanation.contributions,
+            );
+            let scored = score_observation(&features, request.scoring_variant, true, shown);
             ranked_pair_ids.insert(pair_key(
                 &set.anchor.qualified_name,
                 &candidate.declaration.qualified_name,
@@ -86,18 +98,15 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
                 left: set.anchor.qualified_name.clone(),
                 right: candidate.declaration.qualified_name.clone(),
                 generated: true,
-                ranked: true,
+                ranked: scored.ranked,
                 generation_policy: generation_policy_for_ranked(&candidate.declaration),
-                rank: Some(index + 1),
-                shown,
+                rank: scored.ranked.then_some(index + 1),
+                shown: scored.shown,
                 origin: candidate.declaration.origin.clone(),
                 feature_families: feature_families(&candidate.explanation.contributions),
-                survived_shown_filter: shown,
-                features: pair_features(
-                    &set.anchor,
-                    &candidate.declaration,
-                    &candidate.explanation.contributions,
-                ),
+                survived_shown_filter: scored.survived_shown_filter,
+                features,
+                scoring: scored.scoring,
             });
         }
     }
@@ -117,8 +126,46 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
         pairs,
         visible_groups_found,
         visible_groups_total,
+        scoring: if request.scoring_variant == SearchScoringVariant::AllFeatures {
+            default_summary()
+        } else {
+            SearchScoringSummary::new(request.scoring_variant)
+        },
         retrieval: retrieval_observation(&output.diagnostics),
     })
+}
+
+/// Re-score one search observation with a fixed symbolic variant.
+///
+/// Evaluation uses this to run ablations without re-running retrieval or
+/// exposing scorer internals. Candidate generation facts remain unchanged;
+/// ranked and visible facts are recalculated from stable pair features.
+pub fn rescore_observation(observation: &SearchObservation, variant: SearchScoringVariant) -> SearchObservation {
+    if variant == observation.scoring.variant {
+        return observation.clone();
+    }
+    let pairs = observation
+        .pairs
+        .iter()
+        .map(|pair| {
+            let scored = score_observation(&pair.features, variant, pair.ranked, pair.shown);
+            let mut rescored = pair.clone();
+            rescored.ranked = scored.ranked;
+            rescored.rank = scored.ranked.then_some(pair.rank.unwrap_or(usize::MAX));
+            rescored.shown = scored.shown;
+            rescored.survived_shown_filter = scored.survived_shown_filter;
+            rescored.scoring = scored.scoring;
+            rescored
+        })
+        .collect::<Vec<_>>();
+    let visible_groups_found = pairs.iter().filter(|pair| pair.shown).count();
+    SearchObservation {
+        pairs,
+        visible_groups_found,
+        visible_groups_total: observation.visible_groups_total,
+        scoring: SearchScoringSummary::new(variant),
+        retrieval: observation.retrieval.clone(),
+    }
 }
 
 fn retrieval_observation(diagnostics: &RetrievalDiagnostics) -> SearchRetrievalObservation {
@@ -187,7 +234,12 @@ fn tracked_generated_pairs(
         else {
             continue;
         };
-        observed.push(generated_observed_pair(oriented.anchor, oriented.candidate, evidence));
+        observed.push(generated_observed_pair(
+            oriented.anchor,
+            oriented.candidate,
+            evidence,
+            request.scoring_variant,
+        ));
     }
     observed.sort_by(|left, right| left.left.cmp(&right.left).then_with(|| left.right.cmp(&right.right)));
     Ok(observed)
@@ -284,20 +336,24 @@ fn generated_observed_pair(
     anchor: &HydratedDeclaration,
     candidate: &HydratedDeclaration,
     evidence: GeneratedPairEvidence,
+    variant: SearchScoringVariant,
 ) -> SearchObservedPair {
     let feature_families = feature_families(&evidence.contributions);
+    let features = pair_features(anchor, candidate, &evidence.contributions);
+    let scored = score_observation(&features, variant, false, false);
     SearchObservedPair {
         left: anchor.qualified_name.clone(),
         right: candidate.qualified_name.clone(),
         generated: true,
-        ranked: false,
+        ranked: scored.ranked,
         generation_policy: evidence.policy,
         rank: None,
-        shown: false,
+        shown: scored.shown,
         origin: candidate.origin.clone(),
         feature_families,
-        survived_shown_filter: false,
-        features: pair_features(anchor, candidate, &evidence.contributions),
+        survived_shown_filter: scored.survived_shown_filter,
+        features,
+        scoring: scored.scoring,
     }
 }
 
@@ -334,7 +390,9 @@ mod tests {
     use lean_dup_index::{DeclarationHandle, HydratedDeclaration};
     use lean_dup_worker::{Fingerprints, RoleFeature};
 
-    use super::{SearchObservationRequest, SearchTrackedPair, observe_search};
+    use super::{
+        SearchObservationRequest, SearchScoringVariant, SearchTrackedPair, observe_search, rescore_observation,
+    };
 
     #[test]
     fn tracked_pairs_record_generated_before_ranked_selection() {
@@ -348,6 +406,7 @@ mod tests {
             workspace: &rows,
             comparison_indexes: &[],
             tracked_pairs: &tracked,
+            scoring_variant: SearchScoringVariant::AllFeatures,
         })
         .unwrap();
 
@@ -365,6 +424,30 @@ mod tests {
         assert_eq!(pair.generation_policy, "local_duplicate_audit");
         assert!(pair.feature_families.contains(&"statement_fingerprint".to_owned()));
         assert!(observation.retrieval.generated_candidate_count > observation.retrieval.ranked_candidate_count);
+    }
+
+    #[test]
+    fn rescoring_does_not_rerun_generation_or_expose_private_keys() {
+        let rows = generated_rows(3);
+        let observation = observe_search(SearchObservationRequest {
+            workspace: &rows,
+            comparison_indexes: &[],
+            tracked_pairs: &[],
+            scoring_variant: SearchScoringVariant::AllFeatures,
+        })
+        .unwrap();
+
+        let semantic_only = rescore_observation(&observation, SearchScoringVariant::SemanticEvidenceOnlyRerank);
+
+        assert_eq!(
+            semantic_only.retrieval.generated_candidate_count,
+            observation.retrieval.generated_candidate_count
+        );
+        assert_eq!(
+            semantic_only.scoring.variant,
+            SearchScoringVariant::SemanticEvidenceOnlyRerank
+        );
+        assert!(semantic_only.pairs.iter().all(|pair| !pair.shown));
     }
 
     fn generated_rows(count: usize) -> Vec<HydratedDeclaration> {

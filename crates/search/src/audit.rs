@@ -19,6 +19,7 @@ use crate::replacement_hints::{
 };
 use crate::retrieval::RetrievalDiagnostics;
 use crate::retrieval::retrieve_candidates;
+use crate::scorer::{SearchScoringSummary, default_summary};
 use crate::semantic_verification::{
     ProbeDiagnostics, ProbeSettings, SemanticVerificationInput, VerificationIndex, candidate_sets_for_review,
     verify_candidate_probes,
@@ -65,6 +66,7 @@ pub struct AuditOutput {
     pub include_generated: bool,
     pub show_noise: bool,
     pub review_profile: ReviewProfile,
+    pub scoring: SearchScoringSummary,
     pub retrieval: AuditRetrievalSummary,
     pub comparison_provenance: Vec<ComparisonProvenanceReport>,
     pub semantic_verification: AuditProbeSummary,
@@ -547,6 +549,7 @@ fn project_audit_output(workflow: WorkflowOutput) -> AuditOutput {
         include_generated: workflow.include_generated,
         show_noise: workflow.show_noise,
         review_profile: workflow.review_profile,
+        scoring: default_summary(),
         retrieval: audit_retrieval_summary(&workflow.retrieval),
         comparison_provenance: workflow.comparison_provenance,
         semantic_verification: audit_probe_summary(&workflow.semantic_verification),

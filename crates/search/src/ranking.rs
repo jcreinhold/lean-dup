@@ -4,14 +4,12 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::retrieval::{CandidateSet, KeyContribution, RetrievedCandidate};
+use crate::scorer;
 use crate::semantic_verification::{EvidenceKind, EvidenceStatus, SemanticEvidence};
 use crate::source_refs::{ImportStatus, SourceFacts};
 use lean_dup_index::HydratedDeclaration;
 use lean_dup_index::{ComparisonEvidenceMode, ComparisonEvidencePolicy};
 use lean_dup_worker::SourceSpan;
-
-const DEFAULT_MIN_NEAR_SCORE: f64 = 24.0;
-const DEFAULT_TRANSITIONAL_ALIAS_CALLERS: usize = 8;
 
 /// Policy input for turning retrieved candidates into review groups.
 ///
@@ -35,9 +33,10 @@ pub struct RankingProfile {
 
 impl Default for RankingProfile {
     fn default() -> Self {
+        let thresholds = scorer::thresholds();
         Self {
-            min_near_score: DEFAULT_MIN_NEAR_SCORE,
-            transitional_alias_callers: DEFAULT_TRANSITIONAL_ALIAS_CALLERS,
+            min_near_score: thresholds.near_score,
+            transitional_alias_callers: thresholds.transitional_alias_callers,
         }
     }
 }
@@ -257,14 +256,12 @@ fn rank_pair(anchor: &HydratedDeclaration, candidate: &RetrievedCandidate, input
             .comparison_policy
             .requires_semantic_evidence(&candidate.declaration.origin);
     let static_evidence_allowed = !semantic_required;
-    let exact = verified_exact
-        || (static_evidence_allowed && theorem_pair && has_contribution(candidate, "statement-fingerprint"));
+    let score_facts = scorer::ranking_score_facts(candidate, theorem_pair, static_evidence_allowed);
+    let exact = verified_exact || score_facts.exact_static;
     let specialization = theorem_pair && verified_specialization;
-    let permuted = verified_permuted
-        || (static_evidence_allowed && theorem_pair && has_contribution(candidate, "safe-permutation-fingerprint"));
-    let connective = verified_replacement
-        || (static_evidence_allowed && theorem_pair && has_contribution(candidate, "connective-fingerprint"));
-    let near = candidate.score >= input.profile.min_near_score || has_contribution(candidate, "conclusion-fingerprint");
+    let permuted = verified_permuted || score_facts.permuted_static;
+    let connective = verified_replacement || score_facts.connective_static;
+    let near = score_facts.near;
 
     if let Some(semantic) = semantic {
         signals.extend(semantic_signals(semantic));
@@ -279,7 +276,7 @@ fn rank_pair(anchor: &HydratedDeclaration, candidate: &RetrievedCandidate, input
         }
     }
     if semantic_required
-        && strong_static_semantic_candidate(candidate)
+        && score_facts.strong_static_semantic_candidate
         && semantic.is_none_or(|semantic| !semantic.proof_grade())
     {
         blockers.insert("unverified-proof-grade-evidence".to_owned());
@@ -536,23 +533,6 @@ fn semantic_signals(evidence: &SemanticEvidence) -> BTreeSet<String> {
 
 fn verified_kind(evidence: Option<&SemanticEvidence>, kind: EvidenceKind) -> bool {
     evidence.is_some_and(|evidence| evidence.kind == kind && evidence.proof_grade())
-}
-
-fn has_contribution(candidate: &RetrievedCandidate, kind: &str) -> bool {
-    candidate
-        .explanation
-        .contributions
-        .iter()
-        .any(|contribution| contribution.kind == kind)
-}
-
-fn strong_static_semantic_candidate(candidate: &RetrievedCandidate) -> bool {
-    candidate.explanation.contributions.iter().any(|contribution| {
-        matches!(
-            contribution.kind.as_str(),
-            "statement-fingerprint" | "safe-permutation-fingerprint" | "connective-fingerprint"
-        )
-    })
 }
 
 fn same_source_fingerprint(left: &HydratedDeclaration, right: &HydratedDeclaration, facts: &SourceFacts) -> bool {

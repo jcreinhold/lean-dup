@@ -5,7 +5,7 @@ use lean_dup_eval::EvalOutput;
 use lean_dup_index::{CacheCleanupReport, CacheDiagnostics, CacheStatus, ComparisonEvidenceMode};
 use lean_dup_search::{
     AuditEvidence, AuditGroup, AuditMember, AuditOutput, AuditProbeSummary, AuditReplacementHint, AuditReview,
-    DiffOutput, ReviewProfile, SearchBaselineDiff, SearchBaselineGroup, ShowOutput,
+    DiffOutput, ReviewProfile, SearchBaselineDiff, SearchBaselineGroup, SearchScoringSummary, ShowOutput,
 };
 use serde::{Deserialize, Serialize};
 
@@ -29,9 +29,12 @@ pub enum Report {
 pub struct EvalReportDto {
     pub status: String,
     pub suite: String,
+    pub scorer_version: String,
     pub metrics: EvalMetricsDto,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search_dataset_artifact: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scorer_ablation_artifact: Option<PathBuf>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub runs: Vec<EvalRunReportDto>,
 }
@@ -40,6 +43,8 @@ pub struct EvalReportDto {
 pub struct EvalRunReportDto {
     pub suite: String,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scorer_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metrics: Option<EvalMetricsDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -228,6 +233,7 @@ pub struct AuditReport {
     pub include_generated: bool,
     pub show_noise: bool,
     pub review_profile: ReviewProfile,
+    pub scoring: SearchScoringSummary,
     pub profile_counts: ReviewProfileCounts,
     pub retrieval: RetrievalReport,
     pub comparison_provenance: Vec<ComparisonProvenanceReportDto>,
@@ -445,14 +451,17 @@ pub fn eval_report(report: EvalOutput) -> EvalReportDto {
     EvalReportDto {
         status: report.status,
         suite: report.suite,
+        scorer_version: report.scorer_version,
         metrics: eval_metrics_dto(report.metrics),
         search_dataset_artifact: report.search_dataset_artifact,
+        scorer_ablation_artifact: report.scorer_ablation_artifact,
         runs: report
             .runs
             .into_iter()
             .map(|run| EvalRunReportDto {
                 suite: run.suite,
                 status: run.status,
+                scorer_version: run.scorer_version,
                 metrics: run.metrics.map(eval_metrics_dto),
                 reason: run.reason,
                 manual: run.manual,
@@ -593,6 +602,7 @@ pub fn audit_report(output: AuditOutput) -> AuditReport {
         include_generated: output.include_generated,
         show_noise: output.show_noise,
         review_profile: output.review_profile,
+        scoring: output.scoring,
         profile_counts,
         retrieval,
         comparison_provenance,

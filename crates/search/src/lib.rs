@@ -14,6 +14,7 @@ mod pair_features;
 mod ranking;
 mod replacement_hints;
 mod retrieval;
+mod scorer;
 mod semantic_verification;
 mod source_refs;
 
@@ -26,11 +27,12 @@ pub use audit::{
 pub use error::{Error, Result};
 pub use observation::{
     SearchObservation, SearchObservationRequest, SearchObservedPair, SearchPrunedFeatureFanout,
-    SearchRetrievalObservation, SearchTrackedPair, observe_search,
+    SearchRetrievalObservation, SearchTrackedPair, observe_search, rescore_observation,
 };
 pub use pair_features::{
     SearchEvidenceMode, SearchModuleRelation, SearchPairFeatures, SearchRoleOverlap, SearchSemanticEvidenceState,
 };
+pub use scorer::{SearchPairScoring, SearchScoringSummary, SearchScoringVariant};
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]

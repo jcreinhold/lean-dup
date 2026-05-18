@@ -224,6 +224,7 @@ fn eval_default_json_contains_raw_metric_counts() {
     let payload: Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(payload["command"], "eval");
     assert_eq!(payload["status"], "ok");
+    assert_eq!(payload["scorer_version"], "lean-dup.symbolic-scorer.v1");
     assert_eq!(payload["metrics"]["suite"], "default");
     assert!(
         payload["metrics"]["recall"]
@@ -329,6 +330,7 @@ fn eval_hidden_search_dataset_mode_writes_feature_artifact() {
         .success();
     let help_stdout = String::from_utf8(help.get_output().stdout.clone()).unwrap();
     assert!(!help_stdout.contains("--write-search-dataset"));
+    assert!(!help_stdout.contains("--write-scorer-ablations"));
 
     let assert = Command::cargo_bin("lean-dup")
         .unwrap()
@@ -354,6 +356,8 @@ fn eval_hidden_search_dataset_mode_writes_feature_artifact() {
     let dataset: Value = serde_json::from_str(&fs::read_to_string(&artifact).unwrap()).unwrap();
     assert_eq!(dataset["schema_version"], "lean-dup.search-dataset.v1");
     assert_eq!(dataset["suite"], "default");
+    assert_eq!(dataset["scoring"]["version"], "lean-dup.symbolic-scorer.v1");
+    assert_eq!(dataset["scoring"]["variant"], "all-features");
     let pairs = dataset["pairs"].as_array().unwrap();
     assert!(!pairs.is_empty());
     assert!(pairs.iter().any(|pair| pair["label"].is_object()));
@@ -369,6 +373,54 @@ fn eval_hidden_search_dataset_mode_writes_feature_artifact() {
     let raw = fs::read_to_string(artifact).unwrap();
     for forbidden in ["/Users/", "statement_text", "IndexQuery", "FeatureMatch", "sqlite"] {
         assert!(!raw.contains(forbidden), "dataset leaked {forbidden}");
+    }
+}
+
+#[test]
+fn eval_hidden_scorer_ablation_mode_writes_variant_artifact() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let artifact = repo_root().join("target/search-quality/default-scorer-ablations.json");
+    let _ = fs::remove_file(&artifact);
+
+    let assert = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args([
+            "eval",
+            "--suite",
+            "default",
+            "--format",
+            "json",
+            "--write-scorer-ablations",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(
+        payload["scorer_ablation_artifact"],
+        "target/search-quality/default-scorer-ablations.json"
+    );
+
+    let ablations: Value = serde_json::from_str(&fs::read_to_string(&artifact).unwrap()).unwrap();
+    assert_eq!(ablations["schema_version"], "lean-dup.scorer-ablation.v1");
+    assert_eq!(ablations["scorer_version"], "lean-dup.symbolic-scorer.v1");
+    let variants = ablations["variants"].as_array().unwrap();
+    assert_eq!(variants.len(), 6);
+    for expected in [
+        "all-features",
+        "no-role-features",
+        "no-connective-conclusion-features",
+        "no-source-module-features",
+        "no-static-evidence-features",
+        "semantic-evidence-only-rerank",
+    ] {
+        assert!(
+            variants.iter().any(|variant| variant["variant"] == expected),
+            "missing {expected} in {variants:?}"
+        );
     }
 }
 

@@ -272,6 +272,7 @@ fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<lean_dup_report::Eval
             mathlib_workspace: args.mathlib_workspace,
             k_values: args.k_values,
             write_search_dataset: args.write_search_dataset,
+            write_scorer_ablations: args.write_scorer_ablations,
         },
         reporter,
     )?))

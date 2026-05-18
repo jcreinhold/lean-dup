@@ -1,10 +1,8 @@
 use serde::Serialize;
 
 use crate::ranking::{ConfidenceTier, RankedGroup, RankedReview, ReviewAction, ReviewFilter};
+use crate::scorer;
 use crate::source_refs::{ImportStatus, SourceFacts, SourceReference};
-
-const DEFAULT_MAX_DISPLAYED_CALLERS: usize = 12;
-const DEFAULT_TRANSITIONAL_ALIAS_CALLERS: usize = 8;
 
 /// Replacement guidance attached to ranked groups.
 ///
@@ -31,9 +29,10 @@ pub struct ReplacementHintProfile {
 
 impl Default for ReplacementHintProfile {
     fn default() -> Self {
+        let thresholds = scorer::thresholds();
         Self {
-            max_displayed_callers: DEFAULT_MAX_DISPLAYED_CALLERS,
-            transitional_alias_callers: DEFAULT_TRANSITIONAL_ALIAS_CALLERS,
+            max_displayed_callers: thresholds.max_displayed_callers,
+            transitional_alias_callers: thresholds.transitional_alias_callers,
         }
     }
 }

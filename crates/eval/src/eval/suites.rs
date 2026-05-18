@@ -6,6 +6,7 @@ use serde::Serialize;
 
 use crate::EvalSuite;
 use crate::eval::labels::{GoldLabels, load_builtin};
+use crate::eval::scorer_ablations::{self, ScorerAblationVariantReport};
 use crate::eval::scoring::{
     CountMetric, EvaluationMetrics, GoldPair, ObservedPair, ObservedRun, RecallAtK, TimingMetrics, score_run,
 };
@@ -15,7 +16,10 @@ use lean_dup_diagnostics::perf;
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
 use lean_dup_project::{WorkspaceRequest, resolve, resolve_project_mathlib};
-use lean_dup_search::{SearchObservation, SearchObservationRequest, SearchTrackedPair, observe_search};
+use lean_dup_search::{
+    SearchObservation, SearchObservationRequest, SearchScoringVariant, SearchTrackedPair, observe_search,
+    rescore_observation,
+};
 use lean_dup_worker::WorkerClient;
 
 use crate::{Error, Result};
@@ -27,15 +31,21 @@ pub struct EvalRequest {
     pub mathlib_workspace: Option<PathBuf>,
     pub k_values: Vec<usize>,
     pub write_search_dataset: bool,
+    pub write_scorer_ablations: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct EvalOutput {
     pub status: String,
     pub suite: String,
+    pub scorer_version: String,
     pub metrics: EvaluationMetrics,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search_dataset_artifact: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scorer_ablation_artifact: Option<PathBuf>,
+    #[serde(skip)]
+    pub scorer_ablations: Vec<ScorerAblationVariantReport>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub runs: Vec<EvaluationRunReport>,
 }
@@ -45,10 +55,14 @@ pub struct EvaluationRunReport {
     pub suite: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub scorer_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub metrics: Option<EvaluationMetrics>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     pub manual: bool,
+    #[serde(skip)]
+    pub scorer_ablations: Vec<ScorerAblationVariantReport>,
 }
 
 struct SuiteDefinition {
@@ -89,6 +103,8 @@ pub fn run(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutput> 
 
 fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutput> {
     let total_started = Instant::now();
+    let write_search_dataset = request.write_search_dataset;
+    let write_scorer_ablations = request.write_scorer_ablations;
     let labels = load_builtin(request.suite)?;
     let definition = suite_definition(&request);
     let k_values = suite_k_values(request.suite, &request.k_values);
@@ -140,14 +156,17 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
             workspace: &workspace_rows,
             comparison_indexes: std::slice::from_ref(external),
             tracked_pairs: &tracked_pairs,
+            scoring_variant: SearchScoringVariant::AllFeatures,
         })?,
         None => observe_search(SearchObservationRequest {
             workspace: &workspace_rows,
             comparison_indexes: &[],
             tracked_pairs: &tracked_pairs,
+            scoring_variant: SearchScoringVariant::AllFeatures,
         })?,
     };
     let retrieval_ms = retrieval_started.elapsed().as_millis();
+    let scorer_version = output.scoring.version.to_owned();
 
     let observed = ObservedRun {
         suite: labels.suite.clone(),
@@ -168,9 +187,20 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
     };
     let metrics = score_run(&labels, &observed, &k_values);
     enforce_suite_gates(&definition, &labels, &metrics)?;
-    let search_dataset_artifact = if request.write_search_dataset {
+    let search_dataset_artifact = if write_search_dataset {
         let dataset = search_dataset::build(&labels.suite, &labels, &output);
         Some(search_dataset::write_default_artifact(&repo_root(), &dataset)?)
+    } else {
+        None
+    };
+    let scorer_ablations = if write_scorer_ablations {
+        scorer_ablation_variants(&labels, &output, &k_values, index_load_ms, reporter)
+    } else {
+        Vec::new()
+    };
+    let scorer_ablation_artifact = if write_scorer_ablations {
+        let report = scorer_ablations::report(&labels.suite, &scorer_version, scorer_ablations.clone(), Vec::new());
+        Some(scorer_ablations::write_default_artifact(&repo_root(), &report)?)
     } else {
         None
     };
@@ -178,8 +208,11 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
     Ok(EvalOutput {
         status: "ok".to_owned(),
         suite: labels.suite,
+        scorer_version,
         metrics,
         search_dataset_artifact,
+        scorer_ablation_artifact,
+        scorer_ablations,
         runs: Vec::new(),
     })
 }
@@ -199,6 +232,55 @@ fn tracked_pairs(labels: &GoldLabels) -> Vec<SearchTrackedPair> {
     pairs
 }
 
+fn scorer_ablation_variants(
+    labels: &GoldLabels,
+    base_observation: &SearchObservation,
+    k_values: &[usize],
+    index_load_ms: u128,
+    reporter: &mut Reporter,
+) -> Vec<ScorerAblationVariantReport> {
+    let mut variants = Vec::new();
+    for variant in SearchScoringVariant::all() {
+        let started = Instant::now();
+        let observation = rescore_observation(base_observation, variant);
+        let retrieval_ms = started.elapsed().as_millis();
+        reporter.event(
+            "eval",
+            None,
+            None,
+            format!(
+                "scorer ablation {} observed {} pairs",
+                variant.label(),
+                observation.pairs.len()
+            ),
+        );
+        let observed = ObservedRun {
+            suite: labels.suite.clone(),
+            pairs: observed_pairs(&observation),
+            visible_groups: CountMetric {
+                found: observation.visible_groups_found,
+                total: observation.visible_groups_total,
+            },
+            probe_unavailable: CountMetric { found: 0, total: 0 },
+            semantic_verification: SemanticVerificationStageMetrics::default(),
+            timings: TimingMetrics {
+                index_load_ms,
+                retrieval_ms,
+                probe_ms: 0,
+                total_ms: retrieval_ms,
+            },
+            peak_memory_bytes: perf::peak_rss_bytes(),
+        };
+        variants.push(ScorerAblationVariantReport {
+            variant,
+            status: "ok".to_owned(),
+            metrics: Some(score_run(labels, &observed, k_values)),
+            reason: None,
+        });
+    }
+    variants
+}
+
 fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutput> {
     let mut runs = Vec::new();
     for child in [EvalSuite::Default, EvalSuite::HardNegatives] {
@@ -209,6 +291,7 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
                 mathlib_workspace: None,
                 k_values: request.k_values.clone(),
                 write_search_dataset: false,
+                write_scorer_ablations: request.write_scorer_ablations,
             },
             false,
             reporter,
@@ -223,6 +306,7 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
                 mathlib_workspace: request.mathlib_workspace.clone(),
                 k_values: request.k_values.clone(),
                 write_search_dataset: false,
+                write_scorer_ablations: request.write_scorer_ablations,
             },
             true,
             reporter,
@@ -238,12 +322,43 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
     } else {
         "ok"
     };
+    let scorer_version = runs
+        .iter()
+        .find_map(|run| run.scorer_version.clone())
+        .unwrap_or_else(|| {
+            lean_dup_search::SearchScoringSummary::new(SearchScoringVariant::AllFeatures)
+                .version
+                .to_owned()
+        });
+    let scorer_ablations = if request.write_scorer_ablations {
+        aggregate_scorer_ablations(&runs)
+    } else {
+        Vec::new()
+    };
+    let scorer_ablation_artifact = if request.write_scorer_ablations {
+        let children = runs
+            .iter()
+            .map(|run| scorer_ablations::ScorerAblationChildReport {
+                suite: run.suite.clone(),
+                status: run.status.clone(),
+                reason: run.reason.clone(),
+                variants: run.scorer_ablations.clone(),
+            })
+            .collect();
+        let report = scorer_ablations::report("production-gate", &scorer_version, scorer_ablations.clone(), children);
+        Some(scorer_ablations::write_default_artifact(&repo_root(), &report)?)
+    } else {
+        None
+    };
 
     Ok(EvalOutput {
         status: status.to_owned(),
         suite: "production-gate".to_owned(),
+        scorer_version,
         metrics,
         search_dataset_artifact: None,
+        scorer_ablation_artifact,
+        scorer_ablations,
         runs,
     })
 }
@@ -253,9 +368,11 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
         return EvaluationRunReport {
             suite: request.suite.as_str().to_owned(),
             status: "skipped".to_owned(),
+            scorer_version: None,
             metrics: None,
             reason: Some("manual suite workspace is unavailable".to_owned()),
             manual,
+            scorer_ablations: Vec::new(),
         };
     }
 
@@ -264,9 +381,11 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
         Ok(report) => EvaluationRunReport {
             suite: report.suite,
             status: report.status,
+            scorer_version: Some(report.scorer_version),
             metrics: Some(report.metrics),
             reason: None,
             manual,
+            scorer_ablations: report.scorer_ablations,
         },
         Err(error) => {
             let reason = error.to_string();
@@ -278,12 +397,43 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
             EvaluationRunReport {
                 suite: suite.as_str().to_owned(),
                 status: status.to_owned(),
+                scorer_version: None,
                 metrics: None,
                 reason: Some(reason),
                 manual,
+                scorer_ablations: Vec::new(),
             }
         }
     }
+}
+
+fn aggregate_scorer_ablations(runs: &[EvaluationRunReport]) -> Vec<ScorerAblationVariantReport> {
+    SearchScoringVariant::all()
+        .into_iter()
+        .map(|variant| {
+            let metrics = runs
+                .iter()
+                .flat_map(|run| &run.scorer_ablations)
+                .filter(|ablation| ablation.variant == variant && ablation.status == "ok")
+                .filter_map(|ablation| ablation.metrics.as_ref())
+                .collect::<Vec<_>>();
+            if metrics.is_empty() {
+                ScorerAblationVariantReport {
+                    variant,
+                    status: "skipped".to_owned(),
+                    metrics: None,
+                    reason: Some("no completed child metrics".to_owned()),
+                }
+            } else {
+                ScorerAblationVariantReport {
+                    variant,
+                    status: "ok".to_owned(),
+                    metrics: Some(aggregate_metrics("production-gate", &metrics)),
+                    reason: None,
+                }
+            }
+        })
+        .collect()
 }
 
 fn manual_workspace_exists(request: &EvalRequest) -> bool {
@@ -631,6 +781,7 @@ mod tests {
                 mathlib_workspace: None,
                 k_values: vec![1, 5, 10],
                 write_search_dataset: false,
+                write_scorer_ablations: false,
             },
             &mut Reporter::new(false, false),
         );
@@ -685,6 +836,7 @@ mod tests {
                 mathlib_workspace: None,
                 k_values: vec![1, 5, 10],
                 write_search_dataset: false,
+                write_scorer_ablations: false,
             },
             true,
             &mut Reporter::new(false, false),
@@ -718,6 +870,7 @@ mod tests {
                 mathlib_workspace: None,
                 k_values: vec![1, 5, 10],
                 write_search_dataset: false,
+                write_scorer_ablations: false,
             },
             &mut Reporter::new(false, true),
         )
@@ -735,6 +888,7 @@ mod tests {
                 mathlib_workspace: None,
                 k_values: vec![1, 5, 10],
                 write_search_dataset: false,
+                write_scorer_ablations: false,
             },
             &mut Reporter::new(false, true),
         )

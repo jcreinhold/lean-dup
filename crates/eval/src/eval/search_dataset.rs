@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use lean_dup_search::{SearchObservation, SearchObservedPair, SearchPairFeatures};
+use lean_dup_search::{SearchObservation, SearchObservedPair, SearchPairFeatures, SearchScoringSummary};
 use serde::Serialize;
 
 use crate::eval::labels::{GoldLabels, TypedGoldLabel};
@@ -15,6 +15,7 @@ pub const SEARCH_DATASET_SCHEMA_VERSION: &str = "lean-dup.search-dataset.v1";
 pub struct SearchDataset {
     pub schema_version: &'static str,
     pub suite: String,
+    pub scoring: SearchScoringSummary,
     pub pairs: Vec<SearchDatasetPair>,
 }
 
@@ -74,6 +75,7 @@ pub fn build(suite: &str, labels: &GoldLabels, observation: &SearchObservation) 
     SearchDataset {
         schema_version: SEARCH_DATASET_SCHEMA_VERSION,
         suite: suite.to_owned(),
+        scoring: observation.scoring.clone(),
         pairs,
     }
 }
@@ -166,6 +168,7 @@ mod tests {
             ],
             visible_groups_found: 1,
             visible_groups_total: 2,
+            scoring: lean_dup_search::SearchScoringSummary::new(lean_dup_search::SearchScoringVariant::AllFeatures),
             retrieval: SearchRetrievalObservation::default(),
         };
 
@@ -193,6 +196,7 @@ mod tests {
                 pairs: vec![observed("Tiny.same_left", "Tiny.same_right", 1)],
                 visible_groups_found: 1,
                 visible_groups_total: 1,
+                scoring: lean_dup_search::SearchScoringSummary::new(lean_dup_search::SearchScoringVariant::AllFeatures),
                 retrieval: SearchRetrievalObservation::default(),
             },
         );
@@ -250,6 +254,12 @@ mod tests {
                 },
                 semantic_evidence_state: SearchSemanticEvidenceState::NotRun,
                 cheap_blockers: Vec::new(),
+            },
+            scoring: lean_dup_search::SearchPairScoring {
+                version: "lean-dup.symbolic-scorer.v1",
+                variant: lean_dup_search::SearchScoringVariant::AllFeatures,
+                total_score: 100.0,
+                component_scores: std::collections::BTreeMap::from([("statement_fingerprint".to_owned(), 100.0)]),
             },
         }
     }
