@@ -204,7 +204,7 @@ pub(crate) fn candidate_sets_for_review(
     review_profile: ReviewProfile,
     show_noise: bool,
 ) -> Vec<CandidateSet> {
-    if !compare_mathlib || show_noise || review_profile != ReviewProfile::Mathlib {
+    if show_noise || review_profile != ReviewProfile::Mathlib {
         return candidate_sets.to_vec();
     }
 
@@ -214,7 +214,7 @@ pub(crate) fn candidate_sets_for_review(
             let candidates = set
                 .candidates
                 .iter()
-                .filter(|candidate| candidate.declaration.origin == "mathlib")
+                .filter(|candidate| !compare_mathlib || candidate.declaration.origin == "mathlib")
                 .filter(|candidate| strong_static_evidence(candidate))
                 .cloned()
                 .collect::<Vec<_>>();
@@ -990,6 +990,32 @@ mod tests {
                 candidates: vec![exact.clone(), broad],
             }],
             true,
+            ReviewProfile::Mathlib,
+            false,
+        );
+
+        assert_eq!(shaped[0].candidates, vec![exact]);
+    }
+
+    #[test]
+    fn default_review_shape_drops_internal_feature_only_candidates() {
+        let anchor = declaration("workspace:Tiny:Tiny.local", "workspace", "Tiny.local");
+        let exact = candidate(
+            declaration("workspace:Tiny:Tiny.exact", "workspace", "Tiny.exact"),
+            "statement-fingerprint",
+            100.0,
+        );
+        let broad = candidate(
+            declaration("workspace:Tiny:Tiny.broad", "workspace", "Tiny.broad"),
+            "role-feature",
+            12.0,
+        );
+        let shaped = candidate_sets_for_review(
+            &[CandidateSet {
+                anchor,
+                candidates: vec![exact.clone(), broad],
+            }],
+            false,
             ReviewProfile::Mathlib,
             false,
         );

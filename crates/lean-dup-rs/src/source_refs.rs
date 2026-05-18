@@ -70,11 +70,34 @@ impl SourceFacts {
 }
 
 /// Input for bounded source fact collection.
+///
+/// Callers choose which declarations need caller references. Imports and
+/// source fingerprints remain available for every declaration; expensive
+/// cross-file reference scans are reserved for review groups that will use
+/// them.
 #[derive(Debug, Clone)]
 pub(crate) struct SourceFactInput<'a> {
     pub(crate) declarations: &'a [HydratedDeclaration],
     pub(crate) max_file_bytes: u64,
     pub(crate) max_references_per_declaration: usize,
+    pub(crate) reference_scope: SourceReferenceScope,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SourceReferenceScope {
+    All,
+    None,
+    Only(BTreeSet<String>),
+}
+
+impl SourceReferenceScope {
+    fn includes(&self, declaration_id: &str) -> bool {
+        match self {
+            Self::All => true,
+            Self::None => false,
+            Self::Only(ids) => ids.contains(declaration_id),
+        }
+    }
 }
 
 impl<'a> SourceFactInput<'a> {
@@ -83,7 +106,18 @@ impl<'a> SourceFactInput<'a> {
             declarations,
             max_file_bytes: DEFAULT_MAX_FILE_BYTES,
             max_references_per_declaration: DEFAULT_MAX_REFERENCES_PER_DECLARATION,
+            reference_scope: SourceReferenceScope::All,
         }
+    }
+
+    pub(crate) fn without_references(mut self) -> Self {
+        self.reference_scope = SourceReferenceScope::None;
+        self
+    }
+
+    pub(crate) fn with_reference_declarations(mut self, declaration_ids: BTreeSet<String>) -> Self {
+        self.reference_scope = SourceReferenceScope::Only(declaration_ids);
+        self
     }
 }
 
@@ -164,9 +198,13 @@ pub(crate) fn collect_source_facts(input: SourceFactInput<'_>) -> SourceFacts {
             let span = declaration.source_span.as_ref()?;
             source.fingerprint_for(declaration, span.start.line as usize, span.end.line as usize)
         });
-        let references = reference_tokens(declaration)
-            .map(|tokens| references_to(declaration, &tokens, &loaded, input.max_references_per_declaration))
-            .unwrap_or_default();
+        let references = if input.reference_scope.includes(&declaration.declaration_id) {
+            reference_tokens(declaration)
+                .map(|tokens| references_to(declaration, &tokens, &loaded, input.max_references_per_declaration))
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         facts.declarations.insert(
             declaration.declaration_id.clone(),
             DeclarationSourceFact {
@@ -443,6 +481,34 @@ end Tiny
 
         assert_eq!(fact.references.len(), 1);
         assert_eq!(fact.references[0].line, 8);
+        assert_eq!(
+            facts.import_status_for(&declaration.declaration_id, "Target.Module"),
+            ImportStatus::Direct
+        );
+    }
+
+    #[test]
+    fn reference_scope_skips_callers_without_losing_imports_or_fingerprints() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("Tiny.lean");
+        std::fs::write(
+            &path,
+            r#"
+import Target.Module
+namespace Tiny
+theorem target : True := by trivial
+theorem caller : True := target
+end Tiny
+"#,
+        )
+        .unwrap();
+        let declaration = declaration("workspace:Tiny:Tiny.target", "Tiny.target", &path, 4, 4);
+
+        let facts = collect_source_facts(SourceFactInput::new(std::slice::from_ref(&declaration)).without_references());
+        let fact = facts.declaration(&declaration.declaration_id).unwrap();
+
+        assert!(fact.source_fingerprint.is_some());
+        assert!(fact.references.is_empty());
         assert_eq!(
             facts.import_status_for(&declaration.declaration_id, "Target.Module"),
             ImportStatus::Direct

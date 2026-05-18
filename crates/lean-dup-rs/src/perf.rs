@@ -61,8 +61,15 @@ pub(crate) struct PerfWorkloadReport {
     pub(crate) stderr_tail: Option<String>,
     pub(crate) candidate_count: Option<u64>,
     pub(crate) hydrated_declarations: Option<u64>,
+    pub(crate) review_groups: Option<u64>,
+    pub(crate) visible_groups: Option<u64>,
+    pub(crate) semantic_planned_pairs: Option<u64>,
+    pub(crate) semantic_cached_hits: Option<u64>,
+    pub(crate) semantic_worker_pairs: Option<u64>,
+    pub(crate) semantic_unavailable_results: Option<u64>,
     pub(crate) probe_batches: Option<u64>,
     pub(crate) probe_pairs: Option<u64>,
+    pub(crate) profile_timings_ms: BTreeMap<String, u128>,
     pub(crate) events: Vec<PerfEvent>,
     pub(crate) summary: PerfSummary,
 }
@@ -216,10 +223,17 @@ fn run_workload(args: PerfArgs, cache_root: &Path) -> Result<PerfWorkloadReport>
     let elapsed_ms = started.elapsed().as_millis();
     let stdout_text = String::from_utf8_lossy(&stdout);
     let parsed = serde_json::from_str::<serde_json::Value>(&stdout_text).ok();
-    let candidate_count = parsed
+    let candidate_count = json_u64(parsed.as_ref(), "/retrieval/candidate_count");
+    let review_groups = parsed
         .as_ref()
-        .and_then(|payload| payload.pointer("/retrieval/candidate_count"))
-        .and_then(serde_json::Value::as_u64);
+        .and_then(|payload| payload.pointer("/review/groups"))
+        .and_then(serde_json::Value::as_array)
+        .map(|groups| groups.len() as u64);
+    let visible_groups = json_u64(parsed.as_ref(), "/visible_group_count");
+    let semantic_planned_pairs = json_u64(parsed.as_ref(), "/semantic_verification/planned_pairs");
+    let semantic_cached_hits = json_u64(parsed.as_ref(), "/semantic_verification/cached_hits");
+    let semantic_worker_pairs = json_u64(parsed.as_ref(), "/semantic_verification/worker_pairs");
+    let semantic_unavailable_results = json_u64(parsed.as_ref(), "/semantic_verification/unavailable_results");
     let hydrated_declarations = snapshot
         .events
         .iter()
@@ -240,6 +254,7 @@ fn run_workload(args: PerfArgs, cache_root: &Path) -> Result<PerfWorkloadReport>
         .filter_map(|event| event.count)
         .sum::<u64>();
     let summary = summarize(&snapshot);
+    let profile_timings_ms = profile_timings(&stderr);
 
     Ok(PerfWorkloadReport {
         workload: args.workload,
@@ -254,11 +269,36 @@ fn run_workload(args: PerfArgs, cache_root: &Path) -> Result<PerfWorkloadReport>
         stderr_tail: text_tail(&stderr),
         candidate_count,
         hydrated_declarations,
+        review_groups,
+        visible_groups,
+        semantic_planned_pairs,
+        semantic_cached_hits,
+        semantic_worker_pairs,
+        semantic_unavailable_results,
         probe_batches: (probe_batches > 0).then_some(probe_batches),
         probe_pairs: (probe_pairs > 0).then_some(probe_pairs),
+        profile_timings_ms,
         events: snapshot.events,
         summary,
     })
+}
+
+fn json_u64(payload: Option<&serde_json::Value>, pointer: &str) -> Option<u64> {
+    payload
+        .and_then(|payload| payload.pointer(pointer))
+        .and_then(serde_json::Value::as_u64)
+}
+
+fn profile_timings(stderr: &[u8]) -> BTreeMap<String, u128> {
+    String::from_utf8_lossy(stderr)
+        .lines()
+        .filter_map(|line| {
+            let rest = line.strip_prefix("profile.")?;
+            let (phase, value) = rest.split_once('=')?;
+            let millis = value.strip_suffix("ms")?.parse().ok()?;
+            Some((phase.to_owned(), millis))
+        })
+        .collect()
 }
 
 fn text_tail(bytes: &[u8]) -> Option<String> {
@@ -290,6 +330,7 @@ fn cache_state(workload: PerfWorkload) -> &'static str {
         PerfWorkload::WarmMathlibIndex => "warm",
         PerfWorkload::KanproofsTargetedMathlib
         | PerfWorkload::KanproofsFullNoMathlib
+        | PerfWorkload::KanproofsFullMathlibNoProbes
         | PerfWorkload::KanproofsFullMathlib
         | PerfWorkload::FixtureAudit => "reuse-or-build",
     }
@@ -357,6 +398,22 @@ fn workload_command(args: &PerfArgs) -> Vec<String> {
                 command.extend(["--mathlib-workspace".to_owned(), mathlib.display().to_string()]);
             }
         }
+        PerfWorkload::KanproofsFullMathlibNoProbes => {
+            command.extend([
+                "audit".to_owned(),
+                "--workspace".to_owned(),
+                kanproofs.display().to_string(),
+                "--module".to_owned(),
+                "KanProofs".to_owned(),
+                "--compare-mathlib".to_owned(),
+                "--no-semantic-probes".to_owned(),
+                "--format".to_owned(),
+                "json".to_owned(),
+            ]);
+            if let Some(mathlib) = &args.mathlib_workspace {
+                command.extend(["--mathlib-workspace".to_owned(), mathlib.display().to_string()]);
+            }
+        }
         PerfWorkload::FixtureAudit => {
             command.extend([
                 "audit".to_owned(),
@@ -409,7 +466,9 @@ impl Drop for EnvGuard {
 
 #[cfg(test)]
 mod tests {
-    use super::{CostClass, PerfSnapshot, measure, record_count, summarize};
+    use crate::cli::{PerfArgs, PerfFormat, PerfWorkload};
+
+    use super::{CostClass, PerfSnapshot, measure, profile_timings, record_count, summarize, workload_command};
 
     #[test]
     fn summarizes_duration_and_counts_by_stable_names() {
@@ -430,5 +489,33 @@ mod tests {
 
         assert!(summary.elapsed_ms_by_class.is_empty());
         assert!(summary.counts_by_name.is_empty());
+    }
+
+    #[test]
+    fn full_mathlib_no_probes_workload_disables_semantic_probes() {
+        let command = workload_command(&PerfArgs {
+            workload: PerfWorkload::KanproofsFullMathlibNoProbes,
+            format: PerfFormat::Json,
+            output: None,
+            cache_root: None,
+            kanproofs_workspace: Some(std::path::PathBuf::from("/tmp/kanproofs")),
+            mathlib_workspace: None,
+        });
+
+        assert!(command.contains(&"--compare-mathlib".to_owned()));
+        assert!(command.contains(&"--no-semantic-probes".to_owned()));
+        assert!(
+            command
+                .windows(2)
+                .any(|window| window[0] == "--module" && window[1] == "KanProofs")
+        );
+    }
+
+    #[test]
+    fn parses_profile_timings_from_stderr() {
+        let timings = profile_timings(b"profile.retrieval=123ms\nignored\nprofile.report.render=4ms\n");
+
+        assert_eq!(timings["retrieval"], 123);
+        assert_eq!(timings["report.render"], 4);
     }
 }

@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -22,7 +23,7 @@ use crate::ranking::{
     RankedGroup, RankedReview, RankingInput, RankingProfile, ReviewFilter, ReviewPriority as RankedPriority,
     rank_candidates,
 };
-use crate::replacement_hints::{ReplacementHintProfile, attach_replacement_hints};
+use crate::replacement_hints::{ReplacementHintProfile, attach_replacement_hints, reference_declarations_for_hints};
 use crate::retrieval::{RetrievalDiagnostics, retrieve_candidates};
 use crate::semantic_verification::{
     ProbeDiagnostics, ProbeSettings, SemanticVerificationInput, VerificationIndex, candidate_sets_for_review,
@@ -479,8 +480,8 @@ fn compute_audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditComput
         args.review_profile,
         args.show_noise,
     );
-    let source_facts = perf::measure(CostClass::RetrievalRanking, "source_refs.collect", || {
-        collect_source_facts(SourceFactInput::new(&source_fact_rows))
+    let mut source_facts = perf::measure(CostClass::RetrievalRanking, "source_refs.collect.initial", || {
+        collect_source_facts(SourceFactInput::new(&source_fact_rows).without_references())
     });
     let cheap_review = perf::measure(CostClass::RetrievalRanking, "ranking.rank_candidates.initial", || {
         rank_candidates(RankingInput {
@@ -510,7 +511,7 @@ fn compute_audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditComput
         },
         reporter,
     )?;
-    let review = perf::measure(CostClass::RetrievalRanking, "ranking.rank_candidates.final", || {
+    let review_without_references = perf::measure(CostClass::RetrievalRanking, "ranking.rank_candidates.final", || {
         rank_candidates(RankingInput {
             candidate_sets: &review_candidate_sets,
             semantic_evidence: &verification.evidence,
@@ -519,6 +520,35 @@ fn compute_audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditComput
             comparison_policy: &compare.provenance.policy,
         })
     });
+    let filter = profile_filter(
+        args.review_profile,
+        args.include_generated,
+        args.show_noise,
+        ranked_priority(args.min_priority),
+    );
+    let reference_ids = reference_declarations_for_hints(&review_without_references, filter)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    let review = if reference_ids.is_empty() {
+        review_without_references
+    } else {
+        source_facts = perf::measure(CostClass::RetrievalRanking, "source_refs.collect.references", || {
+            collect_source_facts(SourceFactInput::new(&source_fact_rows).with_reference_declarations(reference_ids))
+        });
+        perf::measure(
+            CostClass::RetrievalRanking,
+            "ranking.rank_candidates.with_references",
+            || {
+                rank_candidates(RankingInput {
+                    candidate_sets: &review_candidate_sets,
+                    semantic_evidence: &verification.evidence,
+                    source_facts: &source_facts,
+                    profile: RankingProfile::default(),
+                    comparison_policy: &compare.provenance.policy,
+                })
+            },
+        )
+    };
     let review = perf::measure(CostClass::RetrievalRanking, "ranking.replacement_hints", || {
         attach_replacement_hints(review, &source_facts, ReplacementHintProfile::default())
     });

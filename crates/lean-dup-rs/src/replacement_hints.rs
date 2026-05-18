@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::ranking::{ConfidenceTier, RankedReview, ReviewAction};
+use crate::ranking::{ConfidenceTier, RankedGroup, RankedReview, ReviewAction, ReviewFilter};
 use crate::source_refs::{ImportStatus, SourceFacts, SourceReference};
 
 const DEFAULT_MAX_DISPLAYED_CALLERS: usize = 12;
@@ -50,8 +50,27 @@ pub(crate) fn attach_replacement_hints(
     review
 }
 
+/// Return workspace declarations that need caller scans for visible hints.
+///
+/// This keeps source-reference collection aligned with the replacement-hint
+/// boundary: audit does not need to know hint eligibility rules or caller
+/// display policy.
+pub(crate) fn reference_declarations_for_hints(review: &RankedReview, filter: ReviewFilter) -> Vec<String> {
+    let mut declarations = review
+        .visible_groups(filter)
+        .into_iter()
+        .filter(|group| eligible(group) && group.target_decl.is_some() && group.target_module.is_some())
+        .flat_map(|group| group.members.iter())
+        .filter(|member| member.origin == "workspace")
+        .map(|member| member.declaration_id.clone())
+        .collect::<Vec<_>>();
+    declarations.sort();
+    declarations.dedup();
+    declarations
+}
+
 fn hint_for_group(
-    group: &crate::ranking::RankedGroup,
+    group: &RankedGroup,
     facts: &SourceFacts,
     profile: ReplacementHintProfile,
 ) -> Option<ReplacementHint> {
@@ -106,7 +125,7 @@ fn hint_for_group(
     })
 }
 
-fn eligible(group: &crate::ranking::RankedGroup) -> bool {
+fn eligible(group: &RankedGroup) -> bool {
     if matches!(group.confidence, ConfidenceTier::Low | ConfidenceTier::Noise) {
         return false;
     }

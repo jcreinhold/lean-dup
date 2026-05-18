@@ -305,6 +305,7 @@ pub(crate) enum PerfWorkload {
     WarmMathlibIndex,
     KanproofsTargetedMathlib,
     KanproofsFullNoMathlib,
+    KanproofsFullMathlibNoProbes,
     KanproofsFullMathlib,
     FixtureAudit,
 }
