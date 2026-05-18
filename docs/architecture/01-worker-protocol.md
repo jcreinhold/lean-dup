@@ -4,6 +4,9 @@ This document specifies the first versioned protocol between the Lean semantic w
 refines the boundary in [00-overview.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/00-overview.md) into a
 caller-facing contract for prompt 03 and later implementation prompts.
 
+For the current command-to-report pipeline around this protocol, see
+[06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md).
+
 The protocol is a semantic interface, not a storage format. Lean types and Rust domain structs are the model. JSON and
 JSONL are subprocess encodings used to move those facts between processes.
 
@@ -27,7 +30,7 @@ Rust callers must not rely on:
 - index storage layout, row ids, transaction order, insertion phases, or report/ranking policy.
 
 Any protocol comment or generated interface comment must describe what callers can rely on. It must not describe Lean
-traversal algorithms, storage layout, temporary migration scaffolding, or the current Python implementation.
+traversal algorithms, storage layout, temporary migration scaffolding, or retired Python implementation details.
 
 ## Design Note
 

@@ -31,6 +31,15 @@ cargo build --release -p lean-dup-rs
 target/release/lean-dup-rs audit --workspace /path/to/lake/workspace --compare-mathlib --progress
 ```
 
+## Architecture Docs
+
+Start with
+[docs/architecture/06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md)
+for the as-built pipeline and design rationale. Production gates are tracked in
+[docs/architecture/04-production-readiness.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/04-production-readiness.md),
+and the Lean/Rust worker protocol is specified in
+[docs/architecture/01-worker-protocol.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/01-worker-protocol.md).
+
 By default, `audit` scans the inferred local Lake workspace roots and includes private theorem-like declarations when
 Lean exposes them through compiled modules. Use `--module Root.Module` to restrict the audit to one root module and its
 descendants.

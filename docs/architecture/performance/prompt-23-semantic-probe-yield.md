@@ -1,5 +1,8 @@
 # Prompt 23 Semantic Probe Availability And Evidence Yield
 
+For the current end-to-end architecture around semantic verification, see
+[../06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md).
+
 ## Design Note
 
 This pass makes semantic probing own its own evidence availability policy instead of letting audit, ranking, or worker

@@ -1,64 +1,99 @@
-# Rust CLI Foundation
+# Rust CLI Engine
 
-This document records the Rust boundary introduced by prompt 08. It is a foundation for later production work, not the
-production audit engine.
+This document records the current Rust CLI boundary. It supersedes the prompt-08 foundation note: `lean-dup-rs` is now
+the operational Rust/Lean engine, not a skeleton around future work. For the full as-built pipeline, see
+[06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md).
 
 ## Design Note
 
-This layer owns Lake workspace discovery, module-root and source-file enumeration, Lake command invocation, cache-root
-and cache-key policy, CLI rendering, and progress/profile plumbing. Its smallest public interface is the `lean-dup-rs`
-binary plus one crate-level `run` entrypoint; all workspace, Lake, cache, progress, and rendering modules remain
-internal.
+The CLI engine owns command parsing, command orchestration, progress/profile plumbing, top-level output routing, and the
+small user-facing command vocabulary. It coordinates workspace resolution, worker use, indexing, retrieval, semantic
+verification, ranking, report construction, evaluation, and diagnostics through internal modules.
+
+Its smallest public interface is the `lean-dup-rs` binary plus the crate-level `run` entrypoint. The normal public
+commands are `doctor`, `index`, `index-mathlib`, `audit`, `eval`, `show`, and `diff`. Hidden developer commands are
+`perf` and `cache-cleanup`.
 
 These decisions must not leak upward or sideways:
 
-- how Lakefiles are parsed;
-- the conventional nested `lean/` workspace fallback;
-- source and manifest hashing details;
-- cache-key string format;
-- phase names and timing granularity;
-- stdout/stderr rendering policy.
+- Lakefile parsing, workspace fallback rules, or mathlib package layout;
+- worker build policy, subprocess framing, JSONL parsing, or timeout policy;
+- cache-key serialization, latest-pointer shape, SQLite table layout, or cleanup safety rules;
+- retrieval key shapes, ranking thresholds, probe chunking, and report explanation precedence;
+- stdout/stderr routing details beyond the guarantee that JSON stdout remains machine-clean.
 
-The preserved user-facing capability is the command surface: `doctor`, `index`, `index-mathlib`, `audit`, `show`, and
-`diff` all exist with typed options and stable progress/profile behavior. The intentionally discarded Python-era
-behavior is loosely typed command state, ad hoc stderr writes from internal modules, Rust-side Lean semantic parsing,
-source skeleton semantics, and pass-through Rust wrappers over Python implementation details.
+The preserved user-facing capability is a local read-only duplicate auditor with real indexing, cached mathlib/external
+comparison, semantic evidence, ranked review groups, replacement hints, baseline diffs, evaluation suites, performance
+workloads, and cache diagnostics.
+
+Python-era behavior intentionally discarded:
+
+- Python as the production command surface;
+- Rust wrappers that forward to Python implementation paths;
+- loosely typed command state;
+- source/text-driven Lean semantic parsing in orchestration code;
+- ad hoc stderr writes from internal modules.
 
 ## Design It Twice
 
-**Rejected: one large `main.rs`.** This would make the first Rust version easy to write but shallow. Command-line
-parsing, Lake discovery, cache-key policy, and rendering would all change together, and future prompts would have to
-split apart accidental coupling before implementing worker protocol handling or indexes.
+**Rejected: one large command script.** Putting workspace discovery, worker calls, cache decisions, retrieval, ranking,
+and rendering in `main.rs` would make the CLI easy to follow in the small and brittle in the large. Every production
+change would risk changing command parsing or output routing.
 
-**Rejected: shell out to Python.** This would preserve existing behavior, but only by making Rust a pass-through layer.
-It would keep cache and discovery decisions in the old Python modules and postpone the real Rust boundary.
+**Rejected: Rust as a compatibility shell.** A Rust binary that preserves Python entry points or delegates behavior to
+retired Python modules would keep two production surfaces and make release status depend on obsolete cache and protocol
+assumptions.
 
-**Chosen: internal decision-hiding modules.** The crate separates command parsing, command orchestration, workspace
-discovery, Lake execution, cache construction, typed progress/profile recording, and rendering. This is deeper because
-callers see one binary and one run entrypoint, while volatile details stay inside the module that owns them.
+**Chosen: command shell over deep internal boundaries.** The CLI owns command vocabulary and orchestration only.
+Workspace, mathlib, worker, index, retrieval, verification, ranking, source facts, report contract, eval, perf, and
+cache lifecycle each own their hidden decisions. This is deeper because users see one binary while volatile details
+stay behind capability-oriented module interfaces.
 
 ## Public Behavior
 
-The foundation CLI is read-only. It discovers workspaces, reports facts, constructs deterministic cache fingerprints,
-and returns deterministic skeleton results for commands whose production behavior belongs to later prompts. It does not
-persist indexes, rank candidates, parse Lean semantics, or speak the worker protocol.
+`doctor` checks workspace, Lake, Lean worker, and cache health. In JSON mode it reports cache lifecycle diagnostics,
+including cache root, labels, latest-pointer status, schema/provenance state, declaration counts when readable, and disk
+usage.
 
-`doctor` performs real foundation checks: it resolves the Lake workspace, discovers module roots, enumerates source
-files, resolves the cache root, computes a cache fingerprint, and runs `lake env lean --version`. `--require-oleans`
-checks for compiled artifacts for the selected modules.
+`index` builds or reuses a source-backed workspace index for selected modules.
 
-Progress and profile output are typed events recorded by internal modules. Rendering owns when and where those events
-are printed, so JSON stdout remains machine-clean.
+`index-mathlib` builds or reuses the audited project's pinned mathlib index. It runs from the local project Lake
+environment and uses the shared content-addressed cache by default.
+
+`audit` builds or reuses the needed indexes, retrieves candidates, optionally runs bounded semantic verification, ranks
+groups under the selected review profile, attaches source/replacement context where useful, and renders text or JSON.
+
+`eval` runs named quality suites with raw denominators for recall, shown-queue precision, hard-negative leakage,
+visible groups, probe availability, runtime, and memory. The fast suites are suitable for routine checks; KanProofs
+suites are explicit manual workloads.
+
+`show` explains one resolvable group with evidence mode, semantic/probe state, blockers, visibility reason, and
+replacement/import/caller impact.
+
+`diff` compares saved baselines.
+
+Hidden `perf` runs named performance workloads and writes JSON artifacts. Hidden `cache-cleanup` is dry-run by default
+and deletes only unprotected stale entries when explicitly executed.
+
+## Output Policy
+
+Text and JSON reports are rendered from typed report facts. Progress and profile output go to stderr. JSON stdout is a
+single parseable value even when progress/profile flags are enabled.
+
+The CLI does not expose SQLite details, worker transport details, probe chunking, or cache internals as normal audit
+options. Public flags describe user intent: workspace, modules, comparison sources, review profile, semantic-probe
+enablement, output format, and diagnostics.
 
 ## Red Flag Review
 
-- **Shallow module:** avoided by hiding real workspace, Lake, cache, and rendering decisions behind a narrow CLI.
-- **Pass-through wrapper:** avoided because Rust does not delegate to Python for discovery or cache-key construction.
-- **Temporal decomposition:** avoided by organizing modules around hidden decisions, not command execution steps.
-- **Information leakage:** avoided by keeping Lakefile parsing, cache-key ingredients, and rendering policy private.
-- **Special-general mixture:** avoided by keeping production ranking, protocol handling, and KanProofs policy out of
-    this foundation.
-- **Conjoined methods:** avoided by passing typed workspace and report values between modules.
-- **Hard-to-describe public API:** avoided; the public API is "run the CLI".
-- **Implementation details contaminating interface comments:** avoided by documenting caller guarantees rather than
-    parsing or hashing mechanics.
+- **Shallow module:** mitigated. The CLI coordinates workflows but leaves hidden decisions to workspace, worker, index,
+  retrieval, semantic verification, ranking, source, report, eval, perf, and cache modules.
+- **Pass-through wrapper:** avoided. Rust no longer forwards to Python; it owns the production command surface.
+- **Temporal decomposition:** mitigated. Modules are organized by hidden knowledge, not merely by audit phase.
+- **Information leakage:** mitigated. Cache, SQLite, worker, probe, and retrieval internals stay out of normal CLI
+  flags and reports.
+- **Special-general mixture:** contained. KanProofs policy is in eval/perf/manual artifacts, not normal command parsing.
+- **Conjoined methods:** mitigated. Commands exchange typed domain values rather than shared mutable phase state.
+- **Hard-to-describe public API:** mitigated. Users run one binary with a small set of task-oriented commands.
+- **Implementation details contaminating interface comments:** mitigated. This document describes caller-visible
+  behavior and boundaries, not table layouts, worker framing, or temporary migration scaffolding.

@@ -3,6 +3,10 @@
 Prompt 27 retires the Python-era implementation after Rust/Lean parity evidence exists. This document records what was
 removed, what replaced it, which capability was preserved, and which design mistake was eliminated.
 
+For the current Rust/Lean-only architecture, see
+[06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md). This
+document closes `G9 python_deprecation`; it does not close the remaining quality and release-hardening gates.
+
 ## Design Note
 
 This document owns the hidden knowledge for the switchover: the Python module inventory, the Rust/Lean replacement map,

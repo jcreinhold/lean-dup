@@ -1,7 +1,9 @@
 # Production Gate Evaluation
 
-This document records the evaluation boundary added by prompt 21. The goal is not to make retrieval look good; it is
-to make audit quality measurable before more feature work.
+This document records the evaluation boundary added by prompt 21 and updated through prompt 27. The goal is not to make
+retrieval look good; it is to make audit quality measurable before release work continues. For the current end-to-end
+pipeline, see
+[../06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md).
 
 ## Design Note
 
@@ -39,8 +41,8 @@ Python-era behavior intentionally discarded:
 The scorer would learn private paths, slow-suite rules, and audit execution details, making every future corpus a scorer
 change.
 
-**Chosen: general scorer plus production-gate suite orchestration.** The scorer only knows unordered pairs, ranks, shown
-membership, and raw denominators. Suite definitions own corpus loading, fixture/KanProofs execution, manual skip
+**Chosen: general scorer plus production-gate suite orchestration.** The scorer only knows unordered pairs, ranks,
+shown membership, and raw denominators. Suite definitions own corpus loading, fixture/KanProofs execution, manual skip
 policy, and gate enforcement. This is deeper because callers ask for a suite result rather than coordinating label
 files, cache roots, retrieval output, audit output, and skip rules themselves.
 
@@ -73,6 +75,10 @@ All percentage-like metrics are raw counts:
 - `timings`: index load, retrieval, probe, and total milliseconds;
 - `peak_memory_bytes`: peak RSS when the platform exposes it.
 
+Command completion is not a production-quality pass. `status = ok` means the suite ran and its current command-level
+gate logic did not abort. Release readiness still depends on the raw denominators satisfying `G1 regression_quality`
+and `G2 precision_control`.
+
 ## Commands
 
 Fast gate:
@@ -101,18 +107,30 @@ recorded fact, not a pass.
 
 ## Current Evidence
 
-The first runs after adding this boundary produced:
+Prompt 27 refreshed the eval artifacts:
 
-- `default`: recall@10 `14/14`, hard-negative hits `0/4`, candidate count `299`;
-- `hard-negatives`: recall@10 `1/1`, hard-negative hits `0/5`, candidate count `299`;
-- `production-gate` on this machine: status `failed`, aggregate recall@10 `15/21`, hard-negative hits `0/12`,
-  candidate count `456839`, peak memory `4285382656` bytes.
+- `target/eval/prompt27-default.json`
+- `target/eval/prompt27-hard-negatives.json`
+- `target/eval/prompt27-production-gate.json`
 
-The aggregate failed because `kanproofs-mathlib` hit `worker timed out after 60s`. `default`, `hard-negatives`, and
-`kanproofs-internal` completed successfully. The raw artifact is `target/eval/production-gate.json`.
+The old KanProofs/mathlib eval timeout is fixed: the aggregate now completes on this machine. The current quality
+results are still not production-ready.
 
-These are not final production results for `G1` or `G2`; they prove that the gate machinery can represent positives,
-hard negatives, manual slow-suite failures, raw denominators, runtime, and memory.
+| Suite | Status | Recall@10 | Hard-negative hits | Shown precision | Candidates | Total time |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `default` | `ok` | `14/14` | `0/4` | `13/34` | `299` | `6351 ms` |
+| `hard-negatives` | `ok` | `1/1` | `0/5` | `1/34` | `299` | `423 ms` |
+| `kanproofs-internal` | `ok` | `0/6` | `0/3` | `0/7507` | `466710` | `57197 ms` |
+| `kanproofs-mathlib` | `ok` | `0/11` | `3/4` | `0/13593` | `482205` | `723796 ms` |
+| `production-gate` | `ok` | `15/32` | `3/16` | `14/21168` | `949513` | `787767 ms` |
+
+Interpretation:
+
+- Fast fixture gates pass and remain useful CI-style checks.
+- The aggregate command now completes, which was necessary for Python deprecation and future validation work.
+- `G1 regression_quality` remains open because KanProofs internal and KanProofs/mathlib recall are poor.
+- `G2 precision_control` remains open because the KanProofs/mathlib suite shows `3/4` hard-negative leakage.
+- The aggregate `status = ok` must not be used as a release approval until the raw denominators pass.
 
 ## Red Flag Review
 

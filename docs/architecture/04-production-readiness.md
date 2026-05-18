@@ -1,7 +1,11 @@
 # Production Readiness
 
 This document is the release contract for `lean-dup`. It converts "not production-ready" into named gates, required
-evidence, and no-go criteria. A gate is open until a concrete command, report, or artifact proves it.
+evidence, and no-go criteria. A gate is open until concrete command output, report evidence, or a checked artifact
+proves it.
+
+For the current as-built system, see
+[06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md).
 
 ## Design Note
 
@@ -67,24 +71,27 @@ Production readiness requires all of the following:
   JSON has a documented stable contract.
 - **CI, packaging, versioning, and release docs:** local and CI checks build Rust and Lean code, exercise fixture
   workflows, expose release-grade version/doctor diagnostics, and document supported commands.
-- **Python-era implementation deprecation:** Python modules are retained only as lessons or regression fixtures unless
-  a prompt explicitly validates a retained production role.
+- **Python-era implementation deprecation:** Python modules, tests, and packaging are removed or quarantined after
+  validated Rust/Lean capability preservation.
 
-## Production Gates
+## Gate Status
 
-All gates are currently **open** unless the named evidence artifact is added or updated by a later prompt.
+Current status is evidence-based, not release-ready. Prompt 27 proved the Rust/Lean production surface can run the
+aggregate eval command, but it also exposed quality failures: `target/eval/prompt27-production-gate.json` reports
+aggregate recall@10 `15/32`, aggregate hard-negative hits `3/16`, KanProofs/mathlib recall@10 `0/11`, and
+KanProofs/mathlib hard-negative hits `3/4`.
 
 | Gate | Status | Production claim | Required evidence artifact |
 | --- | --- | --- | --- |
 | `G1 regression_quality` | Open | KanProofs and fixture quality are proven with raw denominators. | `docs/architecture/evaluation/production-gates.md` plus `target/eval/production-gate.json`. |
 | `G2 precision_control` | Open | Hard negatives and known bogus mathlib matches do not leak into the default visible queue. | `docs/architecture/evaluation/production-gates.md` hard-negative section plus fixture/KanProofs eval JSON. |
-| `G3 semantic_probe_yield` | Open | Probes are recoverable and produce useful proof-grade evidence instead of mostly unavailable results. | `docs/architecture/performance/prompt-23-semantic-probe-yield.md` or equivalent report with before/after unavailable counts. |
-| `G4 external_comparison_provenance` | Open | Source-backed and static external indexes have explicit, user-visible semantics. | `docs/architecture/05-external-comparison-provenance.md` plus JSON/profile fixture outputs. |
-| `G5 cache_validity_lifecycle` | Open | Shared caches reuse safely and invalidate only on relevant source, toolchain, worker, protocol, or semantic changes. | `docs/architecture/cache-validity-lifecycle.md` plus `target/cache/doctor-production.json`. |
-| `G6 full_audit_performance` | Open | Warm full audits meet documented runtime and memory targets. | `docs/architecture/performance/prompt-25-full-audit-throughput.md` plus raw JSON/profile outputs under `target/perf/`. |
-| `G7 report_contract` | Open | Empty queues, hidden groups, unavailable probes, provenance, and JSON schema are explained. | `docs/architecture/report-contract.md` plus text/JSON golden outputs under `target/report-contract/`. |
+| `G3 semantic_probe_yield` | Partial | Probes are recoverable and typed, but useful proof-grade yield remains insufficiently validated. | `docs/architecture/performance/prompt-23-semantic-probe-yield.md` plus real-workload probe evidence. |
+| `G4 external_comparison_provenance` | Implemented, awaiting validation | Source-backed and static external indexes have explicit, user-visible semantics. | `docs/architecture/05-external-comparison-provenance.md` plus JSON/profile fixture outputs. |
+| `G5 cache_validity_lifecycle` | Implemented, awaiting validation | Shared caches reuse safely and invalidate only on relevant source, toolchain, worker, protocol, or semantic changes. | `docs/architecture/cache-validity-lifecycle.md` plus `target/cache/doctor-production.json`. |
+| `G6 full_audit_performance` | Partial | Warm full audits meet documented runtime and memory targets. | `docs/architecture/performance/prompt-25-full-audit-throughput.md` plus raw JSON/profile outputs under `target/perf/`. |
+| `G7 report_contract` | Implemented, awaiting validation | Empty queues, hidden groups, unavailable probes, provenance, and JSON schema are explained. | `docs/architecture/report-contract.md` plus text/JSON golden outputs under `target/report-contract/`. |
 | `G8 release_hardening` | Open | CI, packaging, version output, install docs, and reproducibility are release-grade. | `docs/architecture/release-hardening.md`, CI config, and `target/release-diagnostics/`. |
-| `G9 python_deprecation` | Open | Validated Python-era capabilities are preserved and superseded Python paths are removed or quarantined. | `docs/architecture/python-deprecation-map.md` plus parity eval output. |
+| `G9 python_deprecation` | Complete | Validated Python-era capabilities are preserved and superseded Python paths are removed. | `docs/architecture/python-deprecation-map.md` plus Prompt 27 eval artifacts. |
 
 ## Acceptance Evidence
 
@@ -110,8 +117,9 @@ cargo run -p lean-dup-rs -- eval --suite production-gate --format json \
   --output target/eval/production-gate.json
 ```
 
-The `production-gate` suite may remain manual and private-path dependent until prompt 21 defines its label files and
-slow-suite policy. It must not become default CI without an explicit runtime and privacy decision.
+The `production-gate` suite may remain manual and private-path dependent. It must not become default CI without an
+explicit runtime and privacy decision. Command completion is not enough for release readiness; the raw recall and
+hard-negative denominators must pass.
 
 Required full-audit commands:
 
@@ -160,18 +168,18 @@ The expected evidence artifacts are:
 
 ## Prompt Map
 
-| Prompt | Gates advanced | Required result |
+| Prompt | Gates advanced | Current result |
 | --- | --- | --- |
-| 21 | `G1`, `G2` | Production-gate eval suites, labels, hard negatives, raw denominators, and quality docs. |
-| 22 | `G4`, `G7` | Source-backed/static provenance contract in index metadata, reports, and JSON. |
-| 23 | `G3`, `G2` | Lower missing/unavailable semantic probes and increase useful proof-grade evidence. |
-| 24 | `G5`, `G8` | Source-relevant cache fingerprints, doctor diagnostics, and safe cleanup lifecycle. |
-| 25 | `G6`, `G3`, `G5` | Measured warm full-audit throughput improvements with before/after numbers. |
-| 26 | `G7`, `G2` | Empty-queue explanations, `show` evidence explanations, and stable JSON contract. |
-| 27 | `G9`, `G1` | Python parity/deletion map and Rust-first docs after validated capability preservation. |
-| 28 | `G8`, `G5`, `G7` | CI, packaging, version output, release docs, and reproducibility diagnostics. |
-| 29 | `G1`, `G2`, `G3`, `G4`, `G5`, `G6`, `G7` | Real-workload validation on KanProofs and a second project or fixture. |
-| 30 | All gates | Final production/no-go document with supported workflows, limitations, and release checklist. |
+| 21 | `G1`, `G2` | Production-gate eval suites, labels, hard negatives, raw denominators, and quality docs exist. |
+| 22 | `G4`, `G7` | Source-backed/static provenance contract exists in index metadata, reports, and JSON. |
+| 23 | `G3`, `G2` | Missing/private probe mismatch was fixed; proof-grade yield still needs validation. |
+| 24 | `G5`, `G8` | Source-relevant cache fingerprints, doctor diagnostics, and safe cleanup lifecycle exist. |
+| 25 | `G6`, `G3`, `G5` | Warm full-audit throughput improved; full mathlib comparison remains expensive. |
+| 26 | `G7`, `G2` | Empty-queue explanations, `show` explanations, and stable JSON contract exist. |
+| 27 | `G9`, `G1` | Python implementation removed; production-gate command completes but quality gates fail. |
+| 28 | `G8`, `G5`, `G7` | Pending: CI, packaging, version output, release docs, and reproducibility diagnostics. |
+| 29 | `G1`, `G2`, `G3`, `G4`, `G5`, `G6`, `G7` | Pending: real-workload validation on KanProofs and a second project or fixture. |
+| 30 | All gates | Pending: final production/no-go document. |
 
 ## No-Go Criteria
 
@@ -195,8 +203,8 @@ The release is a no-go if any of these remain true:
 - **Temporal decomposition:** avoided. Gates are organized by production capability, not by implementation order.
 - **Information leakage:** avoided. The document names evidence requirements without exposing eval label layout, SQLite
   tables, probe chunking, worker framing, or cache internals as release interfaces.
-- **Special-general mixture:** no remaining red flag. KanProofs is a required real workload, but the production gates
-  are general release claims about quality, evidence, cache behavior, reporting, and packaging.
+- **Special-general mixture:** contained. KanProofs is a required real workload, but the production gates are general
+  release claims about quality, evidence, cache behavior, reporting, and packaging.
 - **Conjoined methods:** no remaining red flag. Each gate has a separable claim and artifact; later prompts can close
   one gate without editing unrelated gate semantics.
 - **Hard-to-describe public API:** no remaining red flag. The public interface is one architecture document with named

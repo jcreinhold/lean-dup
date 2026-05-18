@@ -2,6 +2,9 @@
 
 This document records the production cache-validity boundary from prompt 24.
 
+For the current end-to-end architecture around cache use, `doctor`, and hidden cleanup, see
+[06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md).
+
 ## Design Note
 
 The cache lifecycle boundary owns the hidden knowledge for cache validity: source-relevant fingerprint ingredients,

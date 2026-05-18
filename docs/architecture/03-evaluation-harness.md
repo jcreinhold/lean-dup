@@ -4,6 +4,10 @@ The evaluation harness makes duplicate detection measurable. It scores observed 
 reports raw counts for recall, shown-queue precision, hard-negative leakage, candidate volume, runtime, and peak memory
 when the platform exposes it.
 
+For the current end-to-end architecture and production-gate status, see
+[06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md) and
+[evaluation/production-gates.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/evaluation/production-gates.md).
+
 ## Design Note
 
 This layer owns label normalization, unordered pair identity, cluster-to-pair expansion, recall@k denominators,

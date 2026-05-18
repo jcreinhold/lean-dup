@@ -1,5 +1,8 @@
 # Prompt 15 Performance Pass
 
+For the current as-built architecture around these historical measurements, see
+[../06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md).
+
 ## Design Note
 
 The new internal performance layer owns workload names, cache-state setup, timing labels, memory snapshots, worker event

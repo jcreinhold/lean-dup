@@ -3,6 +3,9 @@
 This document defines the production report contract for `lean-dup`. It closes `G7 report_contract` when the contract
 is backed by fixture and real-workload artifacts.
 
+For the current end-to-end pipeline that builds these explanation facts, see
+[06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md).
+
 ## Design Note
 
 The report contract owns the hidden knowledge for user-facing explanations: visible-queue summaries, hidden-group

@@ -2,6 +2,9 @@
 
 This document closes the production-readiness gate for source-backed versus static external comparison semantics.
 
+For the current end-to-end audit flow that consumes this provenance boundary, see
+[06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md).
+
 ## Design Note
 
 This boundary owns the hidden knowledge for external comparison provenance: whether an index is source-backed or static,

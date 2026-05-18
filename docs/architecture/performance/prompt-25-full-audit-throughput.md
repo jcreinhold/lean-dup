@@ -1,5 +1,15 @@
 # Prompt 25 Full-Audit Throughput
 
+For the current end-to-end architecture around audit throughput, see
+[../06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md).
+
+## Current Status Note
+
+This remains a historical performance report. Prompt 27 later moved large index-worker timeout policy into the
+worker/index boundary, so the old KanProofs/mathlib eval timeout described below is superseded. The current Prompt 27
+production-gate artifact completes, but it still exposes quality failures: aggregate recall@10 `15/32`, aggregate
+hard-negative hits `3/16`, KanProofs/mathlib recall@10 `0/11`, and KanProofs/mathlib hard-negative hits `3/4`.
+
 ## Design Note
 
 The internal audit-throughput profiling layer owns workload cache state, timing labels, memory snapshots,
@@ -147,20 +157,20 @@ SQLite query shape.
 The targeted mathlib workload regressed in wall time from 8.93 s to 11.96 s in this measurement set while peak RSS
 dropped from 2.03 GB to 0.66 GB. No code path specific to targeted mathlib was tuned in this prompt.
 
-The production-gate eval artifact was refreshed at `target/eval/production-gate.json`, but the aggregate gate still
-fails:
+The production-gate eval artifact was refreshed at `target/eval/production-gate.json`, but at the time of this report
+the aggregate gate still failed:
 
 ```text
 status = failed
 default = ok
 hard-negatives = ok
 kanproofs-internal = ok
-kanproofs-mathlib = failed, worker timed out after 60s
+kanproofs-mathlib = failed because the eval worker used the old short indexing timeout
 ```
 
-This is not a new failure introduced by the throughput changes; it is the same manual mathlib gate that remains open in
-the production-readiness sequence. Prompt 26 should not paper over it with output wording, and Prompt 29 must validate
-the real mathlib gate before release.
+This was not a new failure introduced by the throughput changes. Prompt 27 fixed that timeout policy, but Prompt 29
+must still validate the real mathlib quality gate before release because current recall and hard-negative denominators
+remain unacceptable.
 
 ## Red Flag Review
 
