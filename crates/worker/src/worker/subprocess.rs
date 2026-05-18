@@ -601,7 +601,10 @@ mod tests {
 
     #[test]
     fn malformed_json_is_structured_failure() {
-        let (_temp, transport) = script("printf '{'");
+        // Consume the request line before exiting so the transport's stdin
+        // write succeeds; otherwise the child exits first on Linux and the
+        // call returns a write/broken-pipe error before reading stdout.
+        let (_temp, transport) = script("IFS= read -r _line; printf '{'");
         assert!(matches!(
             transport.call(request(Command::Version), control()),
             Err(WorkerError::InvalidJsonLine { .. })
