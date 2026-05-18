@@ -26,18 +26,21 @@
       "members": ["SSet.Subcomplex.Pairing.toAnodynePresentation", "SSet.Subcomplex.PairingCore.toAnodynePresentation"]
     }
   ],
-  "hard_negative_clusters": [
+  "hard_negative_pairs": [
     {
       "id": "broad-extensionality",
-      "members": ["subsumption-candidate-7", "subsumption-candidate-24", "subsumption-candidate-25"]
+      "left": "omegaRecursiveGraph_functional",
+      "right": "naturality_component"
     },
     {
       "id": "broad-cancellation",
-      "members": ["subsumption-candidate-53", "subsumption-candidate-55", "subsumption-candidate-82"]
+      "left": "VojtaConjectureRankOne",
+      "right": "RiemannHypothesis"
     },
     {
       "id": "same-conclusion-shape",
-      "members": ["omegaRecursiveGraph_functional", "naturality_component"]
+      "left": "WeierstrassCurve.valuation_c₄_aux",
+      "right": "WeierstrassCurve.valuation_Δ_aux"
     }
   ]
 }

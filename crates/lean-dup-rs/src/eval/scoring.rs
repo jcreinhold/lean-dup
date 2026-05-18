@@ -1,5 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
-
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
 
 use crate::eval::labels::GoldLabels;
@@ -42,6 +41,8 @@ pub(crate) struct ObservedPair {
 pub(crate) struct ObservedRun {
     pub(crate) suite: String,
     pub(crate) pairs: Vec<ObservedPair>,
+    pub(crate) visible_groups: CountMetric,
+    pub(crate) probe_unavailable: CountMetric,
     pub(crate) timings: TimingMetrics,
     pub(crate) peak_memory_bytes: Option<u64>,
 }
@@ -64,6 +65,8 @@ pub(crate) struct EvaluationMetrics {
     pub(crate) recall: Vec<RecallAtK>,
     pub(crate) shown_queue_precision: CountMetric,
     pub(crate) hard_negative_hits: CountMetric,
+    pub(crate) visible_groups: CountMetric,
+    pub(crate) probe_unavailable: CountMetric,
     pub(crate) candidate_count: usize,
     pub(crate) timings: TimingMetrics,
     pub(crate) peak_memory_bytes: Option<u64>,
@@ -76,7 +79,7 @@ pub(crate) struct RecallAtK {
     pub(crate) total: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub(crate) struct CountMetric {
     pub(crate) found: usize,
     pub(crate) total: usize,
@@ -94,7 +97,7 @@ pub(crate) fn score_run(labels: &GoldLabels, observed: &ObservedRun, k_values: &
         .iter()
         .filter(|pair| pair.shown)
         .map(|pair| pair.pair.clone())
-        .collect::<BTreeSet<_>>();
+        .collect::<FxHashSet<_>>();
 
     let recall = normalized_k_values(k_values)
         .into_iter()
@@ -123,14 +126,16 @@ pub(crate) fn score_run(labels: &GoldLabels, observed: &ObservedRun, k_values: &
             found: hard_negative_hits,
             total: labels.hard_negatives.len(),
         },
+        visible_groups: observed.visible_groups.clone(),
+        probe_unavailable: observed.probe_unavailable.clone(),
         candidate_count: observed.pairs.len(),
         timings: observed.timings.clone(),
         peak_memory_bytes: observed.peak_memory_bytes,
     }
 }
 
-fn best_rank_by_pair(pairs: &[ObservedPair]) -> BTreeMap<GoldPair, usize> {
-    let mut ranks: BTreeMap<GoldPair, usize> = BTreeMap::new();
+fn best_rank_by_pair(pairs: &[ObservedPair]) -> FxHashMap<GoldPair, usize> {
+    let mut ranks: FxHashMap<GoldPair, usize> = FxHashMap::default();
     for observed in pairs {
         ranks
             .entry(observed.pair.clone())
@@ -153,9 +158,9 @@ fn normalized_k_values(k_values: &[usize]) -> Vec<usize> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use rustc_hash::FxHashSet;
 
-    use super::{GoldPair, ObservedPair, ObservedRun, TimingMetrics, score_run};
+    use super::{CountMetric, GoldPair, ObservedPair, ObservedRun, TimingMetrics, score_run};
     use crate::eval::labels::GoldLabels;
 
     #[test]
@@ -199,7 +204,7 @@ mod tests {
     }
 
     fn labels<const P: usize, const N: usize>(positives: [&str; P], negatives: [&str; N]) -> GoldLabels {
-        let positives = positives.into_iter().map(pair).collect::<BTreeSet<_>>();
+        let positives = positives.into_iter().map(pair).collect::<FxHashSet<_>>();
         let hard_negatives = negatives
             .into_iter()
             .map(pair)
@@ -223,6 +228,8 @@ mod tests {
                     shown,
                 })
                 .collect(),
+            visible_groups: CountMetric::default(),
+            probe_unavailable: CountMetric::default(),
             timings: TimingMetrics::default(),
             peak_memory_bytes: None,
         }

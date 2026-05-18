@@ -9,7 +9,9 @@ use crate::cli::EvalSuite;
 use crate::error::{Error, Result};
 use crate::eval::labels::{GoldLabels, load_builtin};
 use crate::eval::memory;
-use crate::eval::scoring::{EvaluationMetrics, GoldPair, ObservedPair, ObservedRun, TimingMetrics, score_run};
+use crate::eval::scoring::{
+    CountMetric, EvaluationMetrics, GoldPair, ObservedPair, ObservedRun, RecallAtK, TimingMetrics, score_run,
+};
 use crate::index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
 use crate::progress::Reporter;
 use crate::retrieval::{CandidateExplanation, RetrievalOutput, retrieve_candidates};
@@ -26,9 +28,22 @@ pub(crate) struct EvalRequest {
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct EvaluationReport {
-    pub(crate) status: &'static str,
+    pub(crate) status: String,
     pub(crate) suite: String,
     pub(crate) metrics: EvaluationMetrics,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) runs: Vec<EvaluationRunReport>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct EvaluationRunReport {
+    pub(crate) suite: String,
+    pub(crate) status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) metrics: Option<EvaluationMetrics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) reason: Option<String>,
+    pub(crate) manual: bool,
 }
 
 struct SuiteDefinition {
@@ -61,6 +76,13 @@ struct SuiteIndexRequest<'a> {
 }
 
 pub(crate) fn run(request: EvalRequest, reporter: &mut Reporter) -> Result<EvaluationReport> {
+    if request.suite == EvalSuite::ProductionGate {
+        return run_production_gate(request, reporter);
+    }
+    run_single(request, reporter)
+}
+
+fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvaluationReport> {
     let total_started = Instant::now();
     let labels = load_builtin(request.suite)?;
     let definition = suite_definition(&request);
@@ -116,6 +138,19 @@ pub(crate) fn run(request: EvalRequest, reporter: &mut Reporter) -> Result<Evalu
     let observed = ObservedRun {
         suite: labels.suite.clone(),
         pairs: observed_pairs(&output),
+        visible_groups: CountMetric {
+            found: output
+                .candidate_sets
+                .iter()
+                .filter(|set| {
+                    set.candidates
+                        .iter()
+                        .any(|candidate| is_shown_queue_candidate(&candidate.explanation))
+                })
+                .count(),
+            total: output.candidate_sets.len(),
+        },
+        probe_unavailable: CountMetric { found: 0, total: 0 },
         timings: TimingMetrics {
             index_load_ms,
             retrieval_ms,
@@ -128,10 +163,165 @@ pub(crate) fn run(request: EvalRequest, reporter: &mut Reporter) -> Result<Evalu
     enforce_suite_gates(&definition, &labels, &metrics)?;
 
     Ok(EvaluationReport {
-        status: "ok",
+        status: "ok".to_owned(),
         suite: labels.suite,
         metrics,
+        runs: Vec::new(),
     })
+}
+
+fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<EvaluationReport> {
+    let mut runs = Vec::new();
+    for child in [EvalSuite::Default, EvalSuite::HardNegatives] {
+        runs.push(run_child_suite(
+            EvalRequest {
+                suite: child,
+                workspace: None,
+                mathlib_workspace: None,
+                k_values: request.k_values.clone(),
+            },
+            false,
+            reporter,
+        ));
+    }
+
+    for child in [EvalSuite::KanproofsInternal, EvalSuite::KanproofsMathlib] {
+        runs.push(run_child_suite(
+            EvalRequest {
+                suite: child,
+                workspace: request.workspace.clone(),
+                mathlib_workspace: request.mathlib_workspace.clone(),
+                k_values: request.k_values.clone(),
+            },
+            true,
+            reporter,
+        ));
+    }
+
+    let completed_metrics = runs.iter().filter_map(|run| run.metrics.as_ref()).collect::<Vec<_>>();
+    let metrics = aggregate_metrics("production-gate", &completed_metrics);
+    let status = if runs.iter().any(|run| run.status == "failed") {
+        "failed"
+    } else if runs.iter().any(|run| run.status == "skipped") {
+        "incomplete"
+    } else {
+        "ok"
+    };
+
+    Ok(EvaluationReport {
+        status: status.to_owned(),
+        suite: "production-gate".to_owned(),
+        metrics,
+        runs,
+    })
+}
+
+fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) -> EvaluationRunReport {
+    if manual && !manual_workspace_exists(&request) {
+        return EvaluationRunReport {
+            suite: request.suite.as_str().to_owned(),
+            status: "skipped".to_owned(),
+            metrics: None,
+            reason: Some("manual suite workspace is unavailable".to_owned()),
+            manual,
+        };
+    }
+
+    let suite = request.suite;
+    match run_single(request, reporter) {
+        Ok(report) => EvaluationRunReport {
+            suite: report.suite,
+            status: report.status,
+            metrics: Some(report.metrics),
+            reason: None,
+            manual,
+        },
+        Err(error) => {
+            let reason = error.to_string();
+            let status = if manual && is_manual_prerequisite_error(&reason) {
+                "skipped"
+            } else {
+                "failed"
+            };
+            EvaluationRunReport {
+                suite: suite.as_str().to_owned(),
+                status: status.to_owned(),
+                metrics: None,
+                reason: Some(reason),
+                manual,
+            }
+        }
+    }
+}
+
+fn manual_workspace_exists(request: &EvalRequest) -> bool {
+    request
+        .workspace
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("/Users/jcreinhold/Code/kan-proofs"))
+        .exists()
+}
+
+fn is_manual_prerequisite_error(reason: &str) -> bool {
+    reason.contains("missing compiled oleans")
+        || (reason.contains("import_failed") && reason.contains("object file") && reason.contains("does not exist"))
+        || reason.contains("workspace does not exist")
+        || reason.contains("not a Lake workspace")
+}
+
+fn aggregate_metrics(suite: &str, runs: &[&EvaluationMetrics]) -> EvaluationMetrics {
+    let k_values = {
+        let mut values = runs
+            .iter()
+            .flat_map(|metrics| metrics.recall.iter().map(|recall| recall.k))
+            .collect::<Vec<_>>();
+        values.sort_unstable();
+        values.dedup();
+        values
+    };
+    let recall = k_values
+        .into_iter()
+        .map(|k| RecallAtK {
+            k,
+            found: runs
+                .iter()
+                .filter_map(|metrics| metrics.recall.iter().find(|recall| recall.k == k))
+                .map(|recall| recall.found)
+                .sum(),
+            total: runs
+                .iter()
+                .filter_map(|metrics| metrics.recall.iter().find(|recall| recall.k == k))
+                .map(|recall| recall.total)
+                .sum(),
+        })
+        .collect();
+
+    EvaluationMetrics {
+        suite: suite.to_owned(),
+        recall,
+        shown_queue_precision: sum_count(runs, |metrics| &metrics.shown_queue_precision),
+        hard_negative_hits: sum_count(runs, |metrics| &metrics.hard_negative_hits),
+        visible_groups: sum_count(runs, |metrics| &metrics.visible_groups),
+        probe_unavailable: sum_count(runs, |metrics| &metrics.probe_unavailable),
+        candidate_count: runs.iter().map(|metrics| metrics.candidate_count).sum(),
+        timings: TimingMetrics {
+            index_load_ms: runs.iter().map(|metrics| metrics.timings.index_load_ms).sum(),
+            retrieval_ms: runs.iter().map(|metrics| metrics.timings.retrieval_ms).sum(),
+            probe_ms: runs.iter().map(|metrics| metrics.timings.probe_ms).sum(),
+            total_ms: runs.iter().map(|metrics| metrics.timings.total_ms).sum(),
+        },
+        peak_memory_bytes: runs.iter().filter_map(|metrics| metrics.peak_memory_bytes).max(),
+    }
+}
+
+fn sum_count<'a>(
+    runs: &[&'a EvaluationMetrics],
+    metric: impl Fn(&'a EvaluationMetrics) -> &'a CountMetric,
+) -> CountMetric {
+    CountMetric {
+        found: runs.iter().map(|run| metric(run).found).sum(),
+        total: runs.iter().map(|run| metric(run).total).sum(),
+    }
 }
 
 fn suite_k_values(suite: EvalSuite, requested: &[usize]) -> Vec<usize> {
@@ -157,6 +347,25 @@ fn suite_definition(request: &EvalRequest) -> SuiteDefinition {
                 workspace: repo.join("tests/fixtures/external"),
                 module_root: "External".to_owned(),
                 label: "eval-default-external".to_owned(),
+                origin: "external:fixture".to_owned(),
+                require_oleans: false,
+            }),
+            mathlib_source_override: None,
+            build_before_index: true,
+            require_oleans: false,
+        },
+        EvalSuite::HardNegatives => SuiteDefinition {
+            suite: request.suite,
+            workspace: request
+                .workspace
+                .clone()
+                .unwrap_or_else(|| repo.join("tests/fixtures/tiny")),
+            module_root: "Tiny".to_owned(),
+            origin: "workspace".to_owned(),
+            external: Some(ExternalSuiteIndex {
+                workspace: repo.join("tests/fixtures/external"),
+                module_root: "External".to_owned(),
+                label: "eval-hard-negatives-external".to_owned(),
                 origin: "external:fixture".to_owned(),
                 require_oleans: false,
             }),
@@ -199,6 +408,7 @@ fn suite_definition(request: &EvalRequest) -> SuiteDefinition {
             build_before_index: false,
             require_oleans: true,
         },
+        EvalSuite::ProductionGate => unreachable!("production-gate is expanded before suite definition"),
     }
 }
 
@@ -331,6 +541,18 @@ fn is_shown_queue_candidate(explanation: &CandidateExplanation) -> bool {
 }
 
 fn enforce_suite_gates(definition: &SuiteDefinition, labels: &GoldLabels, metrics: &EvaluationMetrics) -> Result<()> {
+    if matches!(definition.suite, EvalSuite::Default | EvalSuite::HardNegatives)
+        && metrics.hard_negative_hits.found != 0
+    {
+        return Err(Error::Eval {
+            message: format!(
+                "{} suite hard-negative gate failed: {}/{} appeared in the shown queue",
+                definition.suite.as_str(),
+                metrics.hard_negative_hits.found,
+                metrics.hard_negative_hits.total
+            ),
+        });
+    }
     if definition.suite != EvalSuite::Default {
         return Ok(());
     }
@@ -345,14 +567,6 @@ fn enforce_suite_gates(definition: &SuiteDefinition, labels: &GoldLabels, metric
                 "default suite recall@10 gate failed: found {}/{} positives",
                 recall_10.found,
                 labels.positives.len()
-            ),
-        });
-    }
-    if metrics.hard_negative_hits.found != 0 {
-        return Err(Error::Eval {
-            message: format!(
-                "default suite hard-negative gate failed: {}/{} appeared in the shown queue",
-                metrics.hard_negative_hits.found, metrics.hard_negative_hits.total
             ),
         });
     }
@@ -371,8 +585,9 @@ fn repo_root() -> PathBuf {
 mod tests {
     use tempfile::TempDir;
 
-    use super::{EvalRequest, run};
+    use super::{EvalRequest, aggregate_metrics, run, run_child_suite};
     use crate::cli::EvalSuite;
+    use crate::eval::scoring::{CountMetric, EvaluationMetrics, RecallAtK, TimingMetrics};
     use crate::progress::Reporter;
 
     #[test]
@@ -405,6 +620,59 @@ mod tests {
         );
         assert_eq!(report.metrics.hard_negative_hits.found, 0);
         assert!(report.metrics.candidate_count > 0);
+    }
+
+    #[test]
+    fn aggregate_metrics_sums_counts_and_keeps_peak_memory() {
+        let first = metrics("a", 1, 2, Some(10));
+        let second = metrics("b", 3, 4, Some(30));
+
+        let aggregate = aggregate_metrics("production-gate", &[&first, &second]);
+
+        assert_eq!(aggregate.suite, "production-gate");
+        assert_eq!(aggregate.recall[0].found, 4);
+        assert_eq!(aggregate.recall[0].total, 6);
+        assert_eq!(aggregate.shown_queue_precision.found, 4);
+        assert_eq!(aggregate.shown_queue_precision.total, 6);
+        assert_eq!(aggregate.hard_negative_hits.found, 0);
+        assert_eq!(aggregate.hard_negative_hits.total, 6);
+        assert_eq!(aggregate.visible_groups.found, 4);
+        assert_eq!(aggregate.visible_groups.total, 6);
+        assert_eq!(aggregate.probe_unavailable.found, 4);
+        assert_eq!(aggregate.probe_unavailable.total, 6);
+        assert_eq!(aggregate.peak_memory_bytes, Some(30));
+    }
+
+    #[test]
+    fn manual_child_suite_with_missing_workspace_is_skipped() {
+        let missing = TempDir::new().unwrap().path().join("missing-kanproofs");
+        let report = run_child_suite(
+            EvalRequest {
+                suite: EvalSuite::KanproofsInternal,
+                workspace: Some(missing),
+                mathlib_workspace: None,
+                k_values: vec![1, 5, 10],
+            },
+            true,
+            &mut Reporter::new(false, false),
+        );
+
+        assert_eq!(report.suite, "kanproofs-internal");
+        assert_eq!(report.status, "skipped");
+        assert!(report.manual);
+    }
+
+    #[test]
+    fn missing_oleans_are_manual_prerequisites_not_gate_failures() {
+        assert!(super::is_manual_prerequisite_error(
+            "index error: missing compiled oleans for index"
+        ));
+        assert!(super::is_manual_prerequisite_error(
+            "worker returned a fatal diagnostic: import_failed fatal: object file '/tmp/KanProofs.olean' does not exist"
+        ));
+        assert!(!super::is_manual_prerequisite_error(
+            "evaluation error: default suite recall@10 gate failed"
+        ));
     }
 
     #[test]
@@ -445,6 +713,25 @@ mod tests {
                 Some(value) => std::env::set_var("LEAN_DUP_CACHE_DIR", value),
                 None => std::env::remove_var("LEAN_DUP_CACHE_DIR"),
             }
+        }
+    }
+
+    fn metrics(suite: &str, found: usize, total: usize, peak_memory_bytes: Option<u64>) -> EvaluationMetrics {
+        EvaluationMetrics {
+            suite: suite.to_owned(),
+            recall: vec![RecallAtK { k: 10, found, total }],
+            shown_queue_precision: CountMetric { found, total },
+            hard_negative_hits: CountMetric { found: 0, total },
+            visible_groups: CountMetric { found, total },
+            probe_unavailable: CountMetric { found, total },
+            candidate_count: total,
+            timings: TimingMetrics {
+                index_load_ms: total as u128,
+                retrieval_ms: total as u128,
+                probe_ms: total as u128,
+                total_ms: total as u128,
+            },
+            peak_memory_bytes,
         }
     }
 }

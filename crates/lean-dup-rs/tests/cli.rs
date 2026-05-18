@@ -1,9 +1,17 @@
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::Value;
+
+fn worker_cli_lock() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("worker CLI test lock poisoned")
+}
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -46,6 +54,7 @@ fn index_mathlib_help_has_no_standalone_mathlib_default() {
 
 #[test]
 fn hidden_perf_fixture_workload_emits_json_metrics() {
+    let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();
     let output = tempfile::NamedTempFile::new().unwrap();
     let assert = Command::cargo_bin("lean-dup-rs")
@@ -69,6 +78,7 @@ fn hidden_perf_fixture_workload_emits_json_metrics() {
 
 #[test]
 fn eval_default_prints_compact_metrics_table() {
+    let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();
     let assert = Command::cargo_bin("lean-dup-rs")
         .unwrap()
@@ -88,6 +98,7 @@ fn eval_default_prints_compact_metrics_table() {
 
 #[test]
 fn eval_default_json_contains_raw_metric_counts() {
+    let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();
     let assert = Command::cargo_bin("lean-dup-rs")
         .unwrap()
@@ -112,7 +123,56 @@ fn eval_default_json_contains_raw_metric_counts() {
 }
 
 #[test]
+fn eval_hard_negatives_json_reports_positive_and_hard_negative_denominators() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let assert = Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["eval", "--suite", "hard-negatives", "--format", "json"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["command"], "eval");
+    assert_eq!(payload["status"], "ok");
+    assert_eq!(payload["metrics"]["suite"], "hard-negatives");
+    assert!(
+        payload["metrics"]["recall"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|recall| recall["total"].as_u64().unwrap() > 0)
+    );
+    assert!(payload["metrics"]["hard_negative_hits"]["total"].as_u64().unwrap() > 0);
+    assert_eq!(payload["metrics"]["hard_negative_hits"]["found"], 0);
+}
+
+#[test]
+fn eval_output_writes_artifact_and_keeps_stdout_valid() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let output = tempfile::NamedTempFile::new().unwrap();
+    let assert = Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["eval", "--suite", "default", "--format", "json", "--output"])
+        .arg(output.path())
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let stdout_payload: Value = serde_json::from_str(&stdout).unwrap();
+    let artifact_payload: Value = serde_json::from_str(&fs::read_to_string(output.path()).unwrap()).unwrap();
+    assert_eq!(stdout_payload["command"], "eval");
+    assert_eq!(artifact_payload["command"], "eval");
+    assert_eq!(stdout_payload["metrics"]["suite"], artifact_payload["metrics"]["suite"]);
+}
+
+#[test]
 fn doctor_reports_workspace_facts_from_repo_root() {
+    let _worker = worker_cli_lock();
     let root = repo_root();
     Command::cargo_bin("lean-dup-rs")
         .unwrap()
@@ -138,6 +198,7 @@ fn doctor_reports_workspace_facts_from_repo_root() {
 
 #[test]
 fn doctor_respects_cache_dir_override() {
+    let _worker = worker_cli_lock();
     let temp = tempfile::TempDir::new().unwrap();
     Command::cargo_bin("lean-dup-rs")
         .unwrap()
@@ -154,6 +215,7 @@ fn doctor_respects_cache_dir_override() {
 
 #[test]
 fn audit_json_keeps_progress_and_profile_off_stdout() {
+    let _worker = worker_cli_lock();
     let assert = Command::cargo_bin("lean-dup-rs")
         .unwrap()
         .args(["--progress", "--profile", "audit", "--workspace"])
@@ -182,6 +244,7 @@ fn audit_json_keeps_progress_and_profile_off_stdout() {
 
 #[test]
 fn review_profiles_filter_one_ranked_audit_result() {
+    let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();
     let root = repo_root();
     let tiny = root.join("tests/fixtures/tiny");
@@ -219,6 +282,7 @@ fn review_profiles_filter_one_ranked_audit_result() {
 
 #[test]
 fn audit_fixture_mathlib_label_produces_actionable_hints() {
+    let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();
     let root = repo_root();
     let external = root.join("tests/fixtures/external");
@@ -272,6 +336,7 @@ fn audit_fixture_mathlib_label_produces_actionable_hints() {
 
 #[test]
 fn audit_default_text_hides_noise_blockers() {
+    let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();
     let root = repo_root();
     let tiny = root.join("tests/fixtures/tiny");
@@ -293,6 +358,7 @@ fn audit_default_text_hides_noise_blockers() {
 
 #[test]
 fn show_renders_evidence_blockers_probe_hint_and_callers_for_group() {
+    let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();
     let root = repo_root();
     let tiny = root.join("tests/fixtures/tiny");
@@ -339,6 +405,7 @@ fn show_renders_evidence_blockers_probe_hint_and_callers_for_group() {
 
 #[test]
 fn baseline_diff_reports_appeared_disappeared_and_changed_groups() {
+    let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();
     let root = repo_root();
     let tiny = root.join("tests/fixtures/tiny");
@@ -380,6 +447,7 @@ fn baseline_diff_reports_appeared_disappeared_and_changed_groups() {
 
 #[test]
 fn index_builds_canonical_sqlite_and_reuses_cache() {
+    let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();
     let external = repo_root().join("tests/fixtures/external");
 

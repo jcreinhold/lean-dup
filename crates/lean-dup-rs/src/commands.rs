@@ -34,6 +34,7 @@ use crate::workspace::{self, ResolvedWorkspace, WorkspaceRequest};
 pub(crate) struct Outcome {
     pub(crate) report: Report,
     pub(crate) output_format: OutputFormat,
+    pub(crate) output_path: Option<PathBuf>,
     pub(crate) reporter: Reporter,
 }
 
@@ -171,16 +172,17 @@ const INDEX_WORKER_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 pub(crate) fn run(cli: Cli) -> Result<Outcome> {
     let mut reporter = Reporter::new_live(cli.progress, cli.profile);
-    let (report, output_format) = match cli.command {
-        Command::Doctor(args) => (Report::Doctor(doctor(args, &mut reporter)?), OutputFormat::Text),
-        Command::Index(args) => (Report::Index(index(args, &mut reporter)?), OutputFormat::Text),
+    let (report, output_format, output_path) = match cli.command {
+        Command::Doctor(args) => (Report::Doctor(doctor(args, &mut reporter)?), OutputFormat::Text, None),
+        Command::Index(args) => (Report::Index(index(args, &mut reporter)?), OutputFormat::Text, None),
         Command::IndexMathlib(args) => (
             Report::IndexMathlib(index_mathlib(args, &mut reporter)?),
             OutputFormat::Text,
+            None,
         ),
         Command::Audit(args) => {
             let format = args.format;
-            (Report::Audit(audit(args, &mut reporter)?), format)
+            (Report::Audit(audit(args, &mut reporter)?), format, None)
         }
         Command::Eval(args) => {
             let format = if args.format == EvalFormat::Json {
@@ -188,19 +190,21 @@ pub(crate) fn run(cli: Cli) -> Result<Outcome> {
             } else {
                 OutputFormat::Text
             };
-            (Report::Eval(eval(args, &mut reporter)?), format)
+            let output_path = args.output.clone();
+            (Report::Eval(eval(args, &mut reporter)?), format, output_path)
         }
         Command::Perf(args) => {
             let _format = args.format;
-            (Report::Perf(crate::perf::run(args)?), OutputFormat::Json)
+            (Report::Perf(crate::perf::run(args)?), OutputFormat::Json, None)
         }
-        Command::Show(args) => (Report::Show(show(args, &mut reporter)?), OutputFormat::Text),
-        Command::Diff(args) => (Report::Diff(diff(args, &mut reporter)?), OutputFormat::Text),
+        Command::Show(args) => (Report::Show(show(args, &mut reporter)?), OutputFormat::Text, None),
+        Command::Diff(args) => (Report::Diff(diff(args, &mut reporter)?), OutputFormat::Text, None),
     };
 
     Ok(Outcome {
         report,
         output_format,
+        output_path,
         reporter,
     })
 }

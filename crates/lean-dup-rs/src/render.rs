@@ -10,14 +10,25 @@ use crate::ranking::{RankedGroup, ReviewAction, ReviewPriority, ReviewRelation};
 pub(crate) fn write_outcome<O: Write, E: Write>(mut outcome: Outcome, stdout: &mut O, stderr: &mut E) -> Result<()> {
     perf::measure_result(CostClass::Reporting, "report.render", || {
         write_report(&mut outcome.reporter, stderr)?;
-        match outcome.output_format {
-            OutputFormat::Json => {
-                writeln!(stdout, "{}", serde_json::to_string_pretty(&outcome.report)?)?;
+        let rendered = match outcome.output_format {
+            OutputFormat::Json => serde_json::to_string_pretty(&outcome.report)?,
+            OutputFormat::Text => render_text(&outcome.report),
+        };
+        if let Some(path) = outcome.output_path {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|source| crate::error::Error::Io {
+                    message: "could not create CLI output directory",
+                    path: parent.to_path_buf(),
+                    source,
+                })?;
             }
-            OutputFormat::Text => {
-                writeln!(stdout, "{}", render_text(&outcome.report))?;
-            }
+            std::fs::write(&path, format!("{rendered}\n")).map_err(|source| crate::error::Error::Io {
+                message: "could not write CLI output file",
+                path,
+                source,
+            })?;
         }
+        writeln!(stdout, "{rendered}")?;
         Ok(())
     })
 }

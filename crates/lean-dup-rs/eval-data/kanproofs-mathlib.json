@@ -34,18 +34,26 @@
       "members": ["IsLocalRing.isUnit_of_residue_isUnit", "IsLocalRing.residue_ne_zero_iff_isUnit"]
     }
   ],
-  "hard_negative_clusters": [
+  "hard_negative_pairs": [
     {
       "id": "field-name-collisions",
-      "members": [
-        "IsSaturated.toIsStableUnderComposition",
-        "MorphismProperty.IsMultiplicative.toIsStableUnderComposition",
-        "IsTateStep2NF.toIsMinimal"
-      ]
+      "left": "IsSaturated.toIsStableUnderComposition",
+      "right": "MorphismProperty.IsMultiplicative.toIsStableUnderComposition"
     },
     {
-      "id": "broad-ext-uniqueness",
-      "members": ["subsumption-candidate-129", "subsumption-candidate-140", "subsumption-candidate-149"]
+      "id": "inductive-static-fingerprint-collision",
+      "left": "Height.WeilHeight",
+      "right": "Stream'.Seq1"
+    },
+    {
+      "id": "inductive-static-fingerprint-collision",
+      "left": "Height.WeilHeight",
+      "right": "Topology.WithLawson"
+    },
+    {
+      "id": "obvious-mathlib-nonduplicate",
+      "left": "VojtaConjectureRankOne",
+      "right": "RiemannHypothesis"
     }
   ]
 }

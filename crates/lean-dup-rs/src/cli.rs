@@ -158,6 +158,9 @@ pub(crate) struct EvalArgs {
 
     #[arg(long = "k", value_delimiter = ',', default_value = "1,5,10")]
     pub(crate) k_values: Vec<usize>,
+
+    #[arg(long)]
+    pub(crate) output: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, clap::Args)]
@@ -241,16 +244,20 @@ pub(crate) enum ProbePolicy {
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum EvalSuite {
     Default,
+    HardNegatives,
     KanproofsInternal,
     KanproofsMathlib,
+    ProductionGate,
 }
 
 impl EvalSuite {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Default => "default",
+            Self::HardNegatives => "hard-negatives",
             Self::KanproofsInternal => "kanproofs-internal",
             Self::KanproofsMathlib => "kanproofs-mathlib",
+            Self::ProductionGate => "production-gate",
         }
     }
 }
