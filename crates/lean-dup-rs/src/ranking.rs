@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use crate::external_provenance::{ComparisonEvidenceMode, ComparisonEvidencePolicy};
 use crate::index::HydratedDeclaration;
 use crate::retrieval::{CandidateSet, KeyContribution, RetrievedCandidate};
 use crate::semantic_verification::{EvidenceKind, EvidenceStatus, SemanticEvidence};
@@ -22,7 +23,7 @@ pub(crate) struct RankingInput<'a> {
     pub(crate) semantic_evidence: &'a BTreeMap<String, SemanticEvidence>,
     pub(crate) source_facts: &'a SourceFacts,
     pub(crate) profile: RankingProfile,
-    pub(crate) require_mathlib_semantic_evidence: bool,
+    pub(crate) comparison_policy: &'a ComparisonEvidencePolicy,
 }
 
 /// Tunable ranking defaults owned by a review profile, not by CLI parsing.
@@ -90,9 +91,19 @@ pub(crate) struct RankedGroup {
     pub(crate) recommended_action: ReviewAction,
     pub(crate) target_decl: Option<String>,
     pub(crate) target_module: Option<String>,
+    pub(crate) evidence_mode: ReviewEvidenceMode,
     pub(crate) probe_summary: Option<String>,
     pub(crate) local_caller_count: usize,
     pub(crate) replacement_hint: Option<crate::replacement_hints::ReplacementHint>,
+}
+
+/// Whether a ranked group rests on static or proof-grade comparison evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum ReviewEvidenceMode {
+    Static,
+    SourceBackedNotImportable,
+    ProofGrade,
 }
 
 /// Declaration facts exposed to review output.
@@ -234,13 +245,18 @@ fn rank_pair(anchor: &HydratedDeclaration, candidate: &RetrievedCandidate, input
     let mut blockers = BTreeSet::new();
     let source_clone = same_source_fingerprint(anchor, &candidate.declaration, input.source_facts);
     let has_mathlib = candidate.declaration.origin == "mathlib" || anchor.origin == "mathlib";
+    let evidence_mode = review_evidence_mode(anchor, &candidate.declaration, semantic, input.comparison_policy);
     let theorem_pair = theorem_like(anchor) && theorem_like(&candidate.declaration);
     let verified_exact = verified_kind(semantic, EvidenceKind::ExactTheorem)
         || verified_kind(semantic, EvidenceKind::ReducibleDefinition);
     let verified_specialization = verified_kind(semantic, EvidenceKind::Specialization);
     let verified_permuted = verified_kind(semantic, EvidenceKind::PermutedTheorem);
     let verified_replacement = verified_kind(semantic, EvidenceKind::Replacement);
-    let static_evidence_allowed = !has_mathlib || !input.require_mathlib_semantic_evidence;
+    let semantic_required = input.comparison_policy.requires_semantic_evidence(&anchor.origin)
+        || input
+            .comparison_policy
+            .requires_semantic_evidence(&candidate.declaration.origin);
+    let static_evidence_allowed = !semantic_required;
     let exact = verified_exact
         || (static_evidence_allowed && theorem_pair && has_contribution(candidate, "statement-fingerprint"));
     let specialization = theorem_pair && verified_specialization;
@@ -262,12 +278,11 @@ fn rank_pair(anchor: &HydratedDeclaration, candidate: &RetrievedCandidate, input
             EvidenceStatus::Verified => {}
         }
     }
-    if input.require_mathlib_semantic_evidence
-        && has_mathlib
+    if semantic_required
         && strong_static_semantic_candidate(candidate)
         && semantic.is_none_or(|semantic| !semantic.proof_grade())
     {
-        blockers.insert("unverified-mathlib-semantic-evidence".to_owned());
+        blockers.insert("unverified-proof-grade-evidence".to_owned());
     }
     if source_clone {
         signals.insert("source-clone".to_owned());
@@ -316,7 +331,7 @@ fn rank_pair(anchor: &HydratedDeclaration, candidate: &RetrievedCandidate, input
     let mut confidence = confidence_for(relation, priority);
     if blockers.contains("generated-declaration")
         || blockers.contains("broad-head-only")
-        || blockers.contains("unverified-mathlib-semantic-evidence")
+        || blockers.contains("unverified-proof-grade-evidence")
     {
         priority = ReviewPriority::Noise;
         confidence = ConfidenceTier::Noise;
@@ -344,9 +359,33 @@ fn rank_pair(anchor: &HydratedDeclaration, candidate: &RetrievedCandidate, input
         recommended_action,
         target_decl: target.as_ref().map(|declaration| declaration.qualified_name.clone()),
         target_module: target.as_ref().map(|declaration| declaration.module.clone()),
+        evidence_mode,
         probe_summary: semantic.and_then(semantic_summary),
         local_caller_count,
         replacement_hint: None,
+    }
+}
+
+fn review_evidence_mode(
+    anchor: &HydratedDeclaration,
+    candidate: &HydratedDeclaration,
+    semantic: Option<&SemanticEvidence>,
+    policy: &ComparisonEvidencePolicy,
+) -> ReviewEvidenceMode {
+    if semantic.is_some_and(SemanticEvidence::proof_grade) {
+        return ReviewEvidenceMode::ProofGrade;
+    }
+    let anchor_mode = policy.evidence_mode(&anchor.origin);
+    let candidate_mode = policy.evidence_mode(&candidate.origin);
+    if anchor_mode == ComparisonEvidenceMode::SourceBackedNotImportable
+        || candidate_mode == ComparisonEvidenceMode::SourceBackedNotImportable
+    {
+        ReviewEvidenceMode::SourceBackedNotImportable
+    } else if anchor_mode == ComparisonEvidenceMode::ProofGrade || candidate_mode == ComparisonEvidenceMode::ProofGrade
+    {
+        ReviewEvidenceMode::ProofGrade
+    } else {
+        ReviewEvidenceMode::Static
     }
 }
 
@@ -671,8 +710,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::{
-        RankingInput, RankingProfile, ReviewAction, ReviewFilter, ReviewPriority, ReviewRelation, rank_candidates,
+        RankingInput, RankingProfile, ReviewAction, ReviewEvidenceMode, ReviewFilter, ReviewPriority, ReviewRelation,
+        rank_candidates,
     };
+    use crate::external_provenance::{ComparisonEvidenceMode, ComparisonEvidencePolicy};
     use crate::index::{DeclarationHandle, HydratedDeclaration};
     use crate::retrieval::{CandidateExplanation, CandidateSet, KeyContribution, RetrievedCandidate};
     use crate::semantic_verification::{EvidenceKind, EvidenceStatus, SemanticEvidence};
@@ -690,12 +731,22 @@ mod tests {
 
         let group = &review.groups[0];
         assert_eq!(group.review_priority, ReviewPriority::Noise);
-        assert!(
-            group
-                .blockers
-                .contains(&"unverified-mathlib-semantic-evidence".to_owned())
-        );
+        assert!(group.blockers.contains(&"unverified-proof-grade-evidence".to_owned()));
         assert_ne!(group.recommended_action, ReviewAction::AlreadyInMathlib);
+    }
+
+    #[test]
+    fn static_mathlib_index_is_actionable_but_not_proof_grade() {
+        let workspace = declaration("workspace:Tiny:Tiny.same", "workspace", "Tiny.same");
+        let mathlib = declaration("mathlib:Mathlib:Mathlib.same", "mathlib", "Mathlib.same");
+        let review = rank_candidates(input(vec![candidate_set(
+            workspace,
+            candidate(mathlib, "statement-fingerprint", 100.0),
+        )]));
+
+        let group = &review.groups[0];
+        assert_eq!(group.recommended_action, ReviewAction::AlreadyInMathlib);
+        assert_eq!(group.evidence_mode, ReviewEvidenceMode::Static);
     }
 
     #[test]
@@ -720,7 +771,7 @@ mod tests {
             semantic_evidence: &evidence,
             source_facts: &SourceFacts::empty(),
             profile: RankingProfile::default(),
-            require_mathlib_semantic_evidence: true,
+            comparison_policy: Box::leak(Box::new(proof_grade_mathlib_policy())),
         });
 
         let group = &review.groups[0];
@@ -767,7 +818,7 @@ mod tests {
             semantic_evidence: &evidence,
             source_facts: &SourceFacts::empty(),
             profile: RankingProfile::default(),
-            require_mathlib_semantic_evidence: false,
+            comparison_policy: Box::leak(Box::new(ComparisonEvidencePolicy::default())),
         });
 
         assert_eq!(review.groups[0].recommended_action, ReviewAction::SpecializationOf);
@@ -816,7 +867,7 @@ mod tests {
             semantic_evidence: Box::leak(Box::new(BTreeMap::new())),
             source_facts: Box::leak(Box::new(SourceFacts::empty())),
             profile: RankingProfile::default(),
-            require_mathlib_semantic_evidence: false,
+            comparison_policy: Box::leak(Box::new(ComparisonEvidencePolicy::default())),
         }
     }
 
@@ -826,8 +877,12 @@ mod tests {
             semantic_evidence: Box::leak(Box::new(BTreeMap::new())),
             source_facts: Box::leak(Box::new(SourceFacts::empty())),
             profile: RankingProfile::default(),
-            require_mathlib_semantic_evidence: true,
+            comparison_policy: Box::leak(Box::new(proof_grade_mathlib_policy())),
         }
+    }
+
+    fn proof_grade_mathlib_policy() -> ComparisonEvidencePolicy {
+        ComparisonEvidencePolicy::for_origin("mathlib", ComparisonEvidenceMode::ProofGrade)
     }
 
     fn candidate_set(anchor: HydratedDeclaration, candidate: RetrievedCandidate) -> CandidateSet {

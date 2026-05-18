@@ -1,0 +1,9 @@
+name = "SourceBacked"
+version = "0.1.0"
+defaultTargets = ["Tiny", "External"]
+
+[[lean_lib]]
+name = "Tiny"
+
+[[lean_lib]]
+name = "External"

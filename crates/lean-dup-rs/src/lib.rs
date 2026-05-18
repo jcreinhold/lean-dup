@@ -4,6 +4,7 @@ mod cli;
 mod commands;
 mod error;
 mod eval;
+mod external_provenance;
 mod index;
 mod mathlib;
 mod perf;

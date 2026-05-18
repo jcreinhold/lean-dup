@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 
 use crate::cli::{ProbePolicy, ReviewProfile};
 use crate::error::Result;
+use crate::external_provenance::ComparisonEvidencePolicy;
 use crate::index::{HydratedDeclaration, OpenedIndex, ProbeCacheEntry};
 use crate::progress::Reporter;
 use crate::ranking::{ConfidenceTier, RankedReview, ReviewAction, ReviewPriority, ReviewRelation};
@@ -40,7 +41,7 @@ pub(crate) struct SemanticVerificationInput<'a> {
     pub(crate) cheap_review: &'a RankedReview,
     pub(crate) local_index: VerificationIndex<'a>,
     pub(crate) workspace: &'a ResolvedWorkspace,
-    pub(crate) mathlib_source: Option<&'a ResolvedWorkspace>,
+    pub(crate) comparison_policy: &'a ComparisonEvidencePolicy,
     pub(crate) enabled: bool,
     pub(crate) settings: ProbeSettings,
 }
@@ -272,6 +273,8 @@ struct PlannedProbe {
     obligation: ProbeObligation,
     right_module: String,
     right_origin: String,
+    left_module: String,
+    left_origin: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -299,7 +302,9 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
                 diagnostics.skipped_by_policy += 1;
                 continue;
             };
-            if !probe_supported_origin(&candidate.declaration) || !probe_supported_origin(&set.anchor) {
+            if !probe_supported_origin(&candidate.declaration, input.comparison_policy)
+                || !probe_supported_origin(&set.anchor, input.comparison_policy)
+            {
                 diagnostics.skipped_by_policy += 1;
                 continue;
             }
@@ -365,6 +370,8 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
             obligation,
             right_module: candidate.declaration.module.clone(),
             right_origin: candidate.declaration.origin.clone(),
+            left_module: set.anchor.module.clone(),
+            left_origin: set.anchor.origin.clone(),
         });
     }
     diagnostics.planned_pairs = planned.len();
@@ -388,7 +395,7 @@ fn run_probe_chunk(
         format!("probing {} candidate pairs", chunk.len()),
     );
     let pairs = chunk.iter().map(|planned| planned.pair.clone()).collect::<Vec<_>>();
-    let modules = probe_modules_for(input.workspace, input.mathlib_source, chunk);
+    let modules = probe_modules_for(input.workspace, input.comparison_policy, chunk);
     match worker.probe_batch(ProbeBatch {
         workspace_root: input.workspace.root.clone(),
         modules,
@@ -447,7 +454,7 @@ fn run_probe_chunk(
 
 fn probe_modules_for(
     workspace: &ResolvedWorkspace,
-    mathlib_source: Option<&ResolvedWorkspace>,
+    comparison_policy: &ComparisonEvidencePolicy,
     chunk: &[PlannedProbe],
 ) -> Vec<ModuleDescriptor> {
     let mut modules = workspace
@@ -460,17 +467,18 @@ fn probe_modules_for(
         })
         .collect::<Vec<_>>();
 
-    let Some(mathlib_source) = mathlib_source else {
-        return modules;
-    };
     let mut seen = HashSet::default();
     for planned in chunk {
-        if planned.right_origin == "mathlib" && seen.insert(planned.right_module.clone()) {
-            modules.push(ModuleDescriptor {
-                module: planned.right_module.clone(),
-                origin: "mathlib".to_owned(),
-                source_root: Some(mathlib_source.root.clone()),
-            });
+        for (origin, module) in [
+            (planned.left_origin.as_str(), planned.left_module.as_str()),
+            (planned.right_origin.as_str(), planned.right_module.as_str()),
+        ] {
+            if origin != "workspace"
+                && seen.insert((origin.to_owned(), module.to_owned()))
+                && let Some(descriptor) = comparison_policy.probe_module(origin, module)
+            {
+                modules.push(descriptor);
+            }
         }
     }
     modules.sort_by(|left, right| {
@@ -553,8 +561,8 @@ fn strong_static_evidence(candidate: &RetrievedCandidate) -> bool {
     })
 }
 
-fn probe_supported_origin(declaration: &HydratedDeclaration) -> bool {
-    matches!(declaration.origin.as_str(), "workspace" | "mathlib")
+fn probe_supported_origin(declaration: &HydratedDeclaration, policy: &ComparisonEvidencePolicy) -> bool {
+    declaration.origin == "workspace" || policy.probe_module(&declaration.origin, &declaration.module).is_some()
 }
 
 fn probe_supported_kind(declaration: &HydratedDeclaration) -> bool {
@@ -760,6 +768,7 @@ fn declaration_cache_facts(declaration: &HydratedDeclaration) -> serde_json::Val
 mod tests {
     use super::{ProbeSettings, SemanticVerificationInput, VerificationIndex, candidate_sets_for_review, plan_probes};
     use crate::cli::{ProbePolicy, ReviewProfile};
+    use crate::external_provenance::{ComparisonEvidenceMode, ComparisonEvidencePolicy};
     use crate::index::{DeclarationHandle, HydratedDeclaration};
     use crate::ranking::{RankingInput, RankingProfile, rank_candidates};
     use crate::retrieval::{CandidateExplanation, CandidateSet, KeyContribution, RetrievedCandidate};
@@ -805,12 +814,13 @@ mod tests {
             anchor,
             candidates: vec![candidate],
         }];
+        let policy = proof_grade_mathlib_policy();
         let review = rank_candidates(RankingInput {
             candidate_sets: &candidate_sets,
             semantic_evidence: &std::collections::BTreeMap::new(),
             source_facts: &SourceFacts::empty(),
             profile: RankingProfile::default(),
-            require_mathlib_semantic_evidence: true,
+            comparison_policy: &policy,
         });
         let mut diagnostics = super::ProbeDiagnostics::default();
         let index = empty_index();
@@ -819,7 +829,7 @@ mod tests {
             cheap_review: &review,
             local_index: VerificationIndex::new(&index),
             workspace: &workspace(),
-            mathlib_source: None,
+            comparison_policy: &policy,
             enabled: true,
             settings: ProbeSettings {
                 policy: ProbePolicy::Broad,
@@ -849,12 +859,13 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let candidate_sets = vec![CandidateSet { anchor, candidates }];
+        let policy = proof_grade_mathlib_policy();
         let review = rank_candidates(RankingInput {
             candidate_sets: &candidate_sets,
             semantic_evidence: &std::collections::BTreeMap::new(),
             source_facts: &SourceFacts::empty(),
             profile: RankingProfile::default(),
-            require_mathlib_semantic_evidence: true,
+            comparison_policy: &policy,
         });
         let mut diagnostics = super::ProbeDiagnostics::default();
         let index = empty_index();
@@ -863,7 +874,7 @@ mod tests {
             cheap_review: &review,
             local_index: VerificationIndex::new(&index),
             workspace: &workspace(),
-            mathlib_source: None,
+            comparison_policy: &policy,
             enabled: true,
             settings: ProbeSettings {
                 policy: ProbePolicy::Actionable,
@@ -879,6 +890,10 @@ mod tests {
 
     fn empty_index() -> crate::index::OpenedIndex {
         crate::index::OpenedIndex::for_test(std::path::PathBuf::from("/tmp/nonexistent/index.sqlite"))
+    }
+
+    fn proof_grade_mathlib_policy() -> ComparisonEvidencePolicy {
+        ComparisonEvidencePolicy::for_origin("mathlib", ComparisonEvidenceMode::ProofGrade)
     }
 
     fn workspace() -> ResolvedWorkspace {

@@ -19,6 +19,7 @@ use crate::worker::{
 use crate::workspace::{self, ResolvedWorkspace};
 
 const INDEX_SCHEMA_VERSION: &str = "lean-dup.index.sqlite.v1";
+const INDEX_PROVENANCE_VERSION: &str = "lean-dup.index.provenance.v1";
 const MATHLIB_DECLARATION_CHUNK_SIZE: usize = 32;
 const MAX_MATHLIB_INDEX_THREADS: usize = 2;
 
@@ -127,6 +128,52 @@ pub(crate) struct OpenedIndexFacts {
     pub(crate) label: Option<String>,
     pub(crate) declaration_count: usize,
     pub(crate) path: PathBuf,
+    pub(crate) provenance: IndexProvenance,
+}
+
+/// Source provenance carried by an index.
+///
+/// Callers may use this to decide whether an index can support proof-grade
+/// comparison in the current audit environment. They must not depend on the
+/// metadata storage key or SQLite layout used to persist it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct IndexProvenance {
+    pub(crate) version: String,
+    pub(crate) kind: IndexProvenanceKind,
+    pub(crate) source_root: Option<PathBuf>,
+    pub(crate) execution_root: Option<PathBuf>,
+    pub(crate) execution_policy: String,
+    pub(crate) module_root: String,
+    pub(crate) protocol_version: Option<String>,
+    pub(crate) worker_version: Option<String>,
+    pub(crate) extract_version: Option<String>,
+    pub(crate) features_version: Option<String>,
+    pub(crate) probe_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum IndexProvenanceKind {
+    Static,
+    SourceBacked,
+}
+
+impl IndexProvenance {
+    pub(crate) fn static_index(module_root: impl Into<String>) -> Self {
+        Self {
+            version: INDEX_PROVENANCE_VERSION.to_owned(),
+            kind: IndexProvenanceKind::Static,
+            source_root: None,
+            execution_root: None,
+            execution_policy: "static-index".to_owned(),
+            module_root: module_root.into(),
+            protocol_version: None,
+            worker_version: None,
+            extract_version: None,
+            features_version: None,
+            probe_version: None,
+        }
+    }
 }
 
 /// Opaque declaration identity returned by index queries.
@@ -260,6 +307,7 @@ pub(crate) struct ProbeCacheEntry {
 #[derive(Debug, Clone, Serialize)]
 struct IndexCacheKey {
     index_schema_version: &'static str,
+    index_provenance_version: &'static str,
     protocol_version: String,
     worker_version: String,
     lean_version: Option<String>,
@@ -349,7 +397,7 @@ impl IndexStore {
 
         let mut diagnostics = diagnostics_to_strings(version_call.diagnostics);
         if request.kind == IndexBuildKind::ProjectMathlib {
-            let build = write_batched_sqlite_index(&index_path, &cache_key_json, &request, worker, reporter)?;
+            let build = write_batched_sqlite_index(&index_path, &cache_key_json, &request, &version, worker, reporter)?;
             diagnostics.extend(build.diagnostics);
         } else {
             let modules = modules_for(&request);
@@ -374,7 +422,14 @@ impl IndexStore {
             })?;
             record_worker_events(reporter, &features.events);
 
-            write_sqlite_index(&index_path, &cache_key_json, &request, declarations.rows, features.rows)?;
+            write_sqlite_index(
+                &index_path,
+                &cache_key_json,
+                &request,
+                &version,
+                declarations.rows,
+                features.rows,
+            )?;
             diagnostics.extend(diagnostics_to_strings(declarations.diagnostics));
             diagnostics.extend(diagnostics_to_strings(features.diagnostics));
         }
@@ -454,11 +509,17 @@ impl OpenedIndex {
             message: "index metadata is missing origin".to_owned(),
         })?;
         let label = metadata_value(&connection, "label")?;
+        let module_root = metadata_value(&connection, "module_root")?.unwrap_or_default();
+        let provenance = metadata_value(&connection, "provenance_json")?
+            .map(|json| serde_json::from_str(&json))
+            .transpose()?
+            .unwrap_or_else(|| IndexProvenance::static_index(module_root));
         Ok(OpenedIndexFacts {
             origin,
             label,
             declaration_count: declaration_count(&self.path)?,
             path: self.path.clone(),
+            provenance,
         })
     }
 
@@ -686,6 +747,7 @@ fn index_cache_key(request: &IndexBuildRequest, version: &WorkerVersion) -> Resu
     let execution_root = request.execution_root();
     Ok(IndexCacheKey {
         index_schema_version: INDEX_SCHEMA_VERSION,
+        index_provenance_version: INDEX_PROVENANCE_VERSION,
         protocol_version: version.protocol_version.clone(),
         worker_version: version.worker_version.clone(),
         lean_version: version.lean_version.clone(),
@@ -746,6 +808,7 @@ fn write_sqlite_index(
     index_path: &Path,
     cache_key_json: &str,
     request: &IndexBuildRequest,
+    version: &WorkerVersion,
     declarations: Vec<DeclarationRow>,
     features: Vec<FeatureRow>,
 ) -> Result<()> {
@@ -774,7 +837,7 @@ fn write_sqlite_index(
         let mut connection = Connection::open(&temp_path)?;
         initialize_schema(&connection)?;
         let transaction = connection.transaction()?;
-        write_metadata(&transaction, cache_key_json, request)?;
+        write_metadata(&transaction, cache_key_json, request, version)?;
         for declaration in declarations {
             let Some(feature) = features_by_id.get(&declaration.declaration_id) else {
                 return Err(Error::Index {
@@ -807,6 +870,7 @@ fn write_batched_sqlite_index(
     index_path: &Path,
     cache_key_json: &str,
     request: &IndexBuildRequest,
+    version: &WorkerVersion,
     worker: &WorkerClient,
     reporter: &mut Reporter,
 ) -> Result<BatchedIndexBuild> {
@@ -822,7 +886,7 @@ fn write_batched_sqlite_index(
     }
     let connection = Connection::open(&temp_path)?;
     initialize_schema(&connection)?;
-    write_metadata(&connection, cache_key_json, request)?;
+    write_metadata(&connection, cache_key_json, request, version)?;
 
     let modules = modules_for(request);
     let total_modules = modules.len();
@@ -1030,7 +1094,13 @@ fn initialize_schema(connection: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn write_metadata(connection: &Connection, cache_key_json: &str, request: &IndexBuildRequest) -> Result<()> {
+fn write_metadata(
+    connection: &Connection,
+    cache_key_json: &str,
+    request: &IndexBuildRequest,
+    version: &WorkerVersion,
+) -> Result<()> {
+    let provenance = index_provenance(request, version)?;
     let values = [
         ("schema_version", INDEX_SCHEMA_VERSION.to_owned()),
         ("cache_key", cache_key_json.to_owned()),
@@ -1038,11 +1108,33 @@ fn write_metadata(connection: &Connection, cache_key_json: &str, request: &Index
         ("module_root", request.module_root.clone()),
         ("origin", request.origin.clone()),
         ("kind", serde_json::to_string(&request.kind)?),
+        ("provenance_json", serde_json::to_string(&provenance)?),
     ];
     for (key, value) in values {
         connection.execute("INSERT INTO metadata (key, value) VALUES (?1, ?2)", params![key, value])?;
     }
     Ok(())
+}
+
+fn index_provenance(request: &IndexBuildRequest, version: &WorkerVersion) -> Result<IndexProvenance> {
+    let execution_policy = match request.kind {
+        IndexBuildKind::Local => "workspace-lake-environment",
+        IndexBuildKind::External => "indexed-workspace-lake-environment",
+        IndexBuildKind::ProjectMathlib => "project-pinned-mathlib-lake-environment",
+    };
+    Ok(IndexProvenance {
+        version: INDEX_PROVENANCE_VERSION.to_owned(),
+        kind: IndexProvenanceKind::SourceBacked,
+        source_root: Some(request.workspace.root.clone()),
+        execution_root: Some(request.execution_root()),
+        execution_policy: execution_policy.to_owned(),
+        module_root: request.module_root.clone(),
+        protocol_version: Some(version.protocol_version.clone()),
+        worker_version: Some(version.worker_version.clone()),
+        extract_version: Some(version.extract_version.clone()),
+        features_version: Some(version.features_version.clone()),
+        probe_version: Some(version.probe_version.clone()),
+    })
 }
 
 fn insert_declaration(connection: &Connection, declaration: &DeclarationRow, feature: &FeatureRow) -> Result<()> {
@@ -1494,8 +1586,8 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        CacheStatus, FingerprintKind, FingerprintQuery, IndexBuildKind, IndexBuildRequest, IndexQuery, IndexReference,
-        IndexStore, RoleFeatureQuery, index_cache_key, safe_label, sqlite_cache_is_current,
+        CacheStatus, FingerprintKind, FingerprintQuery, IndexBuildKind, IndexBuildRequest, IndexProvenanceKind,
+        IndexQuery, IndexReference, IndexStore, RoleFeatureQuery, index_cache_key, safe_label, sqlite_cache_is_current,
     };
     use crate::progress::Reporter;
     use crate::worker::{ProbePair, ProbeResult, WorkerClient, WorkerVersion};
@@ -1587,6 +1679,14 @@ mod tests {
         let hydrated = by_path.hydrate(&sample).unwrap();
         assert_eq!(hydrated.len(), sample.len());
         assert!(hydrated.iter().all(|row| row.origin == "external:fixture"));
+        let facts = by_path.facts().unwrap();
+        assert_eq!(facts.provenance.kind, IndexProvenanceKind::SourceBacked);
+        assert_eq!(
+            facts.provenance.source_root,
+            Some(facts.provenance.execution_root.clone().unwrap())
+        );
+        assert_eq!(facts.provenance.module_root, "External");
+        assert!(facts.provenance.worker_version.is_some());
 
         let pair = ProbePair {
             pair_id: "p1".to_owned(),

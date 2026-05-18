@@ -1,9 +1,11 @@
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command as ProcessCommand;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use assert_cmd::Command;
 use predicates::prelude::*;
+use rusqlite::Connection;
 use serde_json::Value;
 
 fn worker_cli_lock() -> MutexGuard<'static, ()> {
@@ -288,7 +290,7 @@ fn audit_fixture_mathlib_label_produces_actionable_hints() {
     let external = root.join("tests/fixtures/external");
     let tiny = root.join("tests/fixtures/tiny");
 
-    Command::cargo_bin("lean-dup-rs")
+    let index = Command::cargo_bin("lean-dup-rs")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["index", "--workspace"])
@@ -296,6 +298,13 @@ fn audit_fixture_mathlib_label_produces_actionable_hints() {
         .args(["--module", "External", "--label", "mathlib"])
         .assert()
         .success();
+    let index_stdout = String::from_utf8(index.get_output().stdout.clone()).unwrap();
+    let index_path = line_value(&index_stdout, "index path: ");
+    let connection = Connection::open(index_path).unwrap();
+    connection
+        .execute("DELETE FROM metadata WHERE key = 'provenance_json'", [])
+        .unwrap();
+    drop(connection);
 
     let assert = Command::cargo_bin("lean-dup-rs")
         .unwrap()
@@ -315,6 +324,7 @@ fn audit_fixture_mathlib_label_produces_actionable_hints() {
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["comparison_provenance"][0]["evidence_mode"], "static");
     let groups = payload["review"]["groups"].as_array().unwrap();
     let exact = groups
         .iter()
@@ -325,12 +335,78 @@ fn audit_fixture_mathlib_label_produces_actionable_hints() {
         .expect("mathlib exact duplicate group");
 
     assert_eq!(exact["review_priority"], "high");
+    assert_eq!(exact["evidence_mode"], "static");
     assert_eq!(exact["replacement_hint"]["target_decl"], "External.same_as_tiny");
     assert_eq!(exact["replacement_hint"]["import_status"], "missing");
     assert!(exact["replacement_hint"]["caller_count"].is_u64());
     assert!(
         exact["replacement_hint"]["displayed_callers"].as_array().unwrap().len()
             <= exact["replacement_hint"]["caller_count"].as_u64().unwrap() as usize
+    );
+}
+
+#[test]
+fn source_backed_external_index_gets_proof_grade_probe_evidence() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let source_backed = repo_root().join("tests/fixtures/source-backed");
+    let _ = fs::remove_dir_all(source_backed.join(".lake"));
+    let lake = ProcessCommand::new("lake")
+        .arg("build")
+        .current_dir(&source_backed)
+        .output()
+        .unwrap();
+    assert!(
+        lake.status.success(),
+        "source-backed fixture lake build failed:\n{}{}",
+        String::from_utf8_lossy(&lake.stderr),
+        String::from_utf8_lossy(&lake.stdout)
+    );
+
+    Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["index", "--workspace"])
+        .arg(&source_backed)
+        .args(["--module", "External", "--label", "linked"])
+        .assert()
+        .success();
+
+    let assert = Command::cargo_bin("lean-dup-rs")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&source_backed)
+        .args([
+            "--module",
+            "Tiny",
+            "--compare-index",
+            "linked",
+            "--format",
+            "json",
+            "--review-profile",
+            "api-design",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(payload["comparison_provenance"][0]["evidence_mode"], "proof-grade");
+    assert!(payload["semantic_verification"]["planned_pairs"].as_u64().unwrap() > 0);
+    assert!(payload["semantic_verification"]["verified_results"].as_u64().unwrap() > 0);
+    let groups = payload["review"]["groups"].as_array().unwrap();
+    let exact = groups
+        .iter()
+        .find(|group| group["target_decl"] == "External.same_as_tiny")
+        .expect("source-backed exact duplicate group");
+    assert_eq!(exact["evidence_mode"], "proof-grade");
+    assert!(
+        exact["signals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|signal| signal == "probe:verified:exact-theorem")
     );
 }
 

@@ -3,9 +3,10 @@ use std::io::Write;
 use crate::cli::{OutputFormat, ReviewProfile};
 use crate::commands::{AuditReport, DiffReport, DoctorReport, IndexReport, Outcome, Report, ShowReport};
 use crate::error::Result;
+use crate::external_provenance::ComparisonEvidenceMode;
 use crate::perf::{self, CostClass};
 use crate::progress::{Reporter, format_progress_event};
-use crate::ranking::{RankedGroup, ReviewAction, ReviewPriority, ReviewRelation};
+use crate::ranking::{RankedGroup, ReviewAction, ReviewEvidenceMode, ReviewPriority, ReviewRelation};
 
 pub(crate) fn write_outcome<O: Write, E: Write>(mut outcome: Outcome, stdout: &mut O, stderr: &mut E) -> Result<()> {
     perf::measure_result(CostClass::Reporting, "report.render", || {
@@ -199,6 +200,10 @@ fn render_audit(report: &AuditReport) -> String {
         format!("threshold: {}", report.threshold),
         format!("candidates: {}", report.retrieval.candidate_count),
         format!(
+            "comparison provenance: {}",
+            comparison_provenance_summary(&report.comparison_provenance)
+        ),
+        format!(
             "semantic probes: planned={} cached={} worker={} unavailable={}",
             report.semantic_verification.planned_pairs,
             report.semantic_verification.cached_hits,
@@ -243,8 +248,46 @@ fn render_audit(report: &AuditReport) -> String {
         if !group.blockers.is_empty() {
             lines.push(format!("  blockers: {}", group.blockers.join(", ")));
         }
+        lines.push(format!(
+            "  evidence mode: {}",
+            review_evidence_mode_label(group.evidence_mode)
+        ));
     }
     lines.join("\n")
+}
+
+fn comparison_provenance_summary(reports: &[crate::external_provenance::ComparisonProvenanceReport]) -> String {
+    if reports.is_empty() {
+        return "none".to_owned();
+    }
+    reports
+        .iter()
+        .map(|report| {
+            let label = report.label.as_deref().unwrap_or("-");
+            format!(
+                "{label}/{}={}",
+                report.origin,
+                comparison_evidence_mode_label(report.evidence_mode)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn comparison_evidence_mode_label(mode: ComparisonEvidenceMode) -> &'static str {
+    match mode {
+        ComparisonEvidenceMode::Static => "static",
+        ComparisonEvidenceMode::SourceBackedNotImportable => "source-backed-not-importable",
+        ComparisonEvidenceMode::ProofGrade => "proof-grade",
+    }
+}
+
+fn review_evidence_mode_label(mode: ReviewEvidenceMode) -> &'static str {
+    match mode {
+        ReviewEvidenceMode::Static => "static",
+        ReviewEvidenceMode::SourceBackedNotImportable => "source-backed-not-importable",
+        ReviewEvidenceMode::ProofGrade => "proof-grade",
+    }
 }
 
 fn push_group_detail(lines: &mut Vec<String>, group: &RankedGroup) {
@@ -258,6 +301,10 @@ fn push_group_detail(lines: &mut Vec<String>, group: &RankedGroup) {
     if let Some(module) = &group.target_module {
         lines.push(format!("target module: {module}"));
     }
+    lines.push(format!(
+        "evidence mode: {}",
+        review_evidence_mode_label(group.evidence_mode)
+    ));
     lines.push("members:".to_owned());
     for member in &group.members {
         let span = member

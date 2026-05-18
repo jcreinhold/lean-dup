@@ -144,8 +144,8 @@ mod tests {
     use super::{ReplacementHintProfile, attach_replacement_hints};
     use crate::index::{DeclarationHandle, HydratedDeclaration};
     use crate::ranking::{
-        ConfidenceTier, RankedGroup, RankedReview, RankingDiagnostics, ReviewAction, ReviewMember, ReviewPriority,
-        ReviewRelation,
+        ConfidenceTier, RankedGroup, RankedReview, RankingDiagnostics, ReviewAction, ReviewEvidenceMode, ReviewMember,
+        ReviewPriority, ReviewRelation,
     };
     use crate::source_refs::{ImportStatus, SourceFactInput, collect_source_facts};
     use crate::worker::{Fingerprints, SourcePoint, SourceSpan};
@@ -190,6 +190,7 @@ end Tiny
                 recommended_action: ReviewAction::LocalAlias,
                 target_decl: Some("Mathlib.local".to_owned()),
                 target_module: Some("Mathlib".to_owned()),
+                evidence_mode: ReviewEvidenceMode::Static,
                 probe_summary: None,
                 local_caller_count: 1,
                 replacement_hint: None,

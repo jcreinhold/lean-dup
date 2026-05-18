@@ -11,6 +11,7 @@ use crate::cli::{
 };
 use crate::error::Result;
 use crate::eval::{EvalRequest, EvaluationReport};
+use crate::external_provenance::{ComparisonProvenance, ComparisonProvenanceReport};
 use crate::index::{
     CacheStatus, IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, IndexSummary, OpenedIndex,
 };
@@ -106,6 +107,7 @@ pub(crate) struct AuditReport {
     pub(crate) review_profile: ReviewProfile,
     pub(crate) profile_counts: ReviewProfileCounts,
     pub(crate) retrieval: RetrievalDiagnostics,
+    pub(crate) comparison_provenance: Vec<ComparisonProvenanceReport>,
     pub(crate) semantic_verification: ProbeDiagnostics,
     pub(crate) review: RankedReview,
     pub(crate) visible_groups: Vec<RankedGroup>,
@@ -164,6 +166,7 @@ struct AuditComputation {
     min_priority: RankedPriority,
     review_profile: ReviewProfile,
     retrieval: RetrievalDiagnostics,
+    comparison_provenance: Vec<ComparisonProvenanceReport>,
     semantic_verification: ProbeDiagnostics,
     review: RankedReview,
 }
@@ -349,6 +352,7 @@ fn audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditReport> {
         review_profile: computation.review_profile,
         profile_counts,
         retrieval: computation.retrieval,
+        comparison_provenance: computation.comparison_provenance,
         semantic_verification: computation.semantic_verification,
         review: computation.review,
         visible_groups,
@@ -415,7 +419,7 @@ fn compute_audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditComput
             semantic_evidence: &std::collections::BTreeMap::new(),
             source_facts: &source_facts,
             profile: RankingProfile::default(),
-            require_mathlib_semantic_evidence: args.compare_mathlib,
+            comparison_policy: &compare.provenance.policy,
         })
     });
     let verification = verify_candidate_probes(
@@ -424,7 +428,7 @@ fn compute_audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditComput
             cheap_review: &cheap_review,
             local_index: VerificationIndex::new(&local_index),
             workspace: &foundation.workspace,
-            mathlib_source: compare.mathlib_source.as_ref(),
+            comparison_policy: &compare.provenance.policy,
             enabled: args.semantic_probes,
             settings: ProbeSettings {
                 policy: args.probe_policy,
@@ -441,7 +445,7 @@ fn compute_audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditComput
             semantic_evidence: &verification.evidence,
             source_facts: &source_facts,
             profile: RankingProfile::default(),
-            require_mathlib_semantic_evidence: args.compare_mathlib,
+            comparison_policy: &compare.provenance.policy,
         })
     });
     let review = perf::measure(CostClass::RetrievalRanking, "ranking.replacement_hints", || {
@@ -460,6 +464,7 @@ fn compute_audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditComput
         min_priority: ranked_priority(args.min_priority),
         review_profile: args.review_profile,
         retrieval: retrieval_output.diagnostics,
+        comparison_provenance: compare.provenance.reports,
         semantic_verification: verification.diagnostics,
         review,
     })
@@ -467,7 +472,7 @@ fn compute_audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditComput
 
 struct CompareIndexes {
     indexes: Vec<OpenedIndex>,
-    mathlib_source: Option<ResolvedWorkspace>,
+    provenance: ComparisonProvenance,
 }
 
 fn open_compare_indexes(
@@ -477,7 +482,6 @@ fn open_compare_indexes(
     reporter: &mut Reporter,
 ) -> Result<CompareIndexes> {
     let mut indexes = Vec::new();
-    let mut mathlib_source = None;
     for label in &args.compare_indexes {
         indexes.push(store.resolve(IndexReference::Label(label.clone()))?);
     }
@@ -501,13 +505,10 @@ fn open_compare_indexes(
             &WorkerClient::with_timeout(INDEX_WORKER_TIMEOUT),
             reporter,
         )?;
-        mathlib_source = Some(mathlib.source);
         indexes.push(store.resolve(IndexReference::Label("mathlib".to_owned()))?);
     }
-    Ok(CompareIndexes {
-        indexes,
-        mathlib_source,
-    })
+    let provenance = crate::external_provenance::resolve(&indexes, project_workspace)?;
+    Ok(CompareIndexes { indexes, provenance })
 }
 
 fn source_fact_declarations(
