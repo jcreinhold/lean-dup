@@ -34,12 +34,15 @@ jobs:
       # crates/eval/src/eval/suites.rs builds fixtures, the cli integration
       # suite runs the full audit pipeline, etc. Install elan + the toolchain
       # pinned by lean/lean-toolchain so cargo test --workspace runs as-is.
-      - uses: leanprover/lean-action@v1
-        with:
-          lake-package-directory: lean
-          build: false
-          test: false
-          lint: false
+      - name: Install elan and pinned Lean toolchain
+        run: |
+          set -euo pipefail
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          toolchain=$(tr -d '[:space:]' < lean/lean-toolchain)
+          "$HOME/.elan/bin/elan" toolchain install "$toolchain"
+          "$HOME/.elan/bin/elan" default "$toolchain"
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
