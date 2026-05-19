@@ -76,7 +76,7 @@ hides implementation details while making failures diagnosable.
   is not a substitute for better planning and evidence yield.
 - Retrieval/ranking changes report stage-level recall, visible precision, hard-negative leakage, candidate volume, and
   runtime before changing default behavior.
-- Local embeddings are not currently accepted architecture. Any embedding experiment must be hidden, off-by-default,
-  local-only, and measured against the symbolic baseline.
+- Embeddings are not accepted default architecture. Any embedding experiment must be hidden, off-by-default, run local
+  inference, acquire models only through explicit preparation, and be measured against the symbolic baseline.
 - Default report visibility must not collapse all match classes into one duplicate bucket. A visible finding names
   what kind of match it is and what evidence makes it actionable.

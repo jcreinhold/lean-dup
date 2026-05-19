@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use lean_dup_embedding::EmbeddingAcquisitionPolicy;
 use lean_dup_eval::EvalSuite;
 use lean_dup_search::{ProbePolicy, ReviewProfile};
 use serde::{Deserialize, Serialize};
@@ -31,6 +32,8 @@ pub enum Command {
     Eval(EvalArgs),
     Show(ShowArgs),
     Diff(DiffArgs),
+    #[command(hide = true)]
+    Embedding(EmbeddingArgs),
     #[command(hide = true)]
     Perf(PerfArgs),
 }
@@ -185,6 +188,35 @@ pub struct EvalArgs {
 }
 
 #[derive(Debug, Clone, clap::Args)]
+pub struct EmbeddingArgs {
+    #[command(subcommand)]
+    pub command: EmbeddingCommand,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum EmbeddingCommand {
+    Prepare(EmbeddingPrepareArgs),
+}
+
+#[derive(Debug, Clone, clap::Args)]
+pub struct EmbeddingPrepareArgs {
+    #[arg(long, value_enum, default_value_t = CliEmbeddingAcquisitionPolicy::DownloadIfMissing)]
+    pub policy: CliEmbeddingAcquisitionPolicy,
+
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub format: OutputFormat,
+
+    #[arg(long = "model-id", default_value = "sentence-transformers/all-MiniLM-L6-v2")]
+    pub model_id: String,
+
+    #[arg(long)]
+    pub revision: Option<String>,
+
+    #[arg(long = "cache-root", hide = true)]
+    pub cache_root: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, clap::Args)]
 pub struct PerfArgs {
     #[arg(long, value_enum)]
     pub workload: PerfWorkload,
@@ -246,6 +278,22 @@ pub enum OutputFormat {
 pub enum EvalFormat {
     Table,
     Json,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum CliEmbeddingAcquisitionPolicy {
+    CacheOnly,
+    DownloadIfMissing,
+}
+
+impl From<CliEmbeddingAcquisitionPolicy> for EmbeddingAcquisitionPolicy {
+    fn from(value: CliEmbeddingAcquisitionPolicy) -> Self {
+        match value {
+            CliEmbeddingAcquisitionPolicy::CacheOnly => Self::CacheOnly,
+            CliEmbeddingAcquisitionPolicy::DownloadIfMissing => Self::DownloadIfMissing,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]

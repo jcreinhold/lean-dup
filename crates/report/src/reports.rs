@@ -21,9 +21,32 @@ pub enum Report {
     IndexMathlib(IndexReport),
     Audit(Box<AuditReport>),
     Eval(EvalReportDto),
+    EmbeddingPrepare(EmbeddingPrepareReportDto),
     Perf(PerfReport),
     Show(Box<ShowReport>),
     Diff(DiffReport),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EmbeddingPrepareReportDto {
+    pub status: String,
+    pub model_id: String,
+    pub revision: Option<String>,
+    pub acquisition_policy: String,
+    pub cache_status: String,
+    pub cache_root: Option<PathBuf>,
+    pub elapsed_ms: u128,
+    pub total_bytes: Option<u64>,
+    pub required_files: Vec<EmbeddingRequiredFileReportDto>,
+    pub reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EmbeddingRequiredFileReportDto {
+    pub role: String,
+    pub state: String,
+    pub bytes: Option<u64>,
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

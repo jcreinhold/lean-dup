@@ -9,7 +9,8 @@ in their own Lake workspace.
 statements: exact theorem matches, safe binder reorderings, equivalent connective shapes, reducible-definition
 equality, and replacement candidates against a comparison corpus (mathlib or another cached index).
 
-It is read-only. It does not edit your Lean source, call network services, run broad proof search, or use embeddings.
+The normal audit path is read-only. It does not edit your Lean source, call network services,
+run broad proof search, or use embeddings.
 
 ## Requirements
 

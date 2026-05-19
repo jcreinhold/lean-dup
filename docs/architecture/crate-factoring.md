@@ -1,8 +1,9 @@
 # Crate Factoring
 
-Eight Rust crates, each owning one kind of hidden knowledge. The split is functional: a crate exists to localize a
+Nine Rust crates, each owning one kind of hidden knowledge. The split is functional: a crate exists to localize a
 class of change (Lean protocol mechanics, Lake project resolution, persisted storage, search and review policy,
-report projection, quality measurement, terminal I/O), not to mirror one old source file.
+embedding model acquisition/runtime policy, report projection, quality measurement, terminal I/O), not to mirror one
+old source file.
 
 For the pipeline the crates implement, see [end-to-end-architecture.md](end-to-end-architecture.md).
 
@@ -15,6 +16,7 @@ For the pipeline the crates implement, see [end-to-end-architecture.md](end-to-e
 | `lean-dup-project` | Lake workspace discovery, module roots, mathlib source/execution roots, toolchain facts. | index, search, eval, cli |
 | `lean-dup-index` | SQLite indexes, cache keys, provenance metadata, latest pointers, cache diagnostics, cleanup. | search, eval, cli |
 | `lean-dup-search` | Audit workflow, candidate generation, semantic evidence planning, ranking, source facts, replacement hints. | eval, report, cli |
+| `lean-dup-embedding` | Embedding model acquisition, local text embedding runtime, vector-cache policy, stable embedding facts. | search, eval, report, cli |
 | `lean-dup-report` | Stable JSON DTOs, explanations, text rendering, report-owned cache/show/diff/eval projections, wording. | cli |
 | `lean-dup-eval` | Labels, suites, stage metrics, quality gates, hidden perf workload artifacts. | cli |
 | `lean-dup-cli` | clap parsing, command dispatch, stdout/stderr routing, output file writes, binary compatibility. | top layer; depends on the others |
@@ -39,6 +41,11 @@ Each crate root is the supported public facade. Submodules and internals stay pr
   `ShowOutput`, `DiffOutput`, `run_audit`, `run_show`, `run_diff`, `observe_search`. Retrieval
   keys, ranking constants, probe obligations, source-scan policy, and replacement-hint internals
   stay private.
+- **`lean-dup-embedding`** — `EmbeddingModelSpec`, `EmbeddingAcquisitionPolicy`,
+  `EmbeddingPrepareRequest`, `EmbeddingPrepareResult`, `prepare_embedding_model`, and future
+  batch text embedding request/result DTOs. Hugging Face cache layout, model filenames, tokenizer
+  internals, tensor layout, pooling, normalization, vector-cache format, and download mechanics
+  stay private. Normal audit/eval paths do not depend on this crate.
 - **`lean-dup-report`** — report DTOs, projection functions, explanation facts, `render_text`.
 - **`lean-dup-eval`** — `EvalSuite`, `EvalRequest`, `EvalOutput`, stage metrics, quality
   denominators. Text rendering belongs to report; runtime/memory measurement belongs to
@@ -51,7 +58,7 @@ Each crate root is the supported public facade. Submodules and internals stay pr
 Misleading audit flags that parsed without reliably changing behavior were removed instead of deprecated:
 `--threshold`, `--include-imports`, `--import-root`, `--min-priority`, `--replacement-hints`.
 
-## Why eight, not seven, not "core + cli"
+## Why nine, not seven, not "core + cli"
 
 A crate per old module would produce shallow pass-through crates around `retrieval`, `ranking`,
 `semantic_verification`, `cache`, and `render`, forcing unstable internal records into public
@@ -60,3 +67,5 @@ internal architecture.
 
 The current split moves audit ordering into `lean-dup-search`, separates diagnostic plumbing
 from user-facing report contracts, and lets `lean-dup-report` own stable projection and wording.
+Embedding model acquisition and CPU inference sit in their own crate because those decisions
+change with the local ML runtime, not with retrieval, labels, report wording, or terminal I/O.

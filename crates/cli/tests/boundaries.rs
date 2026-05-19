@@ -117,7 +117,7 @@ fn dependency_direction_keeps_lower_crates_out_of_report_and_cli() {
 }
 
 #[test]
-fn embedding_crate_is_isolated_until_runtime_prompts() {
+fn embedding_acquisition_dependency_stays_inside_embedding_crate() {
     let manifests = crate_manifests();
     assert!(
         manifests.contains_key("lean-dup-embedding"),
@@ -126,8 +126,12 @@ fn embedding_crate_is_isolated_until_runtime_prompts() {
 
     for (name, manifest) in manifests {
         let dependencies = dependency_names(&manifest);
+        let has_hf_hub = dependencies.iter().any(|dependency| dependency == "hf-hub");
+        assert!(
+            !has_hf_hub || name == "lean-dup-embedding",
+            "{name} must not depend on hf-hub"
+        );
         for forbidden in [
-            "hf-hub",
             "tokenizers",
             "candle-core",
             "candle-nn",
@@ -138,7 +142,7 @@ fn embedding_crate_is_isolated_until_runtime_prompts() {
         ] {
             assert!(
                 !dependencies.iter().any(|dependency| dependency == forbidden),
-                "{name} must not depend on embedding runtime dependency {forbidden} in Prompt 35A"
+                "{name} must not depend on embedding runtime dependency {forbidden} before Prompt 35C"
             );
         }
     }
@@ -302,10 +306,10 @@ fn old_file_shaped_modules_are_not_public_api() {
                 assert!(!contents.contains(forbidden), "{display} imports {forbidden}");
             }
         }
-        if !path.starts_with(root.join("crates/embedding")) {
+        if !path.starts_with(root.join("crates/embedding")) && !path.starts_with(root.join("crates/cli")) {
             assert!(
                 !contents.contains("lean_dup_embedding::"),
-                "{display} imports lean_dup_embedding before integration prompt"
+                "{display} imports lean_dup_embedding outside the hidden CLI prepare boundary"
             );
         }
     }

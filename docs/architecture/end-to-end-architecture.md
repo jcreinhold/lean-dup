@@ -19,6 +19,7 @@ For the layering rule, see [overview.md](overview.md). For release gates, see
 | `show`                    | explain one group resolvable from the current workspace/index context                            |
 | `diff`                    | compare two saved audit baselines                                                                |
 | `eval`                    | run fixture, hard-negative, manual-corpus, or aggregate quality suites                           |
+| *hidden* `embedding prepare` | explicitly prepare or validate local embedding model files for later experiments              |
 | *hidden* `perf`           | run named performance workloads and write profiling artifacts                                    |
 | *hidden* `cache-cleanup`  | inspect or remove unprotected stale cache entries                                                |
 

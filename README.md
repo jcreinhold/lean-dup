@@ -2,7 +2,8 @@
 
 A read-only duplication auditor for Lean 4 Lake workspaces. It indexes declarations from the
 elaborated Lean environment and reports likely duplicate or subsumed statements. Local and
-deterministic: no network services, no embeddings, no proof-term analysis.
+deterministic on the normal audit path: no network services, no embeddings, no proof-term
+analysis. Hidden developer commands may explicitly prepare local experiment assets.
 
 ## Requirements
 

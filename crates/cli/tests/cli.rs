@@ -39,6 +39,39 @@ fn help_lists_foundation_commands() {
         !stdout.contains("cache-cleanup"),
         "hidden cache cleanup command leaked into help:\n{stdout}"
     );
+    assert!(
+        !stdout.contains("embedding"),
+        "hidden embedding command leaked into help:\n{stdout}"
+    );
+}
+
+#[test]
+fn hidden_embedding_prepare_cache_only_reports_not_prepared() {
+    let cache = tempfile::TempDir::new().unwrap();
+    let assert = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .args([
+            "embedding",
+            "prepare",
+            "--policy",
+            "cache-only",
+            "--format",
+            "json",
+            "--cache-root",
+        ])
+        .arg(cache.path())
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["command"], "embedding-prepare");
+    assert_eq!(payload["status"], "warning");
+    assert_eq!(payload["model_id"], "sentence-transformers/all-MiniLM-L6-v2");
+    assert_eq!(payload["acquisition_policy"], "cache-only");
+    assert_eq!(payload["cache_status"], "not-prepared");
+    assert!(payload["required_files"].as_array().unwrap().len() >= 6);
+    assert!(!stdout.contains("snapshots"));
+    assert!(!stdout.contains("blobs"));
 }
 
 #[test]
