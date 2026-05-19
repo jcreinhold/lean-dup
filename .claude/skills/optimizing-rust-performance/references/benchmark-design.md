@@ -1,7 +1,7 @@
 # Benchmark Design And Regression Tracking
 
-Kan needs both narrow and broad measurements. Use the smallest benchmark that answers the question, then expand scope if
-the change can move cost elsewhere.
+A perf workflow needs both narrow and broad measurements. Use the smallest benchmark that answers the question, then
+expand scope if the change can move cost elsewhere.
 
 ## Choose The Right Benchmark Shape
 
@@ -22,11 +22,8 @@ Use when:
 - the hot path depends on realistic term shape, module shape, or cache state
 - the complaint is editor latency, one-file compile cost, or a specific pipeline stage
 
-Good existing surfaces:
-
-- `single_file/list` in `crates/pipeline/build/benches/pipeline_bench.rs`
-- `profile_interactive`
-- regression benches in `crates/frontend/typecheck-infer/benches/regression_bench.rs`
+Common shapes to look for in the current repo: a single-file or single-module bench, an "interactive editor" profile
+binary, or a per-pass regression bench in the typecheck/inference crate.
 
 ### End-To-End Benchmark
 
@@ -36,11 +33,8 @@ Use when:
 - caching or invalidation changes
 - a micro win might lose in total throughput
 
-Good existing surfaces:
-
-- `full_build` and `per_stage` in `crates/pipeline/build/benches/pipeline_bench.rs`
-- `profile_full_build`
-- `collect_baseline_quick` and `collect_baseline_full`
+Common shapes: a full-build pipeline bench, a "full build" profile binary, and a baseline collector (often timing-only
+plus a DHAT-aware variant for allocations).
 
 ## Criterion Guidance
 
@@ -49,9 +43,9 @@ Use Criterion's comparison features instead of ad hoc timing loops.
 Useful commands:
 
 ```bash
-cargo bench -p kan-typecheck-infer --bench unification_bench -- --save-baseline before
-cargo bench -p kan-typecheck-infer --bench unification_bench -- --baseline before
-cargo bench -p kan-typecheck-infer --bench unification_bench -- --profile-time 10
+cargo bench -p <crate> --bench <bench_name> -- --save-baseline before
+cargo bench -p <crate> --bench <bench_name> -- --baseline before
+cargo bench -p <crate> --bench <bench_name> -- --profile-time 10
 ```
 
 Design rules:
@@ -67,10 +61,10 @@ Design rules:
 
 Use heap profiling when allocation pressure is plausible.
 
-Repo-specific options:
+Typical commands:
 
-- `cargo run --profile profiling -p kan-profiling --bin collect_baseline_full`
-- `cargo bench -p kan-typecheck-infer --bench dhat_profile --features dhat-heap`
+- `cargo run --profile profiling -p <profiling-crate> --bin collect_baseline_full`
+- `cargo bench -p <crate> --bench dhat_profile --features dhat-heap`
 
 Questions to answer:
 

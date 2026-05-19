@@ -1,27 +1,27 @@
 ---
 name: optimizing-rust-performance
-description: 'Use for Rust performance in Kan: throughput, allocations, memory footprint, cache locality, hot-path cloning, layout, hashing, pipeline latency, profiling, benches, regressions.'
+description: 'Use for Rust performance work: throughput, allocations, memory footprint, cache locality, hot-path cloning, layout, hashing, pipeline latency, profiling, benches, regressions.'
 ---
 
 # Optimizing Rust Performance
 
-Use this skill for measurement-driven Rust performance work in Kan. The default job is not "make it faster." The job is:
-pick a real workload, measure a baseline, localize the bottleneck, choose the right intervention level, change code, and
-re-measure.
+Use this skill for measurement-driven Rust performance work. The default job is not "make it faster." The job is:
+pick a real workload, measure a baseline, localize the bottleneck, choose the right intervention level, change code,
+and re-measure.
 
 ## Load The Right References
 
 - Start with [`references/workflow.md`](references/workflow.md) for every task.
-- Read [`references/repo-surfaces.md`](references/repo-surfaces.md) when choosing benches, profiling commands, or where
-    to add new measurement support.
-- Read [`references/hotspot-classes.md`](references/hotspot-classes.md) when the issue is in normalization, evaluation,
-    type checking, unification, traversal, registry lookup, or pipeline throughput.
+- Read [`references/repo-surfaces.md`](references/repo-surfaces.md) when choosing benches, profiling commands, or
+    where to add new measurement support.
+- Read [`references/hotspot-classes.md`](references/hotspot-classes.md) when the issue is in normalization,
+    evaluation, type checking, unification, traversal, registry lookup, or pipeline throughput.
 - Read [`references/intervention-patterns.md`](references/intervention-patterns.md) before changing ownership,
     allocation, layout, hashing, indexing, caching, or branch structure.
 - Read [`references/benchmark-design.md`](references/benchmark-design.md) when adding benches, interpreting variance,
     checking regressions, or reviewing performance claims.
-- Read [`references/external-lessons.md`](references/external-lessons.md) when you need design pressure from strong Rust
-    codebases and tooling rather than repo-local habits.
+- Read [`references/external-lessons.md`](references/external-lessons.md) when you need design pressure from strong
+    Rust codebases and tooling rather than repo-local habits.
 
 ## Workflow
 
@@ -39,23 +39,21 @@ re-measure.
 - Do not claim a win from a toy microbenchmark when the change affects pipeline throughput.
 - Do not default to SIMD, parallelism, custom allocators, or `#[inline(always)]` before measuring and exhausting
     algorithm, representation, and allocation/layout changes.
-- Do not switch data structures because they are fashionable. State the key shape, access pattern, mutation pattern, and
-    expected lifetime first.
-- Do not ignore memory to report a speedup, or ignore speed to report lower allocation count. Check both when the change
-    could trade them off.
+- Do not switch data structures because they are fashionable. State the key shape, access pattern, mutation pattern,
+    and expected lifetime first.
+- Do not ignore memory to report a speedup, or ignore speed to report lower allocation count. Check both when the
+    change could trade them off.
 - Do not accept a performance-sensitive diff without asking what workload proves the win and what broader workload
     guards against regressions.
 
-## Kan-Specific Priorities
+## Priorities
 
 - Prefer fixing phase-local allocation, clone pressure, and redundant recomputation before micro-tuning instruction
     count.
-- Treat normalization/evaluation, typechecker/unifier paths, traversal code, registry/metadata lookup, and pipeline pass
-    boundaries as first-class performance surfaces.
-- Arena lifetime design matters here. Distinguish phase-local data from data that must survive across caches or pass
-    boundaries.
-- Many existing benches are microbenches. Use them to localize, then confirm with `pipeline_bench` or `kan-profiling`
-    when the change can affect end-to-end throughput.
+- Treat hot traversal code, indexing/lookup paths, and pipeline pass boundaries as first-class performance surfaces.
+- Lifetime design matters. Distinguish phase-local data from data that must survive across caches or pass boundaries.
+- Many existing benches are microbenches. Use them to localize, then confirm with a broader end-to-end workload when
+    the change can affect overall throughput.
 
 ## Review Mode
 

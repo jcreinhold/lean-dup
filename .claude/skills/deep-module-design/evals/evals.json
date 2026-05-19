@@ -3,7 +3,7 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "I'm about to create a new `kan-pipeline` crate that will hold the compilation pipeline stages (ANF, monadic, defunctionalization, simplify, liveness). Right now these are scattered across `crates/backend/`. How should I structure the public API?",
+      "prompt": "I'm about to create a new `pipeline` crate that will hold the compilation pipeline stages (ANF, monadic, defunctionalization, simplify, liveness). Right now these are scattered across `crates/backend/`. How should I structure the public API?",
       "expected_output": "A design recommendation that identifies volatile decisions to hide, proposes a deep interface (few public entry points serving many pipeline configurations), and avoids complecting pipeline stages with each other or with storage/caching concerns.",
       "files": []
     },

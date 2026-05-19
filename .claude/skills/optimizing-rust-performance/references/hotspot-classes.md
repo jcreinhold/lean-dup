@@ -1,15 +1,17 @@
-# Kan Hotspot Classes
+# Hotspot Classes
 
-These are the bottleneck classes that repeatedly matter in this codebase.
+The bottleneck classes that recur in Rust workspaces with compiler-like or interpreter-like cores. Names and paths
+will vary; the shapes do not.
 
 ## Arena And Phase-Local Allocation
 
 Start here when you see many short-lived vectors, slices, or strings.
 
-- `crates/util/arena/src/lib.rs`
-- `crates/kernel/core/src/arena.rs`
-- `crates/kernel/core/benches/util.rs`
-- `crates/frontend/typecheck-infer/benches/util.rs`
+Find arenas with:
+
+```bash
+rg -n 'arena::|bumpalo|typed_arena|TypedArena|Arena<' .
+```
 
 What to look for:
 
@@ -20,13 +22,13 @@ What to look for:
 
 ## Normalization, Evaluation, And Read-Back
 
-These are core compiler hot paths.
+In codebases with an interpreter or normalizer, these are core hot paths.
 
-- `crates/kernel/core/benches/normalization_bench.rs`
-- `crates/kernel/core-eval/benches/eval_bench.rs`
-- `crates/kernel/core-eval/src/engine/normalize.rs`
-- `crates/kernel/core-eval/src/engine/trampoline.rs`
-- `crates/kernel/core-eval/src/engine/quote_split.rs`
+Find them with:
+
+```bash
+rg -n 'normalize|whnf|nf_at|quote|readback|trampoline' --type rust .
+```
 
 Typical bottlenecks:
 
@@ -39,8 +41,11 @@ Typical bottlenecks:
 
 Traversal shows up both directly and as overhead inside other passes.
 
-- `crates/kernel/core/benches/traversal_bench.rs`
-- search with `rg -n "fold_term|walk|visitor|travers" crates/kernel crates/frontend crates/pipeline`
+Find traversals with:
+
+```bash
+rg -n 'fold|walk|visit|travers' --type rust .
+```
 
 Typical bottlenecks:
 
@@ -50,16 +55,13 @@ Typical bottlenecks:
 
 ## Typechecker, Unifier, Constraint Queue, Metas
 
-This is one of the most important hotspot families for Kan.
+This is one of the most important hotspot families in compiler-style codebases.
 
-- `crates/frontend/typecheck-infer/benches/typecheck_bench.rs`
-- `crates/frontend/typecheck-infer/benches/unification_bench.rs`
-- `crates/frontend/typecheck-infer/benches/regression_bench.rs`
-- `crates/frontend/typecheck-infer/benches/dhat_profile.rs`
-- `crates/frontend/typecheck-infer/src/constraints/queue.rs`
-- `crates/frontend/typecheck-infer/src/constraints/solving.rs`
-- `crates/frontend/typecheck-infer/src/meta/state.rs`
-- `crates/frontend/typecheck-infer/src/unification/dispatch.rs`
+Find them with:
+
+```bash
+rg -n 'unif|constraint|dispatch|meta|infer|synthesis' --type rust .
+```
 
 Typical bottlenecks:
 
@@ -73,11 +75,11 @@ Typical bottlenecks:
 
 These costs often hide behind "small" operations executed everywhere.
 
-- `crates/kernel/core/benches/registry_cache_bench.rs`
-- `crates/kernel/core-typecheck/src/metadata/table.rs`
-- `crates/kernel/core-typecheck/src/metadata/recording.rs`
-- `crates/pipeline/build/src/compilation_pipeline.rs`
-- `crates/pipeline/build/src/stdlib_build.rs`
+Find them with:
+
+```bash
+rg -n 'Registry|registry|metadata|side_table|cache::|Cache<' --type rust .
+```
 
 Typical bottlenecks:
 
@@ -88,11 +90,13 @@ Typical bottlenecks:
 
 ## Closure Capture And Environment Representation
 
-Kan uses closures and environments in multiple layers.
+Codebases with closures and environments in multiple layers pay for both.
 
-- `crates/execution/interpreter/benches/interpreter.rs`
-- `crates/frontend/typecheck-infer/benches/regression_bench.rs`
-- search with `rg -n "CapturedEnv|closure|captured|imbl::Vector|push_back" crates`
+Find them with:
+
+```bash
+rg -n 'CapturedEnv|Closure|closure|env|imbl::|Vector|push_back' --type rust .
+```
 
 Typical bottlenecks:
 
@@ -104,11 +108,11 @@ Typical bottlenecks:
 
 Micro wins can lose here.
 
-- `crates/pipeline/build/benches/pipeline_bench.rs`
-- `profiling/src/bin/profile_frontend.rs`
-- `profiling/src/bin/profile_full_build.rs`
-- `crates/pipeline/build/src/compilation_pipeline.rs`
-- `crates/pipeline/build/src/pipeline/module_cache.rs`
+Find pass boundaries with:
+
+```bash
+rg -n 'pipeline|pass|stage|module_cache|compilation_pipeline' --type rust .
+```
 
 Typical bottlenecks:
 
@@ -122,10 +126,10 @@ Typical bottlenecks:
 Persistent collections are not free. They help when sharing dominates copying, but they hurt when mutation depth
 dominates.
 
-Search:
+Find them with:
 
 ```bash
-rg -n "imbl::|Vector<|HashMap<|HashSet<|SmallVec<" crates/frontend crates/kernel crates/pipeline
+rg -n 'imbl::|Vector<|HashMap<|HashSet<|SmallVec<' --type rust .
 ```
 
 Questions to ask:

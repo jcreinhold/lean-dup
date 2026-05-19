@@ -1,16 +1,15 @@
-# Kan Patterns
+# Repo Patterns
 
 ## Preferred verification commands
 
-Use `cargo nextest run`, not `cargo test`.
+Prefer `cargo nextest run` when nextest is installed; otherwise `cargo test`.
 
 Common commands:
 
 ```bash
 cargo nextest run -p <crate>
-make test-kernel
-make test-frontend
-make rust-test
+cargo test -p <crate>            # fallback
+make test                        # broader spans if a Makefile target exists
 ```
 
 ## Common test locations
@@ -19,9 +18,9 @@ make rust-test
 - unit tests: inline `mod tests`
 - benches: `benches/`
 
-## Common Kan test shapes
+## Common test shapes
 
-- kernel math: laws, under-binder coverage, negative theory boundaries
+- domain math/logic: laws, boundary conditions, negative cases
 - registry/storage: roundtrip, ordering, identity, conflict detection
 - pipeline passes: preservation and semantic equivalence
 - CLI/tooling: visible behavior and persisted state

@@ -190,8 +190,8 @@ Run the narrowest credible verification first. In this repo, prefer:
 cargo nextest run -p <affected-crate>
 ```
 
-Use `make test-kernel` or `make test-frontend` only when the change spans multiple crates or layers. For repo-specific
-patterns, open [kan-patterns.md](references/kan-patterns.md).
+Use a Makefile target such as `make test` (or the broader equivalent in the current repo) only when the change spans
+multiple crates or layers. For repo-specific patterns, open [patterns.md](references/patterns.md).
 
 When the correct answer is a bench or profiling guardrail rather than a correctness test, stop and switch to
 `optimizing-rust-performance`. The handoff rules are in [perf-handoff.md](references/perf-handoff.md).
