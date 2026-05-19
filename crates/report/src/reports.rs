@@ -67,6 +67,10 @@ pub struct EvalReportDto {
     pub embedding_rerank_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub embedding_rerank_artifact: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector_search_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector_search_artifact: Option<PathBuf>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub runs: Vec<EvalRunReportDto>,
 }
@@ -85,6 +89,10 @@ pub struct EvalRunReportDto {
     pub embedding_rerank_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub embedding_rerank_artifact: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector_search_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector_search_artifact: Option<PathBuf>,
     pub manual: bool,
 }
 
@@ -126,16 +134,27 @@ pub struct EvalTimingMetricsDto {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct EvalStageMetricsDto {
     pub candidate_generation_recall: EvalCountMetricDto,
+    pub candidate_stage_recall: EvalCandidateStageSurvivalDto,
     pub top_k_recall_before_final_ranking: Vec<EvalRecallAtKDto>,
     pub ranked_recall: Vec<EvalRecallAtKDto>,
     pub visible_queue_precision: EvalCountMetricDto,
     pub hard_negative_survival: EvalHardNegativeSurvivalDto,
+    pub hard_negative_stage_survival: EvalCandidateStageSurvivalDto,
     pub candidate_count_by_origin: std::collections::BTreeMap<String, usize>,
     pub candidate_count_by_feature_family: std::collections::BTreeMap<String, usize>,
     pub generated_candidate_count_by_policy: std::collections::BTreeMap<String, usize>,
     pub generated_candidate_count_by_feature_family: std::collections::BTreeMap<String, usize>,
     pub hard_negative_generated_by_feature_family: std::collections::BTreeMap<String, usize>,
     pub semantic_verification: EvalSemanticVerificationStageMetricsDto,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct EvalCandidateStageSurvivalDto {
+    pub vector_generated: EvalCountMetricDto,
+    pub symbolic_generated: EvalCountMetricDto,
+    pub merged_generated: EvalCountMetricDto,
+    pub ranked: EvalCountMetricDto,
+    pub visible: EvalCountMetricDto,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -498,6 +517,8 @@ pub fn eval_report(report: EvalOutput) -> EvalReportDto {
         scorer_ablation_artifact: report.scorer_ablation_artifact,
         embedding_rerank_status: report.embedding_rerank_status,
         embedding_rerank_artifact: report.embedding_rerank_artifact,
+        vector_search_status: report.vector_search_status,
+        vector_search_artifact: report.vector_search_artifact,
         runs: report
             .runs
             .into_iter()
@@ -509,6 +530,8 @@ pub fn eval_report(report: EvalOutput) -> EvalReportDto {
                 reason: run.reason,
                 embedding_rerank_status: run.embedding_rerank_status,
                 embedding_rerank_artifact: run.embedding_rerank_artifact,
+                vector_search_status: run.vector_search_status,
+                vector_search_artifact: run.vector_search_artifact,
                 manual: run.manual,
             })
             .collect(),
@@ -533,6 +556,15 @@ fn eval_metrics_dto(metrics: lean_dup_eval::EvaluationMetrics) -> EvalMetricsDto
         probe_unavailable: eval_count_metric_dto(metrics.probe_unavailable),
         stage_metrics: EvalStageMetricsDto {
             candidate_generation_recall: eval_count_metric_dto(metrics.stage_metrics.candidate_generation_recall),
+            candidate_stage_recall: EvalCandidateStageSurvivalDto {
+                vector_generated: eval_count_metric_dto(metrics.stage_metrics.candidate_stage_recall.vector_generated),
+                symbolic_generated: eval_count_metric_dto(
+                    metrics.stage_metrics.candidate_stage_recall.symbolic_generated,
+                ),
+                merged_generated: eval_count_metric_dto(metrics.stage_metrics.candidate_stage_recall.merged_generated),
+                ranked: eval_count_metric_dto(metrics.stage_metrics.candidate_stage_recall.ranked),
+                visible: eval_count_metric_dto(metrics.stage_metrics.candidate_stage_recall.visible),
+            },
             top_k_recall_before_final_ranking: metrics
                 .stage_metrics
                 .top_k_recall_before_final_ranking
@@ -570,6 +602,19 @@ fn eval_metrics_dto(metrics: lean_dup_eval::EvaluationMetrics) -> EvalMetricsDto
                     })
                     .collect(),
                 visible_queue: eval_count_metric_dto(metrics.stage_metrics.hard_negative_survival.visible_queue),
+            },
+            hard_negative_stage_survival: EvalCandidateStageSurvivalDto {
+                vector_generated: eval_count_metric_dto(
+                    metrics.stage_metrics.hard_negative_stage_survival.vector_generated,
+                ),
+                symbolic_generated: eval_count_metric_dto(
+                    metrics.stage_metrics.hard_negative_stage_survival.symbolic_generated,
+                ),
+                merged_generated: eval_count_metric_dto(
+                    metrics.stage_metrics.hard_negative_stage_survival.merged_generated,
+                ),
+                ranked: eval_count_metric_dto(metrics.stage_metrics.hard_negative_stage_survival.ranked),
+                visible: eval_count_metric_dto(metrics.stage_metrics.hard_negative_stage_survival.visible),
             },
             candidate_count_by_origin: metrics.stage_metrics.candidate_count_by_origin,
             candidate_count_by_feature_family: metrics.stage_metrics.candidate_count_by_feature_family,

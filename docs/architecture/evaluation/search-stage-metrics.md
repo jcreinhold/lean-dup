@@ -12,10 +12,12 @@ supported.
 | Metric | What it counts |
 | --- | --- |
 | `candidate_generation_recall` | labeled positives present anywhere in retrieved candidates |
+| `candidate_stage_recall` | labeled positives at vector-generated, symbolic-generated, merged-generated, ranked, and visible stages |
 | `top_k_recall_before_final_ranking` | recall at requested `k` over the current retrieval ordering |
 | `ranked_recall` | current public recall metric, repeated under stage vocabulary |
 | `visible_queue_precision` | shown true positives / shown candidates |
 | `hard_negative_survival` | hard negatives at generated, top-k, and visible stages |
+| `hard_negative_stage_survival` | hard negatives at vector-generated, symbolic-generated, merged-generated, ranked, and visible stages |
 | `candidate_count_by_origin` | candidates grouped by `workspace`, `mathlib`, `external:<label>`, … |
 | `candidate_count_by_feature_family` | candidates grouped by stable retrieval-evidence family |
 | `generated_candidate_count_by_policy` | generated observations grouped by private search policy label |
@@ -25,6 +27,11 @@ supported.
 
 Generated observations are tracked separately from the bounded ranked queue. Candidate generation means "the pair
 was created by the private generation stage"; top-k and visible metrics describe later survival.
+
+For hidden vector experiments, candidate generation has two sources. `symbolic_generated` is the existing symbolic
+retrieval stage. `vector_generated` is nearest-neighbor vector search over a persisted declaration-vector corpus.
+`merged_generated` is the union after search-owned merge policy. Vector-only candidates may be ranked for measurement,
+but they are not shown merely because a vector score exists.
 
 ## Feature families
 
@@ -39,6 +46,7 @@ role_conclusion_const
 role_hypothesis_const
 role_head
 role_other
+vector_similarity
 other
 unknown
 ```
@@ -70,3 +78,5 @@ denominators, especially manual-corpus mathlib recall and hard-negative survival
 - The semantic-verification counters are zero for retrieval-only suites; the slots exist so
   artifact shape stays stable when audit-backed observations are added.
 - Top-k recall before final ranking uses the current first-stage selection order.
+- Hidden vector-search metrics measure candidate generation over the observed corpus and
+  do not by themselves justify changing default visibility thresholds.

@@ -6,8 +6,10 @@ version = { workspace = true }
 
 [dependencies]
 lean-dup-diagnostics = { workspace = true }
+lean-dup-embedding = { workspace = true }
 lean-dup-index = { workspace = true }
 lean-dup-project = { workspace = true }
+lean-dup-vector-index = { workspace = true }
 lean-dup-worker = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }

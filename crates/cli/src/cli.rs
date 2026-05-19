@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 use lean_dup_embedding::EmbeddingAcquisitionPolicy;
 use lean_dup_eval::EvalSuite;
-use lean_dup_search::{ProbePolicy, ReviewProfile};
+use lean_dup_search::{ProbePolicy, ReviewProfile, SearchVectorAcquisitionPolicy};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
@@ -203,6 +203,27 @@ pub struct EvalArgs {
 
     #[arg(long = "embedding-vector-cache-root", hide = true)]
     pub embedding_vector_cache_root: Option<PathBuf>,
+
+    #[arg(long, hide = true)]
+    pub write_vector_search: bool,
+
+    #[arg(long = "vector-acquisition", hide = true, value_enum, default_value_t = CliEmbeddingAcquisitionPolicy::CacheOnly)]
+    pub vector_acquisition: CliEmbeddingAcquisitionPolicy,
+
+    #[arg(long = "vector-model-id", hide = true, default_value = "BAAI/bge-small-en-v1.5")]
+    pub vector_model_id: String,
+
+    #[arg(long = "vector-revision", hide = true)]
+    pub vector_revision: Option<String>,
+
+    #[arg(long = "vector-model-cache-root", hide = true)]
+    pub vector_model_cache_root: Option<PathBuf>,
+
+    #[arg(long = "vector-text-cache-root", hide = true)]
+    pub vector_text_cache_root: Option<PathBuf>,
+
+    #[arg(long = "vector-corpus-cache-root", hide = true)]
+    pub vector_corpus_cache_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, clap::Args)]
@@ -306,6 +327,15 @@ pub enum CliEmbeddingAcquisitionPolicy {
 }
 
 impl From<CliEmbeddingAcquisitionPolicy> for EmbeddingAcquisitionPolicy {
+    fn from(value: CliEmbeddingAcquisitionPolicy) -> Self {
+        match value {
+            CliEmbeddingAcquisitionPolicy::CacheOnly => Self::CacheOnly,
+            CliEmbeddingAcquisitionPolicy::DownloadIfMissing => Self::DownloadIfMissing,
+        }
+    }
+}
+
+impl From<CliEmbeddingAcquisitionPolicy> for SearchVectorAcquisitionPolicy {
     fn from(value: CliEmbeddingAcquisitionPolicy) -> Self {
         match value {
             CliEmbeddingAcquisitionPolicy::CacheOnly => Self::CacheOnly,

@@ -15,12 +15,21 @@ decision.
 | `mathlib_comparison` | pairs generated from the project mathlib index |
 | `static_external_comparison` | pairs from external indexes without current source-backed provenance |
 | `source_backed_external_comparison` | pairs from external indexes with source-backed provenance |
+| `vector_local_duplicate_audit` | hidden vector pairs generated within the audited workspace corpus |
+| `vector_mathlib_comparison` | hidden vector pairs generated from the project mathlib vector corpus |
+| `vector_static_external_comparison` | hidden vector pairs from external vector corpora without current source-backed provenance |
+| `vector_source_backed_external_comparison` | hidden vector pairs from external vector corpora with source-backed provenance |
 
 Generation may be noisy. The noise must be measured by feature family, origin, and hard-negative survival. Final
 visibility remains a later review-policy decision.
 
 Ordinary audits still hydrate only selected external handles. Eval may request tracked declaration pairs by qualified
 name so search can report whether labeled mathlib/external pairs were generated, without hydrating all of mathlib.
+
+Hidden vector experiments are explicit exceptions for measurement. They may build or
+reuse a persisted declaration-vector corpus and query it for nearest neighbors, but this
+work happens only when the hidden vector flag is set. The default audit path remains
+symbolic and keeps the existing selected-candidate hydration limit.
 
 ## Metrics
 
@@ -30,10 +39,12 @@ tracked generated-only pairs that did not survive first-stage selection.
 | Metric | Counts |
 | --- | --- |
 | `candidate_generation_recall` | labeled positives present at generation (including generated-only survivors) |
+| `candidate_stage_recall` | labeled positives at vector-generated, symbolic-generated, merged-generated, ranked, and visible stages |
 | `top_k_recall_before_final_ranking` | labeled positives surviving into ranked observations at each `k` |
 | `ranked_recall` | the previous ranked-recall vocabulary, kept for compatibility |
 | `visible_queue_precision` | shown true positives / shown pairs |
 | `hard_negative_survival` | hard negatives at generated, top-k, and visible stages |
+| `hard_negative_stage_survival` | hard negatives at vector-generated, symbolic-generated, merged-generated, ranked, and visible stages |
 | `generated_candidate_count_by_policy` | generated observations by private policy label |
 | `generated_candidate_count_by_feature_family` | generated observations by stable feature family |
 | `hard_negative_generated_by_feature_family` | generated hard negatives by feature family |
@@ -51,6 +62,11 @@ heap pruning, and SQLite-shaped vocabulary. Every retrieval refactor would becom
 A private generation stage plus stable observation facts means candidate-generation policy can change without teaching
 eval or report how retrieval works. Search keeps feature planning, fanout checks, and first-stage selection private;
 eval receives generated/ranked facts, policy labels, and feature-family diagnostics.
+
+Vector candidate generation follows the same rule. Eval sees stable source facts and raw
+denominators; it does not call embedding or vector-index directly to reconstruct search.
+Vector backend names, corpus storage layout, model runtime details, and final model input
+strings remain private to their owning crates.
 
 ## Evidence commands
 

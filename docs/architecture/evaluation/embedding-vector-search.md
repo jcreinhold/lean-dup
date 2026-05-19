@@ -11,6 +11,12 @@ Prompt 35I adds the vector-index crate boundary described here. It does not chan
 default symbolic audit path, tune ranking thresholds, or make embeddings part of default
 eval.
 
+Prompt 35J adds hidden vector candidate generation inside `lean-dup-search`. The default
+audit and ordinary eval paths still do not prepare models, build corpora, open vector
+databases, or query nearest neighbors. The hidden eval flag is an experiment path that
+lets search build or reuse a persisted comparison corpus, query it, and expose stable
+stage facts for eval.
+
 ## Design Note
 
 Hidden knowledge:
@@ -170,6 +176,64 @@ Fixture corpora may use exact backend search when they are too small for an ANN 
 be useful. Production-sized corpora should create the backend vector index during corpus
 build. This distinction is private: callers receive the same corpus summary and nearest
 declaration facts either way.
+
+## Prompt 35J Hidden Vector Candidate Generation
+
+Design note:
+
+- Hidden knowledge: search owns the vector candidate-generation policy, including
+  declaration-document selection, per-query top-k, symbolic/vector merge ordering, and
+  the rule that vector-only candidates are ranked for measurement but not shown by
+  vector score alone.
+- Smallest public interface: eval passes a search-owned vector request; search returns
+  stable observation facts: vector summary, symbolic-generated, vector-generated,
+  merged-generated, ranked, visible, optional vector score, and optional vector rank.
+- Non-leaking decisions: model profile internals, FastEmbed runtime mechanics, final
+  model input strings, LanceDB storage, ANN parameters, vector database paths, table
+  names, and vector-cache filenames do not cross into search/eval/report artifacts.
+- Preserved capability: ordinary symbolic duplicate audit remains the default path and
+  remains the gate for existing eval suite success.
+- Discarded behavior: eval does not call embedding and vector-index directly to
+  reconstruct candidate pairs. That would recreate search policy in the measurement
+  layer and make the experiment impossible to compare with real audit behavior.
+
+Design It Twice:
+
+- Rejected: eval calls embedding and vector-index directly, assembles pair rows, and
+  computes recall. This exposes model/runtime and vector-corpus mechanics to eval and
+  measures an eval-only workflow rather than search behavior.
+- Rejected: a separate vector-search CLI command unrelated to audit/eval. That can
+  inspect nearest neighbors, but it cannot measure stage survival through the same
+  scoring and visibility pipeline.
+- Chosen: `lean-dup-search` owns a hidden vector candidate policy using only
+  crate-root embedding and vector-index capabilities. Eval enables and measures it;
+  report projects optional status and artifact paths. This is deeper because search
+  hides candidate policy, embedding hides model/runtime details, vector-index hides
+  persistence, and eval hides label denominators.
+
+The hidden workflow builds or reuses a persisted vector corpus once per observation. It
+embeds workspace declarations as queries and comparison declarations as documents. When
+comparison indexes are present, the vector corpus is built from those comparison
+declarations; otherwise it is built from the local workspace so fixture/local duplicate
+experiments can run. Provenance controls reuse, so a valid corpus is reopened instead of
+rebuilt.
+
+Vector candidates are merged with symbolic candidates before scoring. Existing symbolic
+pairs gain vector facts when the nearest-neighbor query also finds them. Vector-only
+pairs are generated and ranked so eval can measure recall, but they are not shown by
+default and vector score is not a production visibility threshold.
+
+Hidden artifacts and metrics distinguish these stages:
+
+- `vector_generated`: pair was produced by nearest-neighbor vector search;
+- `symbolic_generated`: pair was produced by symbolic retrieval;
+- `merged_generated`: pair exists after the hidden search merge stage;
+- `ranked`: pair survived into ranked observation facts;
+- `visible`: pair entered the shown queue.
+
+Cache-only missing model preparation is a skipped vector experiment, not an eval failure.
+The symbolic baseline remains available in the artifact and existing suite gates are
+evaluated against the symbolic baseline, not against experimental vector output.
 
 ## Backend Tradeoff
 

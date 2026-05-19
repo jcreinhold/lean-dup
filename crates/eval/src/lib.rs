@@ -11,7 +11,8 @@ mod eval;
 
 pub use error::{Error, Result};
 pub use eval::{
-    CountMetric, EmbeddingRerankRequest, EvalOutput, EvalRequest, EvaluationMetrics, EvaluationRunReport, run,
+    CountMetric, EmbeddingRerankRequest, EvalOutput, EvalRequest, EvaluationMetrics, EvaluationRunReport,
+    VectorSearchRequest, run,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]

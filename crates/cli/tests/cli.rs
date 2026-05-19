@@ -371,6 +371,8 @@ fn eval_hidden_search_dataset_mode_writes_feature_artifact() {
     assert!(!help_stdout.contains("--write-scorer-ablations"));
     assert!(!help_stdout.contains("--write-embedding-rerank"));
     assert!(!help_stdout.contains("--embedding-acquisition"));
+    assert!(!help_stdout.contains("--write-vector-search"));
+    assert!(!help_stdout.contains("--vector-acquisition"));
 
     let assert = Command::cargo_bin("lean-dup")
         .unwrap()
@@ -423,6 +425,72 @@ fn eval_hidden_search_dataset_mode_writes_feature_artifact() {
     let raw = fs::read_to_string(artifact).unwrap();
     for forbidden in ["/Users/", "statement_text", "IndexQuery", "FeatureMatch", "sqlite"] {
         assert!(!raw.contains(forbidden), "dataset leaked {forbidden}");
+    }
+}
+
+#[test]
+fn eval_hidden_vector_search_mode_writes_skipped_artifact_without_model() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let model_cache = tempfile::TempDir::new().unwrap();
+    let text_cache = tempfile::TempDir::new().unwrap();
+    let corpus_cache = tempfile::TempDir::new().unwrap();
+    let artifact = repo_root().join("target/search-quality/default-vector-search.json");
+    let _ = fs::remove_file(&artifact);
+
+    let assert = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args([
+            "eval",
+            "--suite",
+            "default",
+            "--format",
+            "json",
+            "--write-vector-search",
+            "--vector-acquisition",
+            "cache-only",
+            "--vector-model-cache-root",
+        ])
+        .arg(model_cache.path())
+        .arg("--vector-text-cache-root")
+        .arg(text_cache.path())
+        .arg("--vector-corpus-cache-root")
+        .arg(corpus_cache.path())
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["vector_search_status"], "skipped");
+    assert_eq!(
+        payload["vector_search_artifact"],
+        "target/search-quality/default-vector-search.json"
+    );
+
+    let vector: Value = serde_json::from_str(&fs::read_to_string(&artifact).unwrap()).unwrap();
+    assert_eq!(vector["schema_version"], "lean-dup.vector-search.v1");
+    assert_eq!(vector["suite"], "default");
+    assert_eq!(vector["status"], "skipped");
+    assert_eq!(vector["reason"], "vector-model-not-prepared");
+    assert_eq!(vector["vector_candidates"]["status"], "skipped");
+    assert_eq!(vector["vector_candidates"]["acquisition_policy"], "cache-only");
+    assert!(vector["symbolic_baseline"]["stage_metrics"].is_object());
+
+    let raw = fs::read_to_string(artifact).unwrap();
+    for forbidden in [
+        "/Users/",
+        "statement_text",
+        "model.safetensors",
+        "snapshot",
+        "sqlite",
+        "posting",
+        "worker JSONL",
+        "tensor",
+        "lancedb",
+        "table_name",
+    ] {
+        assert!(!raw.contains(forbidden), "vector search artifact leaked {forbidden}");
     }
 }
 

@@ -13,6 +13,7 @@ use crate::eval::scoring::{
 };
 use crate::eval::search_dataset;
 use crate::eval::stage_metrics::SemanticVerificationStageMetrics;
+use crate::eval::vector_search::{self, VectorSearchRequest};
 use lean_dup_diagnostics::perf;
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
@@ -35,6 +36,7 @@ pub struct EvalRequest {
     pub write_search_dataset: bool,
     pub write_scorer_ablations: bool,
     pub embedding_rerank: Option<EmbeddingRerankRequest>,
+    pub vector_search: Option<VectorSearchRequest>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -51,10 +53,16 @@ pub struct EvalOutput {
     pub embedding_rerank_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub embedding_rerank_artifact: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector_search_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector_search_artifact: Option<PathBuf>,
     #[serde(skip)]
     pub scorer_ablations: Vec<ScorerAblationVariantReport>,
     #[serde(skip)]
     pub embedding_rerank_metrics: Option<EvaluationMetrics>,
+    #[serde(skip)]
+    pub vector_search_metrics: Option<EvaluationMetrics>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub runs: Vec<EvaluationRunReport>,
 }
@@ -73,11 +81,17 @@ pub struct EvaluationRunReport {
     pub embedding_rerank_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub embedding_rerank_artifact: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector_search_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector_search_artifact: Option<PathBuf>,
     pub manual: bool,
     #[serde(skip)]
     pub scorer_ablations: Vec<ScorerAblationVariantReport>,
     #[serde(skip)]
     pub embedding_rerank_metrics: Option<EvaluationMetrics>,
+    #[serde(skip)]
+    pub vector_search_metrics: Option<EvaluationMetrics>,
 }
 
 struct SuiteDefinition {
@@ -164,24 +178,76 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
         };
     let index_load_ms = index_started.elapsed().as_millis();
 
-    let retrieval_started = Instant::now();
     let tracked_pairs = tracked_pairs(&labels);
-    let output = match &external {
+    let retrieval_started = Instant::now();
+    let base_output = match &external {
         Some(external) => observe_search(SearchObservationRequest {
             workspace: &workspace_rows,
             comparison_indexes: std::slice::from_ref(external),
             tracked_pairs: &tracked_pairs,
             scoring_variant: SearchScoringVariant::AllFeatures,
+            vector_candidates: None,
         })?,
         None => observe_search(SearchObservationRequest {
             workspace: &workspace_rows,
             comparison_indexes: &[],
             tracked_pairs: &tracked_pairs,
             scoring_variant: SearchScoringVariant::AllFeatures,
+            vector_candidates: None,
         })?,
     };
-    let retrieval_ms = retrieval_started.elapsed().as_millis();
+    let base_retrieval_ms = retrieval_started.elapsed().as_millis();
+
+    let vector_search_request = request
+        .vector_search
+        .as_ref()
+        .map(|request| request.to_search_request(&labels.suite));
+    let (output, retrieval_ms) = if let Some(vector_request) = vector_search_request.as_ref() {
+        let started = Instant::now();
+        let output = match &external {
+            Some(external) => observe_search(SearchObservationRequest {
+                workspace: &workspace_rows,
+                comparison_indexes: std::slice::from_ref(external),
+                tracked_pairs: &tracked_pairs,
+                scoring_variant: SearchScoringVariant::AllFeatures,
+                vector_candidates: Some(vector_request),
+            })?,
+            None => observe_search(SearchObservationRequest {
+                workspace: &workspace_rows,
+                comparison_indexes: &[],
+                tracked_pairs: &tracked_pairs,
+                scoring_variant: SearchScoringVariant::AllFeatures,
+                vector_candidates: Some(vector_request),
+            })?,
+        };
+        (output, started.elapsed().as_millis())
+    } else {
+        (base_output.clone(), base_retrieval_ms)
+    };
     let scorer_version = output.scoring.version.to_owned();
+
+    let base_observed = ObservedRun {
+        suite: labels.suite.clone(),
+        pairs: observed_pairs(&base_output),
+        visible_groups: CountMetric {
+            found: base_output.visible_groups_found,
+            total: base_output.visible_groups_total,
+        },
+        probe_unavailable: CountMetric { found: 0, total: 0 },
+        semantic_verification: SemanticVerificationStageMetrics {
+            semantic_reranking: base_output.semantic_reranking.clone(),
+            obligation_yield: base_output.semantic_obligation_yield.clone(),
+            ..SemanticVerificationStageMetrics::default()
+        },
+        timings: TimingMetrics {
+            index_load_ms,
+            retrieval_ms: base_retrieval_ms,
+            probe_ms: 0,
+            total_ms: total_started.elapsed().as_millis(),
+        },
+        peak_memory_bytes: perf::peak_rss_bytes(),
+    };
+    let baseline_metrics = score_run(&labels, &base_observed, &k_values);
 
     let observed = ObservedRun {
         suite: labels.suite.clone(),
@@ -205,7 +271,7 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
         peak_memory_bytes: perf::peak_rss_bytes(),
     };
     let metrics = score_run(&labels, &observed, &k_values);
-    enforce_suite_gates(&definition, &labels, &metrics)?;
+    enforce_suite_gates(&definition, &labels, &baseline_metrics)?;
     let search_dataset_artifact = if write_search_dataset {
         let dataset = search_dataset::build(&labels.suite, &labels, &output);
         Some(search_dataset::write_default_artifact(&repo_root(), &dataset)?)
@@ -245,6 +311,20 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
     } else {
         None
     };
+    let vector_search = if request.vector_search.is_some() {
+        let root = repo_root();
+        Some(vector_search::report(vector_search::VectorSearchReportRun {
+            repo_root: &root,
+            suite: &labels.suite,
+            labels: &labels,
+            observation: &output,
+            symbolic_baseline: &baseline_metrics,
+            vector_metrics: &metrics,
+            scorer_version: &scorer_version,
+        })?)
+    } else {
+        None
+    };
 
     Ok(EvalOutput {
         status: "ok".to_owned(),
@@ -255,8 +335,11 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
         scorer_ablation_artifact,
         embedding_rerank_status: embedding_rerank.as_ref().map(|outcome| outcome.status.clone()),
         embedding_rerank_artifact: embedding_rerank.as_ref().map(|outcome| outcome.artifact.clone()),
+        vector_search_status: vector_search.as_ref().map(|outcome| outcome.status.clone()),
+        vector_search_artifact: vector_search.as_ref().map(|outcome| outcome.artifact.clone()),
         scorer_ablations,
         embedding_rerank_metrics: embedding_rerank.and_then(|outcome| outcome.metrics),
+        vector_search_metrics: vector_search.and_then(|outcome| outcome.metrics),
         runs: Vec::new(),
     })
 }
@@ -344,6 +427,7 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
                 write_search_dataset: false,
                 write_scorer_ablations: request.write_scorer_ablations,
                 embedding_rerank: request.embedding_rerank.clone(),
+                vector_search: request.vector_search.clone(),
             },
             false,
             reporter,
@@ -361,6 +445,7 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
                 write_search_dataset: false,
                 write_scorer_ablations: request.write_scorer_ablations,
                 embedding_rerank: request.embedding_rerank.clone(),
+                vector_search: request.vector_search.clone(),
             },
             true,
             reporter,
@@ -440,6 +525,29 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
     } else {
         None
     };
+    let vector_search = if request.vector_search.is_some() {
+        let children = runs
+            .iter()
+            .map(|run| {
+                vector_search::child_report(
+                    run.suite.clone(),
+                    run.vector_search_status.clone(),
+                    run.vector_search_artifact.clone(),
+                    run.vector_search_metrics.clone(),
+                    run.reason.clone(),
+                )
+            })
+            .collect();
+        Some(vector_search::aggregate(
+            &repo_root(),
+            "production-gate",
+            &scorer_version,
+            &metrics,
+            children,
+        )?)
+    } else {
+        None
+    };
 
     Ok(EvalOutput {
         status: status.to_owned(),
@@ -450,8 +558,11 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
         scorer_ablation_artifact,
         embedding_rerank_status: embedding_rerank.as_ref().map(|outcome| outcome.status.clone()),
         embedding_rerank_artifact: embedding_rerank.as_ref().map(|outcome| outcome.artifact.clone()),
+        vector_search_status: vector_search.as_ref().map(|outcome| outcome.status.clone()),
+        vector_search_artifact: vector_search.as_ref().map(|outcome| outcome.artifact.clone()),
         scorer_ablations,
         embedding_rerank_metrics: embedding_rerank.and_then(|outcome| outcome.metrics),
+        vector_search_metrics: vector_search.and_then(|outcome| outcome.metrics),
         runs,
     })
 }
@@ -466,9 +577,12 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
             reason: Some("manual suite workspace is unavailable".to_owned()),
             embedding_rerank_status: None,
             embedding_rerank_artifact: None,
+            vector_search_status: None,
+            vector_search_artifact: None,
             manual,
             scorer_ablations: Vec::new(),
             embedding_rerank_metrics: None,
+            vector_search_metrics: None,
         };
     }
 
@@ -482,9 +596,12 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
             reason: None,
             embedding_rerank_status: report.embedding_rerank_status,
             embedding_rerank_artifact: report.embedding_rerank_artifact,
+            vector_search_status: report.vector_search_status,
+            vector_search_artifact: report.vector_search_artifact,
             manual,
             scorer_ablations: report.scorer_ablations,
             embedding_rerank_metrics: report.embedding_rerank_metrics,
+            vector_search_metrics: report.vector_search_metrics,
         },
         Err(error) => {
             let reason = error.to_string();
@@ -501,9 +618,12 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
                 reason: Some(reason),
                 embedding_rerank_status: None,
                 embedding_rerank_artifact: None,
+                vector_search_status: None,
+                vector_search_artifact: None,
                 manual,
                 scorer_ablations: Vec::new(),
                 embedding_rerank_metrics: None,
+                vector_search_metrics: None,
             }
         }
     }
@@ -803,6 +923,9 @@ fn observed_pairs(output: &SearchObservation) -> Vec<ObservedPair> {
         .map(|pair| ObservedPair {
             pair: GoldPair::new(pair.left.clone(), pair.right.clone()),
             generated: pair.generated,
+            symbolic_generated: pair.symbolic_generated,
+            vector_generated: pair.vector_generated,
+            merged_generated: pair.merged_generated,
             ranked: pair.ranked,
             generation_policy: pair.generation_policy.clone(),
             rank: pair.rank,
@@ -882,6 +1005,7 @@ mod tests {
                 write_search_dataset: false,
                 write_scorer_ablations: false,
                 embedding_rerank: None,
+                vector_search: None,
             },
             &mut Reporter::new(false, false),
         );
@@ -939,6 +1063,7 @@ mod tests {
                 write_search_dataset: false,
                 write_scorer_ablations: false,
                 embedding_rerank: None,
+                vector_search: None,
             },
             true,
             &mut Reporter::new(false, false),
@@ -975,6 +1100,7 @@ mod tests {
                 write_search_dataset: false,
                 write_scorer_ablations: false,
                 embedding_rerank: None,
+                vector_search: None,
             },
             &mut Reporter::new(false, true),
         )
@@ -995,6 +1121,7 @@ mod tests {
                 write_search_dataset: false,
                 write_scorer_ablations: false,
                 embedding_rerank: None,
+                vector_search: None,
             },
             &mut Reporter::new(false, true),
         )
@@ -1021,10 +1148,12 @@ mod tests {
             probe_unavailable: CountMetric { found, total },
             stage_metrics: SearchStageMetrics {
                 candidate_generation_recall: CountMetric { found, total },
+                candidate_stage_recall: Default::default(),
                 top_k_recall_before_final_ranking: vec![RecallAtK { k: 10, found, total }],
                 ranked_recall: vec![RecallAtK { k: 10, found, total }],
                 visible_queue_precision: CountMetric { found, total },
                 hard_negative_survival: Default::default(),
+                hard_negative_stage_survival: Default::default(),
                 candidate_count_by_origin: Default::default(),
                 candidate_count_by_feature_family: Default::default(),
                 generated_candidate_count_by_policy: Default::default(),

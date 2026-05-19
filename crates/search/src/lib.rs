@@ -18,6 +18,7 @@ mod scorer;
 mod semantic_reranking;
 mod semantic_verification;
 mod source_refs;
+mod vector_candidates;
 
 pub use audit::{
     AuditEvidence, AuditGroup, AuditHiddenGroupCounts, AuditHiddenReason, AuditMember, AuditOutput, AuditProbeSummary,
@@ -38,6 +39,10 @@ pub use scorer::{SearchPairScoring, SearchScoringSummary, SearchScoringVariant};
 pub use semantic_reranking::{
     SearchSemanticObligationFact, SearchSemanticObligationKind, SearchSemanticObligationStatus,
     SearchSemanticObligationYield, SearchSemanticRerankingSummary, SearchSemanticUnavailableReason,
+};
+pub use vector_candidates::{
+    SearchVectorAcquisitionPolicy, SearchVectorCandidateRequest, SearchVectorCandidateStatus,
+    SearchVectorCandidateSummary, SearchVectorCorpusStatus,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]

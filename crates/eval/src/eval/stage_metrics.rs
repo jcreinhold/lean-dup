@@ -14,16 +14,27 @@ use crate::eval::scoring::{CountMetric, GoldPair, ObservedRun, RecallAtK};
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct SearchStageMetrics {
     pub candidate_generation_recall: CountMetric,
+    pub candidate_stage_recall: CandidateStageSurvival,
     pub top_k_recall_before_final_ranking: Vec<RecallAtK>,
     pub ranked_recall: Vec<RecallAtK>,
     pub visible_queue_precision: CountMetric,
     pub hard_negative_survival: HardNegativeSurvival,
+    pub hard_negative_stage_survival: CandidateStageSurvival,
     pub candidate_count_by_origin: BTreeMap<String, usize>,
     pub candidate_count_by_feature_family: BTreeMap<String, usize>,
     pub generated_candidate_count_by_policy: BTreeMap<String, usize>,
     pub generated_candidate_count_by_feature_family: BTreeMap<String, usize>,
     pub hard_negative_generated_by_feature_family: BTreeMap<String, usize>,
     pub semantic_verification: SemanticVerificationStageMetrics,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct CandidateStageSurvival {
+    pub vector_generated: CountMetric,
+    pub symbolic_generated: CountMetric,
+    pub merged_generated: CountMetric,
+    pub ranked: CountMetric,
+    pub visible: CountMetric,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -56,6 +67,30 @@ pub fn score(labels: &GoldLabels, observed: &ObservedRun, k_values: &[usize]) ->
         .pairs
         .iter()
         .filter(|pair| pair.generated)
+        .map(|pair| pair.pair.clone())
+        .collect::<FxHashSet<_>>();
+    let vector_generated_pairs = observed
+        .pairs
+        .iter()
+        .filter(|pair| pair.vector_generated)
+        .map(|pair| pair.pair.clone())
+        .collect::<FxHashSet<_>>();
+    let symbolic_generated_pairs = observed
+        .pairs
+        .iter()
+        .filter(|pair| pair.symbolic_generated)
+        .map(|pair| pair.pair.clone())
+        .collect::<FxHashSet<_>>();
+    let merged_generated_pairs = observed
+        .pairs
+        .iter()
+        .filter(|pair| pair.merged_generated)
+        .map(|pair| pair.pair.clone())
+        .collect::<FxHashSet<_>>();
+    let ranked_pairs = observed
+        .pairs
+        .iter()
+        .filter(|pair| pair.ranked)
         .map(|pair| pair.pair.clone())
         .collect::<FxHashSet<_>>();
     let shown_pairs = observed
@@ -101,6 +136,13 @@ pub fn score(labels: &GoldLabels, observed: &ObservedRun, k_values: &[usize]) ->
                 .count(),
             total: labels.positives.len(),
         },
+        candidate_stage_recall: CandidateStageSurvival {
+            vector_generated: count_labeled(&labels.positives, &vector_generated_pairs),
+            symbolic_generated: count_labeled(&labels.positives, &symbolic_generated_pairs),
+            merged_generated: count_labeled(&labels.positives, &merged_generated_pairs),
+            ranked: count_labeled(&labels.positives, &ranked_pairs),
+            visible: count_labeled(&labels.positives, &shown_pairs),
+        },
         ranked_recall: top_k_recall_before_final_ranking.clone(),
         top_k_recall_before_final_ranking,
         visible_queue_precision: CountMetric {
@@ -121,6 +163,13 @@ pub fn score(labels: &GoldLabels, observed: &ObservedRun, k_values: &[usize]) ->
                 found: shown_pairs.intersection(&labels.hard_negatives).count(),
                 total: labels.hard_negatives.len(),
             },
+        },
+        hard_negative_stage_survival: CandidateStageSurvival {
+            vector_generated: count_labeled(&labels.hard_negatives, &vector_generated_pairs),
+            symbolic_generated: count_labeled(&labels.hard_negatives, &symbolic_generated_pairs),
+            merged_generated: count_labeled(&labels.hard_negatives, &merged_generated_pairs),
+            ranked: count_labeled(&labels.hard_negatives, &ranked_pairs),
+            visible: count_labeled(&labels.hard_negatives, &shown_pairs),
         },
         candidate_count_by_origin: count_by_origin(observed),
         candidate_count_by_feature_family: count_by_feature_family(observed),
@@ -150,6 +199,13 @@ pub fn aggregate(_suite: &str, runs: &[&SearchStageMetrics]) -> SearchStageMetri
 
     SearchStageMetrics {
         candidate_generation_recall: sum_count(runs, |metrics| &metrics.candidate_generation_recall),
+        candidate_stage_recall: CandidateStageSurvival {
+            vector_generated: sum_count(runs, |metrics| &metrics.candidate_stage_recall.vector_generated),
+            symbolic_generated: sum_count(runs, |metrics| &metrics.candidate_stage_recall.symbolic_generated),
+            merged_generated: sum_count(runs, |metrics| &metrics.candidate_stage_recall.merged_generated),
+            ranked: sum_count(runs, |metrics| &metrics.candidate_stage_recall.ranked),
+            visible: sum_count(runs, |metrics| &metrics.candidate_stage_recall.visible),
+        },
         top_k_recall_before_final_ranking: sum_recall(&k_values, runs, |metrics| {
             &metrics.top_k_recall_before_final_ranking
         }),
@@ -159,6 +215,13 @@ pub fn aggregate(_suite: &str, runs: &[&SearchStageMetrics]) -> SearchStageMetri
             candidate_generation: sum_count(runs, |metrics| &metrics.hard_negative_survival.candidate_generation),
             top_k: sum_count_at_k(&k_values, runs),
             visible_queue: sum_count(runs, |metrics| &metrics.hard_negative_survival.visible_queue),
+        },
+        hard_negative_stage_survival: CandidateStageSurvival {
+            vector_generated: sum_count(runs, |metrics| &metrics.hard_negative_stage_survival.vector_generated),
+            symbolic_generated: sum_count(runs, |metrics| &metrics.hard_negative_stage_survival.symbolic_generated),
+            merged_generated: sum_count(runs, |metrics| &metrics.hard_negative_stage_survival.merged_generated),
+            ranked: sum_count(runs, |metrics| &metrics.hard_negative_stage_survival.ranked),
+            visible: sum_count(runs, |metrics| &metrics.hard_negative_stage_survival.visible),
         },
         candidate_count_by_origin: sum_maps(runs.iter().map(|metrics| &metrics.candidate_count_by_origin)),
         candidate_count_by_feature_family: sum_maps(
@@ -211,6 +274,16 @@ fn aggregate_obligation_yield<'a>(
         aggregate.worker_pairs += item.worker_pairs;
     }
     by_kind.into_values().collect()
+}
+
+fn count_labeled(
+    labels: &FxHashSet<crate::eval::scoring::GoldPair>,
+    observed: &FxHashSet<crate::eval::scoring::GoldPair>,
+) -> CountMetric {
+    CountMetric {
+        found: labels.iter().filter(|pair| observed.contains(*pair)).count(),
+        total: labels.len(),
+    }
 }
 
 fn count_by_origin(observed: &ObservedRun) -> BTreeMap<String, usize> {
@@ -492,6 +565,9 @@ mod tests {
         ObservedPair {
             pair: GoldPair::new(left, right),
             generated: true,
+            symbolic_generated: true,
+            vector_generated: false,
+            merged_generated: true,
             ranked: true,
             generation_policy: "local_duplicate_audit".to_owned(),
             rank: Some(rank),
@@ -506,6 +582,9 @@ mod tests {
         ObservedPair {
             pair: GoldPair::new(left, right),
             generated: true,
+            symbolic_generated: true,
+            vector_generated: false,
+            merged_generated: true,
             ranked: false,
             generation_policy: "local_duplicate_audit".to_owned(),
             rank: None,

@@ -34,6 +34,9 @@ impl GoldPair {
 pub struct ObservedPair {
     pub pair: GoldPair,
     pub generated: bool,
+    pub symbolic_generated: bool,
+    pub vector_generated: bool,
+    pub merged_generated: bool,
     pub ranked: bool,
     pub generation_policy: String,
     pub rank: Option<usize>,
@@ -242,6 +245,9 @@ mod tests {
                 .map(|(left, right, rank, shown)| ObservedPair {
                     pair: GoldPair::new(left, right),
                     generated: true,
+                    symbolic_generated: true,
+                    vector_generated: false,
+                    merged_generated: true,
                     ranked: true,
                     generation_policy: "local_duplicate_audit".to_owned(),
                     rank: Some(rank),

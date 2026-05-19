@@ -356,10 +356,11 @@ fn old_file_shaped_modules_are_not_public_api() {
         if !path.starts_with(root.join("crates/embedding"))
             && !path.starts_with(root.join("crates/cli"))
             && !path.starts_with(root.join("crates/eval"))
+            && !path.starts_with(root.join("crates/search"))
         {
             assert!(
                 !contents.contains("lean_dup_embedding::"),
-                "{display} imports lean_dup_embedding outside hidden CLI prepare or eval rerank experiment boundaries"
+                "{display} imports lean_dup_embedding outside hidden CLI prepare, eval rerank, or search vector experiment boundaries"
             );
         }
         if !path.starts_with(root.join("crates/embedding")) {
@@ -387,10 +388,13 @@ fn old_file_shaped_modules_are_not_public_api() {
                 );
             }
         }
-        if !path.starts_with(root.join("crates/vector-index")) && !path.starts_with(root.join("crates/cli/tests")) {
+        if !path.starts_with(root.join("crates/vector-index"))
+            && !path.starts_with(root.join("crates/search"))
+            && !path.starts_with(root.join("crates/cli/tests"))
+        {
             assert!(
                 !contents.contains("lean_dup_vector_index::"),
-                "{display} imports lean_dup_vector_index before hidden vector candidate generation integration"
+                "{display} imports lean_dup_vector_index outside hidden search vector candidate generation"
             );
         }
     }

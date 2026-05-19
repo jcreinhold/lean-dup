@@ -16,6 +16,9 @@ use crate::scorer::{
 use crate::semantic_reranking::{
     SearchSemanticObligationYield, SearchSemanticRerankingSummary, summary as semantic_reranking_summary,
 };
+use crate::vector_candidates::{
+    SearchVectorCandidateRequest, SearchVectorCandidateSummary, VectorCandidate, generate_vector_candidates,
+};
 
 /// Request for search-stage observations used by offline evaluation.
 ///
@@ -27,6 +30,7 @@ pub struct SearchObservationRequest<'a> {
     pub comparison_indexes: &'a [OpenedIndex],
     pub tracked_pairs: &'a [SearchTrackedPair],
     pub scoring_variant: SearchScoringVariant,
+    pub vector_candidates: Option<&'a SearchVectorCandidateRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -53,11 +57,15 @@ pub struct SearchRetrievalObservation {
     pub candidate_count: usize,
     pub generated_candidate_count: usize,
     pub ranked_candidate_count: usize,
+    pub symbolic_generated_candidate_count: usize,
+    pub vector_generated_candidate_count: usize,
+    pub merged_generated_candidate_count: usize,
     pub hydrated_external_count: usize,
     pub pruned_feature_fanout_count: usize,
     pub heap_truncations: usize,
     pub candidate_count_by_generation_policy: BTreeMap<String, usize>,
     pub pruned_feature_fanouts: Vec<SearchPrunedFeatureFanout>,
+    pub vector_candidates: SearchVectorCandidateSummary,
 }
 
 /// Search-owned declaration documents for hidden embedding experiments.
@@ -140,10 +148,15 @@ pub struct SearchObservedPair {
     pub left: String,
     pub right: String,
     pub generated: bool,
+    pub symbolic_generated: bool,
+    pub vector_generated: bool,
+    pub merged_generated: bool,
     pub ranked: bool,
     pub generation_policy: String,
     pub rank: Option<usize>,
     pub shown: bool,
+    pub vector_score: Option<f64>,
+    pub vector_rank: Option<usize>,
     pub origin: String,
     pub feature_families: Vec<String>,
     pub survived_shown_filter: bool,
@@ -181,10 +194,15 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
                 left: set.anchor.qualified_name.clone(),
                 right: candidate.declaration.qualified_name.clone(),
                 generated: true,
+                symbolic_generated: true,
+                vector_generated: false,
+                merged_generated: true,
                 ranked: scored.ranked,
                 generation_policy: generation_policy_for_ranked(&candidate.declaration),
                 rank: scored.ranked.then_some(index + 1),
                 shown: scored.shown,
+                vector_score: None,
+                vector_rank: None,
                 origin: candidate.declaration.origin.clone(),
                 feature_families: feature_families(&candidate.explanation.contributions),
                 survived_shown_filter: scored.survived_shown_filter,
@@ -195,6 +213,20 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
     }
     let index_facts = tracked_index_facts(request.comparison_indexes)?;
     pairs.extend(tracked_generated_pairs(&request, &ranked_pair_ids, &index_facts)?);
+    let (vector_summary, vector_generated_count) = if let Some(vector_request) = request.vector_candidates {
+        let comparison_declarations = all_comparison_declarations(request.comparison_indexes)?;
+        let vector_output = generate_vector_candidates(vector_request, request.workspace, &comparison_declarations);
+        let count = merge_vector_candidates(
+            request.workspace,
+            &mut pairs,
+            vector_output.candidates,
+            request.scoring_variant,
+        );
+        (vector_output.summary, count)
+    } else {
+        (SearchVectorCandidateSummary::default(), 0)
+    };
+    let merged_generated_count = pairs.iter().filter(|pair| pair.merged_generated).count();
     let visible_groups_found = output
         .candidate_sets
         .iter()
@@ -216,7 +248,12 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
         },
         semantic_reranking: semantic_reranking_summary(),
         semantic_obligation_yield: Vec::new(),
-        retrieval: retrieval_observation(&output.diagnostics),
+        retrieval: retrieval_observation(
+            &output.diagnostics,
+            vector_summary,
+            vector_generated_count,
+            merged_generated_count,
+        ),
         embedding_documents: embedding_documents(&output.candidate_sets),
     })
 }
@@ -276,6 +313,19 @@ fn embedding_documents(candidate_sets: &[crate::retrieval::CandidateSet]) -> Sea
         policy_id: policy.id().to_owned(),
         policy_version: SEARCH_EMBEDDING_DOCUMENT_POLICY_VERSION.to_owned(),
         documents: by_name.into_values().collect(),
+    }
+}
+
+pub(crate) fn embedding_documents_for_declarations(declarations: &[HydratedDeclaration]) -> SearchEmbeddingDocuments {
+    let policy = SearchEmbeddingDocumentPolicy::default();
+    let documents = declarations
+        .iter()
+        .map(|declaration| embedding_document_for(declaration, policy))
+        .collect::<Vec<_>>();
+    SearchEmbeddingDocuments {
+        policy_id: policy.id().to_owned(),
+        policy_version: SEARCH_EMBEDDING_DOCUMENT_POLICY_VERSION.to_owned(),
+        documents,
     }
 }
 
@@ -357,11 +407,19 @@ impl SearchEmbeddingDocumentPolicy {
     }
 }
 
-fn retrieval_observation(diagnostics: &RetrievalDiagnostics) -> SearchRetrievalObservation {
+fn retrieval_observation(
+    diagnostics: &RetrievalDiagnostics,
+    vector_candidates: SearchVectorCandidateSummary,
+    vector_generated_count: usize,
+    merged_generated_count: usize,
+) -> SearchRetrievalObservation {
     SearchRetrievalObservation {
         candidate_count: diagnostics.candidate_count,
         generated_candidate_count: diagnostics.generated_candidate_count,
         ranked_candidate_count: diagnostics.ranked_candidate_count,
+        symbolic_generated_candidate_count: diagnostics.generated_candidate_count,
+        vector_generated_candidate_count: vector_generated_count,
+        merged_generated_candidate_count: merged_generated_count,
         hydrated_external_count: diagnostics.hydrated_external_count,
         pruned_feature_fanout_count: diagnostics.pruned_postings.len(),
         heap_truncations: diagnostics.heap_truncations.len(),
@@ -377,6 +435,7 @@ fn retrieval_observation(diagnostics: &RetrievalDiagnostics) -> SearchRetrievalO
                 count: item.count,
             })
             .collect(),
+        vector_candidates,
     }
 }
 
@@ -387,6 +446,80 @@ fn is_shown_queue_candidate(explanation: &CandidateExplanation) -> bool {
             "statement-fingerprint" | "safe-permutation-fingerprint" | "connective-fingerprint"
         )
     })
+}
+
+fn merge_vector_candidates(
+    workspace: &[HydratedDeclaration],
+    pairs: &mut Vec<SearchObservedPair>,
+    vector_candidates: Vec<VectorCandidate>,
+    variant: SearchScoringVariant,
+) -> usize {
+    let workspace_by_name = workspace
+        .iter()
+        .map(|declaration| (declaration.qualified_name.clone(), declaration))
+        .collect::<BTreeMap<_, _>>();
+    let mut pair_index_by_key = pairs
+        .iter()
+        .enumerate()
+        .map(|(index, pair)| (pair_key(&pair.left, &pair.right), index))
+        .collect::<BTreeMap<_, _>>();
+    let vector_count = vector_candidates.len();
+    for vector in vector_candidates {
+        let key = pair_key(&vector.anchor_name, &vector.declaration.qualified_name);
+        if let Some(index) = pair_index_by_key.get(&key).copied() {
+            if let Some(pair) = pairs.get_mut(index) {
+                pair.vector_generated = true;
+                pair.merged_generated = pair.symbolic_generated || pair.vector_generated;
+                pair.vector_score = Some(f64::from(vector.score));
+                pair.vector_rank = Some(vector.rank);
+            }
+            continue;
+        }
+        let Some(anchor) = workspace_by_name.get(&vector.anchor_name) else {
+            continue;
+        };
+        let feature_families = vec!["vector_similarity".to_owned()];
+        let mut features = pair_features(anchor, &vector.declaration, &[]);
+        features.retrieval_feature_families = feature_families.clone();
+        let scored = score_observation(&features, variant, true, false);
+        let observed = SearchObservedPair {
+            left: anchor.qualified_name.clone(),
+            right: vector.declaration.qualified_name.clone(),
+            generated: true,
+            symbolic_generated: false,
+            vector_generated: true,
+            merged_generated: true,
+            ranked: scored.ranked,
+            generation_policy: generation_policy_for_vector(&vector.declaration),
+            rank: scored.ranked.then_some(vector.rank),
+            shown: false,
+            vector_score: Some(f64::from(vector.score)),
+            vector_rank: Some(vector.rank),
+            origin: vector.declaration.origin.clone(),
+            feature_families,
+            survived_shown_filter: false,
+            features,
+            scoring: scored.scoring,
+        };
+        pair_index_by_key.insert(key, pairs.len());
+        pairs.push(observed);
+    }
+    pairs.sort_by(|left, right| {
+        left.left
+            .cmp(&right.left)
+            .then_with(|| left.rank.unwrap_or(usize::MAX).cmp(&right.rank.unwrap_or(usize::MAX)))
+            .then_with(|| left.right.cmp(&right.right))
+    });
+    vector_count
+}
+
+fn all_comparison_declarations(indexes: &[OpenedIndex]) -> Result<Vec<HydratedDeclaration>> {
+    let mut declarations = Vec::new();
+    for index in indexes {
+        let handles = index.all_handles()?;
+        declarations.extend(index.hydrate(&handles)?);
+    }
+    Ok(declarations)
 }
 
 fn tracked_generated_pairs(
@@ -534,10 +667,15 @@ fn generated_observed_pair(
         left: anchor.qualified_name.clone(),
         right: candidate.qualified_name.clone(),
         generated: true,
+        symbolic_generated: true,
+        vector_generated: false,
+        merged_generated: true,
         ranked: scored.ranked,
         generation_policy: evidence.policy,
         rank: None,
         shown: scored.shown,
+        vector_score: None,
+        vector_rank: None,
         origin: candidate.origin.clone(),
         feature_families,
         survived_shown_filter: scored.survived_shown_filter,
@@ -574,6 +712,18 @@ fn generation_policy_for_ranked(candidate: &HydratedDeclaration) -> String {
     }
 }
 
+fn generation_policy_for_vector(candidate: &HydratedDeclaration) -> String {
+    if candidate.origin == "workspace" {
+        "vector_local_duplicate_audit".to_owned()
+    } else if candidate.origin == "mathlib" {
+        "vector_mathlib_comparison".to_owned()
+    } else if candidate.source_span.is_some() {
+        "vector_source_backed_external_comparison".to_owned()
+    } else {
+        "vector_static_external_comparison".to_owned()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use lean_dup_index::{DeclarationHandle, HydratedDeclaration};
@@ -581,8 +731,9 @@ mod tests {
 
     use super::{
         SearchEmbeddingDocumentPolicy, SearchObservationRequest, SearchScoringVariant, SearchTrackedPair,
-        content_hash_for, observe_search, rescore_observation,
+        content_hash_for, merge_vector_candidates, observe_search, rescore_observation,
     };
+    use crate::vector_candidates::{SearchVectorCandidateStatus, VectorCandidate};
 
     #[test]
     fn tracked_pairs_record_generated_before_ranked_selection() {
@@ -597,6 +748,7 @@ mod tests {
             comparison_indexes: &[],
             tracked_pairs: &tracked,
             scoring_variant: SearchScoringVariant::AllFeatures,
+            vector_candidates: None,
         })
         .unwrap();
 
@@ -614,6 +766,40 @@ mod tests {
         assert_eq!(pair.generation_policy, "local_duplicate_audit");
         assert!(pair.feature_families.contains(&"statement_fingerprint".to_owned()));
         assert!(observation.retrieval.generated_candidate_count > observation.retrieval.ranked_candidate_count);
+        assert_eq!(
+            observation.retrieval.vector_candidates.status,
+            SearchVectorCandidateStatus::Disabled
+        );
+    }
+
+    #[test]
+    fn vector_only_candidates_are_ranked_but_not_shown() {
+        let rows = generated_rows(2);
+        let mut pairs = Vec::new();
+
+        let count = merge_vector_candidates(
+            &rows,
+            &mut pairs,
+            vec![VectorCandidate {
+                anchor_name: "Synthetic.generated_0".to_owned(),
+                declaration: rows[1].clone(),
+                score: 0.95,
+                rank: 1,
+            }],
+            SearchScoringVariant::AllFeatures,
+        );
+
+        assert_eq!(count, 1);
+        assert_eq!(pairs.len(), 1);
+        let pair = &pairs[0];
+        assert!(pair.generated);
+        assert!(!pair.symbolic_generated);
+        assert!(pair.vector_generated);
+        assert!(pair.merged_generated);
+        assert!(pair.ranked);
+        assert!(!pair.shown);
+        assert_eq!(pair.vector_rank, Some(1));
+        assert_eq!(pair.generation_policy, "vector_local_duplicate_audit");
     }
 
     #[test]
@@ -624,6 +810,7 @@ mod tests {
             comparison_indexes: &[],
             tracked_pairs: &[],
             scoring_variant: SearchScoringVariant::AllFeatures,
+            vector_candidates: None,
         })
         .unwrap();
 
@@ -648,6 +835,7 @@ mod tests {
             comparison_indexes: &[],
             tracked_pairs: &[],
             scoring_variant: SearchScoringVariant::AllFeatures,
+            vector_candidates: None,
         })
         .unwrap();
 
