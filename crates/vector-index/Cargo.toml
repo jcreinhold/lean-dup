@@ -1,0 +1,23 @@
+[package]
+edition = { workspace = true }
+license = { workspace = true }
+name = "lean-dup-vector-index"
+version = { workspace = true }
+
+[dependencies]
+arrow-array = "58"
+arrow-schema = "58"
+futures = "0.3"
+lance = { version = "=6.0.0", default-features = false, features = ["protoc"] }
+lance-datafusion = { version = "=6.0.0", features = ["protoc"] }
+lancedb = "0.29.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

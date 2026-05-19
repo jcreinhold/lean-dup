@@ -113,6 +113,17 @@ fn dependency_direction_keeps_lower_crates_out_of_report_and_cli() {
                 );
             }
         }
+        if name == "lean-dup-vector-index" {
+            for forbidden in dependencies
+                .iter()
+                .filter(|dependency| dependency.starts_with("lean-dup-"))
+            {
+                assert!(
+                    forbidden == "lean-dup-vector-index",
+                    "vector index must not depend on {forbidden}"
+                );
+            }
+        }
     }
 }
 
@@ -153,6 +164,32 @@ fn embedding_acquisition_dependency_stays_inside_embedding_crate() {
             assert!(
                 !dependencies.iter().any(|dependency| dependency == forbidden),
                 "{name} must not depend on forbidden embedding runtime dependency {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
+fn vector_database_dependency_stays_inside_vector_index_crate() {
+    let manifests = crate_manifests();
+    assert!(
+        manifests.contains_key("lean-dup-vector-index"),
+        "lean-dup-vector-index crate must be present"
+    );
+
+    for (name, manifest) in manifests {
+        let dependencies = dependency_names(&manifest);
+        for backend_dependency in ["lancedb", "lance", "lance-datafusion", "arrow-array", "arrow-schema"] {
+            assert!(
+                !dependencies.iter().any(|dependency| dependency == backend_dependency)
+                    || name == "lean-dup-vector-index",
+                "{name} must not depend on vector database backend dependency {backend_dependency}"
+            );
+        }
+        for forbidden in ["qdrant-client", "sqlite-vec", "hnsw_rs"] {
+            assert!(
+                !dependencies.iter().any(|dependency| dependency == forbidden),
+                "{name} must not depend on future vector backend dependency {forbidden}"
             );
         }
     }
@@ -341,6 +378,20 @@ fn old_file_shaped_modules_are_not_public_api() {
                     "{display} imports embedding runtime internals: {forbidden}"
                 );
             }
+        }
+        if !path.starts_with(root.join("crates/vector-index")) {
+            for forbidden in ["lancedb::", "qdrant_client::", "sqlite_vec::", "hnsw_rs::"] {
+                assert!(
+                    !contents.contains(forbidden),
+                    "{display} imports vector database internals: {forbidden}"
+                );
+            }
+        }
+        if !path.starts_with(root.join("crates/vector-index")) && !path.starts_with(root.join("crates/cli/tests")) {
+            assert!(
+                !contents.contains("lean_dup_vector_index::"),
+                "{display} imports lean_dup_vector_index before hidden vector candidate generation integration"
+            );
         }
     }
 }

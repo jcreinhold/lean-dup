@@ -1,9 +1,9 @@
 # Crate Factoring
 
-Nine Rust crates, each owning one kind of hidden knowledge. The split is functional: a crate exists to localize a
+Ten Rust crates, each owning one kind of hidden knowledge. The split is functional: a crate exists to localize a
 class of change (Lean protocol mechanics, Lake project resolution, persisted storage, search and review policy,
-embedding model acquisition/runtime policy, report projection, quality measurement, terminal I/O), not to mirror one
-old source file.
+embedding model acquisition/runtime policy, vector-corpus persistence, report projection, quality measurement,
+terminal I/O), not to mirror one old source file.
 
 For the pipeline the crates implement, see [end-to-end-architecture.md](end-to-end-architecture.md).
 
@@ -15,6 +15,7 @@ For the pipeline the crates implement, see [end-to-end-architecture.md](end-to-e
 | `lean-dup-diagnostics` | Progress/profile events, runtime perf collection, generic file/JSON helpers. | any other `lean-dup` crate |
 | `lean-dup-project` | Lake workspace discovery, module roots, mathlib source/execution roots, toolchain facts. | index, search, eval, cli |
 | `lean-dup-index` | SQLite indexes, cache keys, provenance metadata, latest pointers, cache diagnostics, cleanup. | search, eval, cli |
+| `lean-dup-vector-index` | Persisted declaration-vector corpora, vector database backend policy, corpus provenance, nearest-declaration lookup. | search, eval, report, cli |
 | `lean-dup-search` | Audit workflow, candidate generation, semantic evidence planning, ranking, source facts, replacement hints. | eval, report, cli |
 | `lean-dup-embedding` | Embedding model acquisition, local text embedding runtime, vector-cache policy, stable embedding facts. | search, eval, report, cli |
 | `lean-dup-report` | Stable JSON DTOs, explanations, text rendering, report-owned cache/show/diff/eval projections, wording. | cli |
@@ -37,6 +38,10 @@ Each crate root is the supported public facade. Submodules and internals stay pr
 - **`lean-dup-index`** — `IndexStore`, build/open/hydrate DTOs, `SemanticFeatureFanout`,
   provenance summaries, cache diagnostics, safe cleanup reports. SQLite schema, posting layout,
   and latest-pointer layout are private; feature keys are opaque Lean-owned strings.
+- **`lean-dup-vector-index`** — `VectorCorpusBuildRequest`, `VectorCorpusOpenRequest`,
+  opaque `VectorCorpus`, nearest-declaration query DTOs, corpus summaries, provenance facts,
+  and stable vector-index errors. LanceDB/Arrow rows, vector database layout, index parameters,
+  score conversion, cache paths, and backend fallback rules are private.
 - **`lean-dup-search`** — `ReviewProfile`, `ProbePolicy`, `AuditRequest`, `AuditOutput`,
   `ShowOutput`, `DiffOutput`, `run_audit`, `run_show`, `run_diff`, `observe_search`. Retrieval
   keys, ranking constants, probe obligations, source-scan policy, and replacement-hint internals
@@ -58,7 +63,7 @@ Each crate root is the supported public facade. Submodules and internals stay pr
 Misleading audit flags that parsed without reliably changing behavior were removed instead of deprecated:
 `--threshold`, `--include-imports`, `--import-root`, `--min-priority`, `--replacement-hints`.
 
-## Why nine, not seven, not "core + cli"
+## Why ten, not seven, not "core + cli"
 
 A crate per old module would produce shallow pass-through crates around `retrieval`, `ranking`,
 `semantic_verification`, `cache`, and `render`, forcing unstable internal records into public
@@ -69,3 +74,6 @@ The current split moves audit ordering into `lean-dup-search`, separates diagnos
 from user-facing report contracts, and lets `lean-dup-report` own stable projection and wording.
 Embedding model acquisition and CPU inference sit in their own crate because those decisions
 change with the local ML runtime, not with retrieval, labels, report wording, or terminal I/O.
+The vector index is separate from both `lean-dup-index` and `lean-dup-search` because vector
+database persistence, ANN tuning, corpus provenance, and backend replacement change for different
+reasons than SQLite feature storage or search candidate policy.

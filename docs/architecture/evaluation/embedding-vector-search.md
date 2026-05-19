@@ -7,7 +7,7 @@ the capability Lean-Dup needs for mathlib-scale search: per-declaration vector c
 generation over a persisted comparison corpus that is built once, reopened, and reused
 across audits.
 
-This document is architecture-only. It does not add the vector-index crate, change the
+Prompt 35I adds the vector-index crate boundary described here. It does not change the
 default symbolic audit path, tune ranking thresholds, or make embeddings part of default
 eval.
 
@@ -18,7 +18,7 @@ Hidden knowledge:
 - `lean-dup-embedding` owns model profiles, model acquisition, model-specific input
   wrapping, CPU inference, vector normalization, runtime counters, and per-text vector
   cache policy.
-- `lean-dup-vector-index` will own persisted declaration-vector corpora, vector database
+- `lean-dup-vector-index` owns persisted declaration-vector corpora, vector database
   or ANN backend choice, corpus identity, index/cache invalidation, nearest-neighbor
   lookup, and vector-corpus diagnostics.
 - `lean-dup-search` owns declaration document construction, vector candidate-generation
@@ -143,6 +143,33 @@ recompute vector search, inspect model profiles, or mention backend-specific sto
 `lean-dup-cli` provides explicit hidden preparation and experiment commands. Normal
 `audit`, `doctor`, `show`, `diff`, and ordinary `eval` do not prepare models, build
 vector corpora, open vector databases, or require embedding dependencies at runtime.
+
+## Prompt 35I Vector-Corpus Contract
+
+`lean-dup-vector-index` exposes only declaration-corpus operations:
+
+- build or reuse a persisted corpus from declaration identities, metadata, content
+  hashes, and normalized vectors;
+- open a previously built corpus only when schema and provenance match;
+- query nearest declarations and return stable declaration facts with scores where higher
+  means closer;
+- report corpus status as built, reused, missing, stale, or unusable.
+
+The public provenance includes the source corpus fingerprint, embedding model profile and
+fingerprint, declaration-document policy id/version, vector dimension, and normalization
+contract. The schema version is owned by the vector-index crate. If any provenance fact
+changes, the crate reports stale state instead of letting search inspect database files.
+
+The implementation uses LanceDB privately for the first persistent local backend. The
+crate also enables vendored protobuf support for Lance dependencies, because the local
+toolchain did not have `protoc` on `PATH` during the first build attempt. This keeps the
+backend self-contained inside the vector-index crate rather than adding a machine-level
+operator prerequisite.
+
+Fixture corpora may use exact backend search when they are too small for an ANN index to
+be useful. Production-sized corpora should create the backend vector index during corpus
+build. This distinction is private: callers receive the same corpus summary and nearest
+declaration facts either way.
 
 ## Backend Tradeoff
 
