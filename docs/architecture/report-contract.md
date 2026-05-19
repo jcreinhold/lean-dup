@@ -1,143 +1,117 @@
 # Report Contract
 
-This document defines the production report contract for `lean-dup`. It closes `G7 report_contract` when the contract
-is backed by fixture and real-workload artifacts.
+What every audit report—text, JSON, and `show`—must explain. Renderers consume typed explanation facts and never
+invent the policy themselves.
 
-For the current end-to-end pipeline that builds these explanation facts, see
-[06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md).
+For the pipeline that builds these facts, see
+[06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md). This
+document closes `G7 report_contract` once fixture and real-workload artifacts back the contract.
 
-## Design Note
+## Schema
 
-The report contract owns the hidden knowledge for user-facing explanations: visible-queue summaries, hidden-group
-reason precedence, semantic-probe summaries, comparison provenance summaries, `show` explanations, and JSON schema
-versioning.
+Audit JSON is additive. The stable surface is `report_schema_version` plus an `explanations` object. Existing
+top-level fields remain for compatibility; production consumers should prefer these.
 
-Its smallest public interface is additive report fields plus text explanations:
-
-- `report_schema_version`;
-- `explanations.visible_queue`;
-- `explanations.hidden_groups`;
-- `explanations.semantic_probes`;
-- `explanations.comparison_provenance`;
-- group-level explanations in `show`.
-
-These decisions must not leak upward or sideways:
-
-- SQLite table names, row ids, cache paths, or cache-key ingredients;
-- worker JSONL framing, probe chunking, heartbeat recovery, or Lean expression traversal;
-- retrieval key shapes, ranking heap policy, source scanning policy, or replacement-hint internals.
-
-The preserved user-facing capability is read-only local duplicate auditing with cached indexes, mathlib or external
-comparison, semantic evidence, text and JSON reports, `show`, and baseline review.
-
-Python-era behavior intentionally discarded: report meaning is not inferred from Python cache layout, Python string
-heuristics, or manual `jq` inspection. The Rust report emits typed explanation facts directly.
-
-## Design It Twice
-
-**Rejected: renderer-local explanation strings.** Adding conditionals directly to the text renderer would be quick, but
-it would spread hidden-count policy across text, JSON, and `show`. JSON consumers would still need to reconstruct why
-the visible queue is empty.
-
-**Chosen: private report-contract facts.** Audit and `show` build typed explanation facts before rendering. Text and
-JSON output format those facts without knowing hidden-count precedence, probe diagnostics, provenance policy, SQLite
-layout, or worker transport. This is deeper because callers get stable report meaning through one narrow contract.
-
-## Stable JSON Contract
-
-Audit JSON is additive. Existing top-level fields remain available, but production consumers should prefer
-`report_schema_version` and `explanations` for user-facing meaning.
-
-`report_schema_version` is currently:
-
-```text
-lean-dup.report.v1
+```jsonc
+{
+  "report_schema_version": "lean-dup.report.v1",
+  "explanations": {
+    "visible_queue": {
+      "count": 0,                       // visible groups
+      "total_ranked": 12,               // all ranked, before visibility filtering
+      "summary": "no visible groups",
+      "reason": "all-unverified-proof-grade"
+      // reason ∈ {none-ranked, all-noise-or-profile, all-unverified-proof-grade,
+      //          probes-unavailable, mixed-blockers}
+    },
+    "hidden_groups": {
+      // exclusive counts; each group classified once using this precedence:
+      // generated-decl > unverified-proof-grade > unavailable-probe >
+      // profile-noise > other-blockers
+      "generated_decl": 3,
+      "unverified_proof_grade": 6,
+      "unavailable_probe": 2,
+      "profile_noise": 1,
+      "other_blockers": 0
+    },
+    "semantic_probes": {
+      "ran": true,
+      "planned": 177,
+      "verified": 0,
+      "unavailable": 70,
+      "cache_hits": 0,
+      "worker_pairs": 177,
+      "unavailable_reasons": { "missing-decl": 61, "opaque-or-unreducible": 9 },
+      "summary": "177 planned, 0 verified, 70 unavailable"
+    },
+    "comparison_provenance": {
+      "summary": "mathlib: proof-grade (312 611 decls)",
+      "entries": [
+        { "label": "mathlib", "origin": "mathlib", "evidence_mode": "proof-grade",
+          "declaration_count": 312611, "reason": "source-backed, importable" }
+      ]
+      // index paths and source roots intentionally live in legacy provenance fields, not here
+    }
+  }
+}
 ```
 
-The `explanations` object contains:
+Progress and profile output remain stderr-only. JSON stdout must parse as one JSON value even with `--progress` and
+`--profile`.
 
-- `visible_queue`: visible count, total ranked groups, a compact summary, and a direct reason. If the visible queue is
-  empty, this reason must say whether no groups were ranked, all groups were filtered as noise/profile results, all
-  groups lacked verified proof-grade evidence, probes were unavailable, or mixed blockers remain.
-- `hidden_groups`: exclusive hidden counts. A hidden group is counted once using this precedence: generated declaration,
-  unverified proof-grade evidence, unavailable semantic probe, profile/noise filtering, then other blockers.
-- `semantic_probes`: whether probes ran, planned pairs, verified results, unavailable results, cache hits, worker pairs,
-  stable unavailable reason counts, and a short summary.
-- `comparison_provenance`: one compact summary plus entries for label, origin, evidence mode, declaration count, and
-  reason. It intentionally omits index paths and source roots from the explanation layer; legacy provenance fields
-  still carry detailed diagnostics.
+## Text contract
 
-Progress and profile output remain stderr-only. JSON stdout must parse as one JSON value even when `--progress` and
-`--profile` are enabled.
+Default text audit output must include, in order:
 
-## Text UX Contract
-
-Default text audit output must include:
-
-- report schema version;
-- comparison provenance status;
-- semantic-probe planned/cache/worker/unavailable counts;
-- visible-group count;
-- visible-queue reason;
-- exclusive hidden-group counts;
-- probe summary;
-- the first visible groups, if any.
+1. report schema version;
+2. comparison provenance status;
+3. semantic-probe planned / cache / worker / unavailable counts;
+4. visible-group count;
+5. visible-queue reason;
+6. exclusive hidden-group counts;
+7. probe summary;
+8. the first visible groups, if any.
 
 When `visible groups: 0`, the text report must explain why without requiring `jq`.
 
-## `show` Contract
+## `show` contract
 
 `show` explains one ranked group. It must include:
 
-- static, source-backed-not-importable, or proof-grade evidence mode;
+- evidence mode: `static`, `source-backed-not-importable`, or `proof-grade`;
 - semantic evidence status or the reason no semantic evidence is attached;
-- blockers or `none`;
+- blockers, or `none`;
 - replacement target, import status, caller count, and replacement blockers or notes when available;
-- whether the group is visible or hidden under the active filter and why.
+- whether the group is visible or hidden under the active filter, and why.
 
 `show` does not expose worker records, SQLite rows, retrieval keys, or source-scan implementation details.
 
-## Evidence Artifacts
+## Why a private contract
 
-Prompt 26 evidence should live under `target/report-contract/`:
+A renderer-local approach—conditionals inside the text renderer—spreads hidden-count policy across text, JSON, and
+`show`. JSON consumers would still have to reconstruct why the visible queue is empty.
+
+Audit and `show` instead build typed explanation facts before rendering. Text and JSON format those facts without
+knowing hidden-count precedence, probe diagnostics, provenance policy, SQLite layout, or worker transport. The
+contract changes in one place; renderers stay narrow.
+
+## How to regenerate the evidence
 
 ```sh
 cargo run -p lean-dup-cli -- audit --workspace tests/fixtures/tiny --module Tiny \
-  --no-semantic-probes --format json \
-  > target/report-contract/fixture-audit.json
+  --no-semantic-probes --format json > target/report-contract/fixture-audit.json
 
 cargo run -p lean-dup-cli -- audit --workspace tests/fixtures/tiny --module Tiny \
-  --no-semantic-probes \
-  > target/report-contract/fixture-audit.txt
+  --no-semantic-probes > target/report-contract/fixture-audit.txt
 
 target/release/lean-dup --progress --profile audit \
   --workspace /Users/jcreinhold/Code/kan-proofs --module KanProofs \
-  --compare-mathlib --format json \
-  > target/report-contract/kanproofs-full-mathlib.json
+  --compare-mathlib --format json > target/report-contract/kanproofs-full-mathlib.json
 ```
 
-Required verification:
+Verification:
 
 ```sh
-cargo test
-cargo clippy --all-targets -- -D warnings
-cargo fmt --check
+cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
 cd /Users/jcreinhold/Code/lean-dup/lean && lake build
 ```
-
-## Red Flag Review
-
-- **Shallow module:** mitigated. The report contract computes explanation facts; renderers do not duplicate the policy.
-- **Pass-through wrapper:** mitigated. The new boundary transforms ranking/probe/provenance diagnostics into stable
-  report meaning rather than forwarding raw fields.
-- **Temporal decomposition:** mitigated. The boundary is organized around report meaning, not around the order audit
-  phases execute.
-- **Information leakage:** mitigated. SQLite, worker transport, retrieval keys, source scanning, and cache layout stay
-  out of the contract.
-- **Special-general mixture:** mitigated. KanProofs is an evidence workload, but the report contract is general across
-  fixture, local, mathlib, and external-index audits.
-- **Conjoined methods:** mitigated. Audit explanation and group explanation are separate facts with separate callers.
-- **Hard-to-describe public API:** mitigated. The public report shape is a small additive `explanations` object and one
-  schema version.
-- **Implementation details contaminating interface comments:** mitigated. Comments and this document describe caller
-  guarantees, not storage layout, worker framing, or temporary migration machinery.

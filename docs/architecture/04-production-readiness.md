@@ -1,108 +1,75 @@
 # Production Readiness
 
-This document is the release contract for `lean-dup`. It converts "not production-ready" into named gates, required
-evidence, and no-go criteria. A gate is open until concrete command output, report evidence, or a checked artifact
-proves it.
+The release contract: named gates, required evidence, no-go criteria. A gate is open until concrete command output or
+a checked artifact proves it. Prose alone never closes a gate.
 
-For the current as-built system, see
+For the pipeline these gates measure, see
 [06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md).
+For the search-quality contract that governs `G1`–`G3`, see
+[search-quality.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/search-quality.md).
 
-## Design Note
+## Where we are today
 
-This document owns the hidden knowledge needed to judge release readiness: the production gate taxonomy, acceptance
-evidence, supported workflow contract, no-go criteria, and the distinction between validated capabilities and old
-implementation shape.
+Not release-ready. The aggregate eval command runs end to end; the quality numbers do not pass:
 
-Its smallest public interface is this architecture document. Later prompts may update gate status and artifact links,
-but they should not create parallel release checklists with different definitions of readiness.
+| Metric | Result |
+| ---: | ---: |
+| Aggregate recall@10 | 15/32 |
+| Aggregate hard-negative hits | 3/16 |
+| KanProofs/mathlib recall@10 | 0/11 |
+| KanProofs/mathlib hard-negative hits | 3/4 |
 
-These decisions must not leak upward or sideways:
+`status = ok` means the suite ran. It is not approval. The
+[search-quality charter](/Users/jcreinhold/Code/lean-dup/docs/architecture/search-quality.md) defines what `G1` and
+`G2` need before they can close.
 
-- evaluation label layout, fixture paths, and KanProofs private-path policy;
-- cache directory layout, cache-key ingredients, SQLite table names, row ids, and cleanup mechanics;
-- semantic-probe chunking, heartbeat recovery, worker transport framing, JSONL parsing, and Lean traversal details;
-- prompt sequencing mechanics or temporary migration steps.
-
-The validated user-facing capability to preserve is a read-only local duplicate auditor: it indexes local workspaces,
-builds and reuses cached mathlib or external indexes, compares against source-backed evidence where available, runs
-bounded semantic verification for actionable findings, emits text and JSON reports, supports `show`, and supports saved
-baseline review.
-
-Python-era behavior intentionally discarded:
-
-- treating Python parity as the architecture goal;
-- treating Python cache paths, index layout, or scoring heuristics as compatibility contracts;
-- preserving string-driven or source-parsing semantic policy in Rust;
-- requiring users to run project workflows through Python-era shell conventions.
-
-Production preserves proven capabilities, not Python implementation shape.
-
-## Design It Twice
-
-**Rejected: prompt-by-prompt release checklist.** A checklist organized by prompts 21 through 40 would be easy to write,
-but it would be temporally decomposed. It would make release status depend on execution order rather than evidence, and
-it would not hide the release policy behind a stable boundary.
-
-**Chosen: gate-centered production contract.** The release boundary is a small set of named gates with commands and
-artifacts. This is deeper because future prompts, users, and release reviewers can ask whether a capability is proven
-without learning the internal sequence of cache work, probe work, report work, CI work, or Python deletion work.
-
-## Production Definition
+## Definition
 
 `lean-dup` is production-ready when it is a local, deterministic, read-only duplicate auditor with proven correctness,
 high-precision default output, stable cache behavior, explainable reports, reproducible releases, and no dependency on
-Python-era implementation paths.
+Python-era implementation paths. Concretely, all of:
 
-Production readiness requires all of the following:
+- correctness and regression quality from labeled denominators (not anecdote);
+- precision control: default queues do not show weak feature-only or known-bogus mathlib matches as actionable;
+- recoverable semantic verification that produces proof-grade evidence when source-backed declarations are importable;
+- explicit source-backed vs static external evidence in reports and JSON;
+- shared cache reuse across projects pinned to the same relevant sources; invalidation on Lean source, Lake,
+  toolchain, worker, protocol, or semantic-version changes;
+- warm full-audit runtime and memory inside a documented production range;
+- empty visible queues that explain themselves; hidden evidence summarized; JSON with a documented stable contract;
+- CI, packaging, version output, doctor diagnostics, and supported-commands docs at release grade;
+- Python-era modules, tests, and packaging removed or quarantined.
 
-- **Correctness and regression quality:** fixture and KanProofs regression suites prove known true positives, known hard
-  negatives, raw denominators, and runtime.
-- **Precision and false-positive control:** default visible queues do not show weak feature-only mathlib overlaps or
-  known bogus structural collisions as actionable findings.
-- **Semantic probe availability and usefulness:** semantic verification is recoverable and produces proof-grade evidence
-  when source-backed comparison declarations are importable.
-- **External comparison semantics:** source-backed and static indexes are distinguished in reports and JSON, and static
-  evidence cannot masquerade as proof-grade semantic evidence.
-- **Cache validity and lifecycle:** shared caches reuse across projects pinned to the same relevant sources and
-  invalidate on Lean source, Lake, toolchain, worker, protocol, or semantic-version changes.
-- **Full-audit runtime and memory:** warm full audits with and without mathlib comparison run in an acceptable,
-  documented production range with measured peak memory.
-- **Report UX and JSON stability:** empty visible queues explain why they are empty, hidden evidence is summarized, and
-  JSON has a documented stable contract.
-- **CI, packaging, versioning, and release docs:** local and CI checks build Rust and Lean code, exercise fixture
-  workflows, expose release-grade version/doctor diagnostics, and document supported commands.
-- **Python-era implementation deprecation:** Python modules, tests, and packaging are removed or quarantined after
-  validated Rust/Lean capability preservation.
+## Gates
 
-## Gate Status
+| Gate | Status | Evidence artifact |
+| --- | --- | --- |
+| `G1 regression_quality` | open | [search-quality.md](search-quality.md), [evaluation/production-gates.md](evaluation/production-gates.md), `target/eval/production-gate.json` |
+| `G2 precision_control` | open | search-quality.md, production-gates.md hard-negative section, fixture/KanProofs eval JSON |
+| `G3 semantic_probe_yield` | partial | real-workload probe evidence under `target/audit-runs/` |
+| `G4 external_comparison_provenance` | implemented, awaiting validation | [05-external-comparison-provenance.md](05-external-comparison-provenance.md) + JSON/profile fixtures |
+| `G5 cache_validity_lifecycle` | implemented, awaiting validation | [cache-validity-lifecycle.md](cache-validity-lifecycle.md) + `target/cache/doctor-production.json` |
+| `G6 full_audit_performance` | partial | `target/perf/` outputs |
+| `G7 report_contract` | implemented, awaiting validation | [report-contract.md](report-contract.md) + `target/report-contract/` golden outputs |
+| `G8 release_hardening` | open | release-hardening.md, CI config, `target/release-diagnostics/` |
+| `G9 python_deprecation` | complete | [python-deprecation-map.md](python-deprecation-map.md) + eval artifacts |
 
-Current status is evidence-based, not release-ready. Prompt 27 proved the Rust/Lean production surface can run the
-aggregate eval command, but it also exposed quality failures: `target/eval/prompt27-production-gate.json` reports
-aggregate recall@10 `15/32`, aggregate hard-negative hits `3/16`, KanProofs/mathlib recall@10 `0/11`, and
-KanProofs/mathlib hard-negative hits `3/4`.
+Production claim per gate:
 
-Prompts 28 through 37 are now the search-quality prerequisite for release hardening. They are governed by
-[search-quality.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/search-quality.md), which defines the match
-taxonomy, stage objectives, and quality evidence needed before `G1` and `G2` can close.
+- **G1**: KanProofs and fixture quality proven with raw denominators and stage-level search metrics.
+- **G2**: Hard negatives and known bogus mathlib matches do not leak into the default visible queue.
+- **G3**: Probes are recoverable, typed, and produce useful proof-grade yield on real workloads.
+- **G4**: Source-backed and static external indexes have explicit, user-visible semantics.
+- **G5**: Shared caches reuse safely and invalidate only on relevant source, toolchain, worker, protocol, or semantic
+  changes.
+- **G6**: Warm full audits meet documented runtime and memory targets.
+- **G7**: Empty queues, hidden groups, unavailable probes, provenance, and JSON schema are explained.
+- **G8**: CI, packaging, version output, install docs, and reproducibility are release-grade.
+- **G9**: Validated Python-era capabilities are preserved; superseded Python paths removed.
 
-| Gate | Status | Production claim | Required evidence artifact |
-| --- | --- | --- | --- |
-| `G1 regression_quality` | Open | KanProofs and fixture quality are proven with raw denominators and stage-level search metrics. | `docs/architecture/search-quality.md`, `docs/architecture/evaluation/production-gates.md`, and `target/eval/production-gate.json`. |
-| `G2 precision_control` | Open | Hard negatives and known bogus mathlib matches do not leak into the default visible queue. | `docs/architecture/search-quality.md`, `docs/architecture/evaluation/production-gates.md` hard-negative section, and fixture/KanProofs eval JSON. |
-| `G3 semantic_probe_yield` | Partial | Probes are recoverable and typed, but useful proof-grade yield remains insufficiently validated. | `docs/architecture/performance/prompt-23-semantic-probe-yield.md` plus real-workload probe evidence. |
-| `G4 external_comparison_provenance` | Implemented, awaiting validation | Source-backed and static external indexes have explicit, user-visible semantics. | `docs/architecture/05-external-comparison-provenance.md` plus JSON/profile fixture outputs. |
-| `G5 cache_validity_lifecycle` | Implemented, awaiting validation | Shared caches reuse safely and invalidate only on relevant source, toolchain, worker, protocol, or semantic changes. | `docs/architecture/cache-validity-lifecycle.md` plus `target/cache/doctor-production.json`. |
-| `G6 full_audit_performance` | Partial | Warm full audits meet documented runtime and memory targets. | `docs/architecture/performance/prompt-25-full-audit-throughput.md` plus raw JSON/profile outputs under `target/perf/`. |
-| `G7 report_contract` | Implemented, awaiting validation | Empty queues, hidden groups, unavailable probes, provenance, and JSON schema are explained. | `docs/architecture/report-contract.md` plus text/JSON golden outputs under `target/report-contract/`. |
-| `G8 release_hardening` | Open | CI, packaging, version output, install docs, and reproducibility are release-grade. | `docs/architecture/release-hardening.md`, CI config, and `target/release-diagnostics/`. |
-| `G9 python_deprecation` | Complete | Validated Python-era capabilities are preserved and superseded Python paths are removed. | `docs/architecture/python-deprecation-map.md` plus Prompt 27 eval artifacts. |
+## Required commands
 
-## Acceptance Evidence
-
-No gate may be marked complete by prose alone. Each gate needs at least one command transcript or machine-readable
-artifact plus the architecture document named above.
-
-Required local checks for every release-candidate gate update:
+Every release-candidate update runs:
 
 ```sh
 cargo test
@@ -111,7 +78,7 @@ cargo fmt --check
 cd /Users/jcreinhold/Code/lean-dup/lean && lake build
 ```
 
-Required quality and production-gate commands:
+Quality and production gates:
 
 ```sh
 cargo run -p lean-dup-cli -- eval --suite default --format json \
@@ -121,11 +88,11 @@ cargo run -p lean-dup-cli -- eval --suite production-gate --format json \
   --output target/eval/production-gate.json
 ```
 
-The `production-gate` suite may remain manual and private-path dependent. It must not become default CI without an
-explicit runtime and privacy decision. Command completion is not enough for release readiness; the raw recall and
-hard-negative denominators must pass.
+The `production-gate` suite stays manual and may depend on private paths. It does not become default CI without an
+explicit runtime and privacy decision. Command completion is not enough; the raw recall and hard-negative denominators
+must pass.
 
-Required full-audit commands:
+Full audits:
 
 ```sh
 env LEAN_NUM_THREADS=2 target/release/lean-dup --progress --profile \
@@ -141,7 +108,7 @@ env LEAN_NUM_THREADS=2 target/release/lean-dup --progress --profile \
   > target/audit-runs/kanproofs-full-mathlib-no-probes.json
 ```
 
-Required targeted audit command:
+Targeted audit:
 
 ```sh
 env LEAN_NUM_THREADS=2 target/release/lean-dup --progress --profile \
@@ -150,7 +117,7 @@ env LEAN_NUM_THREADS=2 target/release/lean-dup --progress --profile \
   > target/audit-runs/kanproofs-mathlib4backports.json
 ```
 
-Required cache and release diagnostics once implemented:
+Release diagnostics (once implemented):
 
 ```sh
 target/release/lean-dup doctor --format json \
@@ -160,68 +127,19 @@ target/release/lean-dup --version \
   > target/release-diagnostics/version.txt
 ```
 
-The expected evidence artifacts are:
+Expected evidence locations: `docs/architecture/evaluation/` for quality gates, `docs/architecture/validation/` for
+real-workload inspection, `report-contract.md` and `release-hardening.md` for the corresponding gates, and JSON under
+`target/eval/`, `target/audit-runs/`, `target/perf/`, `target/report-contract/`, `target/release-diagnostics/`.
 
-- `docs/architecture/evaluation/production-gates.md` for quality gates and hard negatives;
-- `docs/architecture/performance/` reports for runtime, memory, retrieval, probe, and rendering costs;
-- `docs/architecture/validation/` reports for real-workload inspection and production/no-go decisions;
-- `docs/architecture/report-contract.md` for stable JSON and report behavior;
-- `docs/architecture/release-hardening.md` for CI, packaging, versioning, and reproducibility;
-- JSON outputs under `target/eval/`, `target/audit-runs/`, `target/perf/`, `target/report-contract/`, and
-  `target/release-diagnostics/`.
-
-## Prompt Map
-
-| Prompt | Gates advanced | Current result |
-| --- | --- | --- |
-| 21 | `G1`, `G2` | Production-gate eval suites, labels, hard negatives, raw denominators, and quality docs exist. |
-| 22 | `G4`, `G7` | Source-backed/static provenance contract exists in index metadata, reports, and JSON. |
-| 23 | `G3`, `G2` | Missing/private probe mismatch was fixed; proof-grade yield still needs validation. |
-| 24 | `G5`, `G8` | Source-relevant cache fingerprints, doctor diagnostics, and safe cleanup lifecycle exist. |
-| 25 | `G6`, `G3`, `G5` | Warm full-audit throughput improved; full mathlib comparison remains expensive. |
-| 26 | `G7`, `G2` | Empty-queue explanations, `show` explanations, and stable JSON contract exist. |
-| 27 | `G9`, `G1` | Python implementation removed; production-gate command completes but quality gates fail. |
-| 28 | `G1`, `G2`, `G3`, `G7` | Search-quality charter and match taxonomy. |
-| 29 | `G1`, `G2` | Pending: task-specific label schema and adjudication corpus. |
-| 30 | `G1`, `G2` | Stage metrics and retrieval observability exist; quality gates remain open until stage denominators pass. |
-| 31 | `G1`, `G2`, `G6` | Pair feature facts and hidden search dataset artifacts exist; scoring behavior is unchanged. |
-| 32 | `G1`, `G2`, `G6` | Candidate generation is an explicit private search stage with generated/ranked observability; scoring behavior is unchanged. |
-| 33 | `G1`, `G2`, `G6` | Symbolic scorer versioning and hidden ablation artifacts exist; no default weight change was accepted. |
-| 34 | `G2`, `G3` | Pending: semantic reranking and obligation-yield improvements. |
-| 35 | `G1`, `G2`, `G6` | Pending: hidden local embedding experiment gate. |
-| 36 | `G1`, `G2`, `G7` | Pending: threshold calibration and review policy. |
-| 37 | `G1`, `G2`, `G3`, `G6`, `G7` | Pending: search-quality validation and go/no-go. |
-| 38 | `G8`, `G5`, `G7` | Pending: CI, packaging, version output, release docs, and reproducibility diagnostics. |
-| 39 | `G1`, `G2`, `G3`, `G4`, `G5`, `G6`, `G7` | Pending: real-workload validation on KanProofs and a second project or fixture. |
-| 40 | All gates | Pending: final production/no-go document. |
-
-## No-Go Criteria
+## No-go criteria
 
 The release is a no-go if any of these remain true:
 
-- default reports show known hard negatives or weak mathlib noise as actionable findings;
+- default reports show known hard negatives or weak mathlib noise as actionable;
 - full KanProofs audits fail, require `--no-semantic-probes` for ordinary use, or lack clear unavailable-probe
   diagnostics;
 - source-backed and static external evidence are indistinguishable in JSON or text output;
 - cache reuse depends on unrelated project dirtiness, absolute paths, or Python-era layout;
-- release artifacts cannot identify binary, Git revision, Lean version, worker version, protocol version, index schema,
-  and report schema;
+- release artifacts cannot identify binary, Git revision, Lean version, worker version, protocol version, index
+  schema, and report schema;
 - README examples rely on Python entry points or private local paths for common workflows.
-
-## Red Flag Review
-
-- **Shallow module:** avoided. The document defines release gates, evidence, and no-go policy instead of restating the
-  prompt sequence.
-- **Pass-through wrapper:** avoided. The charter is not a wrapper around prompts 21 through 40; it gives the prompts a
-  shared release contract.
-- **Temporal decomposition:** avoided. Gates are organized by production capability, not by implementation order.
-- **Information leakage:** avoided. The document names evidence requirements without exposing eval label layout, SQLite
-  tables, probe chunking, worker framing, or cache internals as release interfaces.
-- **Special-general mixture:** contained. KanProofs is a required real workload, but the production gates are general
-  release claims about quality, evidence, cache behavior, reporting, and packaging.
-- **Conjoined methods:** no remaining red flag. Each gate has a separable claim and artifact; later prompts can close
-  one gate without editing unrelated gate semantics.
-- **Hard-to-describe public API:** no remaining red flag. The public interface is one architecture document with named
-  gates and required artifacts.
-- **Implementation details contaminating interface comments:** avoided. The document describes caller-visible production
-  guarantees and evidence paths, not Lean traversal algorithms, SQLite layout, or temporary migration machinery.

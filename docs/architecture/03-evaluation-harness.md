@@ -1,76 +1,51 @@
 # Evaluation Harness
 
-The evaluation harness makes duplicate detection measurable. It scores observed candidate pairs against gold labels and
-reports raw counts for recall, shown-queue precision, hard-negative leakage, candidate volume, runtime, and peak memory
-when the platform exposes it.
+The harness scores observed candidate pairs against gold labels and emits raw counts. It is how a retrieval,
+ranking, or probe change is shown to be an improvement rather than a vibe shift.
 
-For the current end-to-end architecture and production-gate status, see
-[06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md) and
-[evaluation/production-gates.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/evaluation/production-gates.md).
+For the production-gate suite, see [evaluation/production-gates.md](evaluation/production-gates.md).
+For the full pipeline, see [06-end-to-end-architecture.md](06-end-to-end-architecture.md).
 
-## Design Note
+## Metrics
 
-This layer owns label normalization, unordered pair identity, cluster-to-pair expansion, recall@k denominators,
-shown-queue precision denominators, hard-negative policy, timing names, and memory metric names.
+All percentage-like metrics are raw counts (`5/7`, not `71%`) so the denominator stays visible.
 
-Its smallest public interface is:
+| Metric | What it counts |
+| --- | --- |
+| `recall@k` | gold positives the candidate set surfaces at each `k` |
+| `shown_queue_precision` | gold positives among shown pairs / all shown pairs |
+| `hard_negative_leakage` | hard negatives that reach the shown queue / all hard negatives |
+| `candidate_count` | observed candidate pair count |
+| `timings` | index load, retrieval, probe, total (ms) |
+| `peak_memory_bytes` | peak RSS when the platform exposes it |
 
-- `score_run(labels, observed, k_values) -> EvaluationMetrics`;
-- `lean-dup eval --suite <name> --format table|json`.
+## Suites
 
-These decisions must not leak upward or sideways:
+| Suite | Speed | Default CI? | What it covers |
+| --- | --- | --- | --- |
+| `default` | fast | yes | small fixture suite; all gold positives within recall@10, zero hard-negative leakage required |
+| `hard-negatives` | fast | yes | fixture precision gate (same-conclusion, broad-key, known static-fingerprint collisions) |
+| `kanproofs-internal` | slow | no | KanProofs internal duplicate labels; requires compiled artifacts |
+| `kanproofs-mathlib` | slow | no | KanProofs/mathlib labels, including known bogus mathlib collisions |
+| `production-gate` | slow | no | aggregates the four above; `status = incomplete` if a manual suite is unavailable |
 
-- fixture paths and KanProofs paths;
-- JSON label file layout;
-- retrieval weights, probe policy, and queue thresholds;
-- SQLite handles and cache layout;
-- table and JSON report formatting.
+## Public interface
 
-The preserved user-facing capability is measurable audit quality. Retrieval and later probe/ranking work can now be
-checked by recall, shown-queue precision, candidate count, timing, and memory instead of report anecdotes.
+- `lean-dup eval --suite <name> --format table|json`
+- `score_run(labels, observed, k_values) -> EvaluationMetrics`
 
-Python-era behavior intentionally discarded:
+Suites load corpus labels, run the index and retrieval through the normal cache layer, record timings and memory, and
+emit metrics. The scorer itself knows nothing about fixture paths, KanProofs paths, label-file layout, retrieval
+weights, probe policy, queue thresholds, or report formatting; only normalized labels and observed pairs.
 
-- anecdotal inspection as the only regression signal;
-- tuning against positives without hard negatives;
-- heuristic scoring policy spread across candidate generation and rendering;
-- global broad hydration as the main large-audit safety mechanism.
+A corpus-specific scorer was rejected: it would have mixed corpus knowledge with metric
+definitions, so adding a new corpus would mean editing scoring. A general scorer plus suite
+definitions keeps the metric interface small and reusable.
 
-## Design It Twice
+## Reading the numbers
 
-**Rejected: KanProofs-specific scorer.** The scorer would know KanProofs report paths, label names, and retrieval calls.
-That design mixes a special corpus with the general metric definitions. It would be shallow because adding a new corpus
-would require changing scoring code.
-
-**Chosen: general scorer plus suite definitions.** The scorer consumes normalized labels and observed pairs. Suite code
-loads fixture or slow corpus labels, runs indexes and retrieval, records timings, and decides which suites are default
-or manual. This design is deeper because the scorer has a small stable interface, corpus paths do not leak into metric
-calculation, and future audit outputs can reuse the same metric definitions.
-
-## Public Behavior
-
-`eval --suite default` runs the small fixture suite. It builds the local and external fixture workspaces, reuses
-canonical indexes through the normal cache layer, runs retrieval, and prints a compact table by default. The default
-suite is a quality gate: all gold positives must appear within recall@10 and no hard negative may enter the shown queue.
-
-`kanproofs-internal` and `kanproofs-mathlib` are explicit slow suites. They use built-in labels from the confirmed
-KanProofs reports and require existing compiled artifacts; they are not part of the default test suite.
-
-All percentage-like metrics are reported as raw counts, such as `5/7`, so readers can see the denominator.
-
-## Red Flag Review
-
-- **Shallow module:** avoided by giving scoring one narrow operation with nontrivial label normalization and metric
-    policy hidden behind it.
-- **Pass-through wrapper:** avoided; the suite runner adds label loading, index orchestration, observation extraction,
-    timing, memory sampling, and quality gates.
-- **Temporal decomposition:** avoided by splitting modules around hidden knowledge: labels, scoring, suites, table
-    rendering, and memory.
-- **Information leakage:** avoided because fixture and KanProofs paths live in suite definitions and label files, not
-    the scorer.
-- **Special-general mixture:** avoided because KanProofs labels are named slow suites; the scorer has no KanProofs
-    branches.
-- **Conjoined methods:** avoided because scoring accepts a complete observed run and does not share retrieval state.
-- **Hard-to-describe public API:** avoided; users run one named suite and get metrics.
-- **Implementation details contaminating interface comments:** avoided by documenting caller-visible metric contracts,
-    not SQLite layout, Lean traversal, or temporary migration details.
+Command-level success means the suite ran. Release readiness depends on the raw denominators
+satisfying `G1 regression_quality` and `G2 precision_control` in
+[04-production-readiness.md](04-production-readiness.md). The `production-gate` aggregate may
+report `status = incomplete` on machines without the KanProofs workspace; that is a recorded
+fact, not a pass.

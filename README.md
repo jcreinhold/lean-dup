@@ -1,62 +1,58 @@
 # lean-dup
 
-`lean-dup` is a read-only duplication auditor for Lean 4 Lake workspaces.
+A read-only duplication auditor for Lean 4 Lake workspaces. It indexes declarations from the
+elaborated Lean environment and reports likely duplicate or subsumed statements. Local and
+deterministic: no network services, no embeddings, no proof-term analysis.
 
-It indexes declarations from the elaborated Lean environment, then reports likely duplicate or subsumed statements. It
-is intentionally local and deterministic: no network services, no embeddings, and no proof-term analysis in v1.
-
-## Usage
-
-Build the Rust binary and Lean worker first:
-
-```sh
-cargo build -p lean-dup-cli
-cd lean && lake build
-```
-
-For local development, run the Rust CLI through Cargo:
-
-```sh
-cargo run -p lean-dup-cli -- doctor --workspace /path/to/lake/workspace
-cargo run -p lean-dup-cli -- audit --workspace /path/to/lake/workspace --format text
-cargo run -p lean-dup-cli -- audit --workspace /path/to/lake/workspace --format json
-cargo run -p lean-dup-cli -- audit --workspace /path/to/lake/workspace --compare-mathlib --progress
-cargo run -p lean-dup-cli -- show --workspace /path/to/lake/workspace --group exact-statement-1
-```
-
-For production-style local runs, use the release binary:
+## Build
 
 ```sh
 cargo build --release -p lean-dup-cli
+cd lean && lake build
+```
+
+## Audit a workspace
+
+```sh
 target/release/lean-dup audit --workspace /path/to/lake/workspace --compare-mathlib --progress
 ```
 
-## Architecture Docs
+`audit` walks the inferred Lake workspace roots. Private theorem-like declarations are included
+by default when Lean exposes them through compiled modules; `--module Root.Module` scopes the
+audit to one root and its descendants.
 
-Start with
-[docs/architecture/06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md)
-for the as-built pipeline and design rationale. Production gates are tracked in
-[docs/architecture/04-production-readiness.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/04-production-readiness.md),
-and the Lean/Rust worker protocol is specified in
-[docs/architecture/01-worker-protocol.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/01-worker-protocol.md).
-The Rust crate split is recorded in
-[docs/architecture/07-crate-factoring.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/07-crate-factoring.md).
+| Flag                    | Effect                                                                        |
+| ----------------------- | ----------------------------------------------------------------------------- |
+| `--public-only`         | exclude private declarations                                                  |
+| `--compare-mathlib`     | compare against the project's pinned mathlib index                            |
+| `--compare-index LABEL` | compare against a named cached external index                                 |
+| `--profile`             | include extraction and classification timings                                 |
+| `--format json`         | machine-readable output (stdout stays parseable with `--progress`/`--profile`) |
 
-By default, `audit` scans the inferred local Lake workspace roots and includes private theorem-like declarations when
-Lean exposes them through compiled modules. Use `--module Root.Module` to restrict the audit to one root module and its
-descendants.
+For local development, swap `target/release/lean-dup` for `cargo run -p lean-dup-cli --`. Other
+commands: `doctor` (workspace, worker, Lake, cache health), `show --group <id>` (one ranked
+group), `diff` (saved baselines), `eval` (quality suites).
 
-Useful audit flags:
+## Caches and replacement hints
 
-- `--public-only`: exclude private declarations from the report.
-- `--compare-mathlib`: compare workspace declarations with the cached mathlib index.
-- `--compare-index LABEL`: compare workspace declarations with a named cached external index.
-- `--profile`: include extraction and classification timings in the report.
+Project and mathlib indexes are cached under the resolved `lean-dup` cache root; shared project-pinned mathlib
+indexes default to `~/.cache/lean-dup` (`LEAN_DUP_CACHE_DIR` overrides).
 
-Project and mathlib indexes are cached under the resolved `lean-dup` cache root; shared project-pinned mathlib indexes
-default to `~/.cache/lean-dup`. For confirmed external matches, text and JSON reports include read-only replacement
-hints: the target declaration, the specific import line, direct-import status, and bounded local source references to
-replace or preserve behind a transitional alias.
+For confirmed external matches, text and JSON reports include read-only replacement hints: the target declaration,
+the specific import line, direct-import status, and bounded local source references to replace or preserve behind a
+transitional alias.
 
-The Python implementation has been retired. Historical Python modules and tests were used as regression evidence during
-the Rust/Lean rewrite; the production command surface is the Rust `lean-dup` binary.
+## Architecture
+
+Start with the [end-to-end architecture](docs/architecture/06-end-to-end-architecture.md) for the
+as-built pipeline. Then:
+
+- [Architecture charter](docs/architecture/00-overview.md)
+- [Worker protocol](docs/architecture/01-worker-protocol.md)
+- [Crate factoring](docs/architecture/07-crate-factoring.md)
+- [Production readiness](docs/architecture/04-production-readiness.md)
+- [Search quality](docs/architecture/search-quality.md)
+
+The Python implementation has been retired; the production command surface is the Rust
+`lean-dup` binary. The [deprecation map](docs/architecture/python-deprecation-map.md) records what
+each Python module was superseded by.

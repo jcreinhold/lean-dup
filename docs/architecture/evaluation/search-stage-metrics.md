@@ -1,130 +1,75 @@
-# Search Stage Metrics And Retrieval Observability
+# Search Stage Metrics
 
-Prompt 30 adds stage-level denominators to evaluation output. The goal is to locate quality failures before changing
-retrieval, ranking, semantic verification, or visibility policy.
+Evaluation output carries stage-level denominators. Without them a quality failure cannot be located: a positive
+could be lost at candidate generation, ranking, semantic verification, or visibility, and those are different bugs.
 
-## Design Note
+## Metric contract
 
-The stage-metrics boundary owns search-stage denominators, hard-negative survival, candidate origin counts, stable
-retrieval feature-family names, semantic-verification counters, and aggregation across production-gate child suites.
+`metrics.stage_metrics` is additive and JSON-safe. Existing `metrics.recall`, `shown_queue_precision`,
+`hard_negative_hits`, `visible_groups`, `probe_unavailable`, candidate counts, timings, and table output stay
+supported.
 
-Its smallest public interface is additive eval JSON under `metrics.stage_metrics`. Existing `metrics.recall`,
-`shown_queue_precision`, `hard_negative_hits`, `visible_groups`, `probe_unavailable`, candidate counts, timings, and
-table output remain supported.
+| Metric | What it counts |
+| --- | --- |
+| `candidate_generation_recall` | labeled positives present anywhere in retrieved candidates |
+| `top_k_recall_before_final_ranking` | recall at requested `k` over the current retrieval ordering |
+| `ranked_recall` | current public recall metric, repeated under stage vocabulary |
+| `visible_queue_precision` | shown true positives / shown candidates |
+| `hard_negative_survival` | hard negatives at generated, top-k, and visible stages |
+| `candidate_count_by_origin` | candidates grouped by `workspace`, `mathlib`, `external:<label>`, … |
+| `candidate_count_by_feature_family` | candidates grouped by stable retrieval-evidence family |
+| `generated_candidate_count_by_policy` | generated observations grouped by private search policy label |
+| `generated_candidate_count_by_feature_family` | generated observations grouped by feature family |
+| `hard_negative_generated_by_feature_family` | generated hard negatives grouped by feature family |
+| `semantic_verification` | planned, cached, worker, and unavailable probe counts (zeros for retrieval-only suites) |
 
-These decisions must not leak upward or sideways:
+Generated observations are tracked separately from the bounded ranked queue. Candidate generation means "the pair
+was created by the private generation stage"; top-k and visible metrics describe later survival.
 
-- SQLite table names, posting keys, raw Lean-owned feature keys, and hydration mechanics;
-- ranking thresholds, scorer constants, review profile internals, and report visibility policy;
-- Lean worker rows, probe chunks, JSONL framing, and probe-cache keys;
-- private KanProofs paths or prompt-specific artifact layout.
+## Feature families
 
-The preserved capability is measurable read-only duplicate-audit quality. Users can keep running the same eval suites
-while JSON consumers gain enough stage information to tell whether positives are lost during candidate generation,
-top-k ranking, semantic verification, or visible-queue filtering.
+Stable diagnostic vocabulary. Not retrieval keys, posting-table names, or Lean feature encodings.
 
-Python-era behavior intentionally discarded:
-
-- aggregate command completion as a quality pass;
-- anecdotal "the candidate looked related" inspection;
-- exposing broad retrieval key dumps as observability;
-- measuring one mixed duplicate bucket without stage denominators.
-
-## Design It Twice
-
-**Rejected: expose raw retrieval contributions in eval JSON.** Raw contribution keys would make debugging easy in the
-short term, but they would leak Lean-owned encodings, SQLite query shape, and retrieval internals into the report
-contract. Later retrieval refactors would become JSON migrations.
-
-**Chosen: stage metrics with stable feature families.** Eval records where each labeled pair survives and groups
-retrieval evidence into stable families such as `statement_fingerprint`, `safe_permutation_fingerprint`, and
-`role_conclusion_const`. This is deeper because the eval boundary owns observability vocabulary while retrieval keeps
-its internal key representation private.
-
-## Metric Contract
-
-`metrics.stage_metrics` is additive and JSON-safe:
-
-- `candidate_generation_recall`: labeled positives present anywhere in retrieved candidates;
-- `top_k_recall_before_final_ranking`: recall at requested `k` values over the current retrieval ordering;
-- `ranked_recall`: the current public recall metric repeated under the stage vocabulary;
-- `visible_queue_precision`: shown true positives over shown candidates;
-- `hard_negative_survival`: hard negatives present at candidate generation, at requested top-k values, and in the
-  visible queue;
-- `candidate_count_by_origin`: candidate observations grouped by stable origin labels such as `workspace`, `mathlib`,
-  or `external:fixture`;
-- `candidate_count_by_feature_family`: candidate observations grouped by stable retrieval evidence families;
-- `generated_candidate_count_by_policy`: generated observations grouped by private search policy labels;
-- `generated_candidate_count_by_feature_family`: generated observations grouped by stable feature family;
-- `hard_negative_generated_by_feature_family`: generated hard negatives grouped by stable feature family;
-- `semantic_verification`: planned, cached, worker, and unavailable probe counts. Retrieval-only eval suites report
-  zeros until an audit-backed observation path supplies probe diagnostics.
-
-Prompt 32 split generated observations from the bounded ranked queue. Candidate generation now means "the pair was
-created by the private generation stage," while top-k and visible metrics describe later survival.
-
-## Feature Families
-
-Feature families are intentionally coarser than retrieval keys:
-
-- `statement_fingerprint`
-- `safe_permutation_fingerprint`
-- `connective_fingerprint`
-- `conclusion_fingerprint`
-- `role_conclusion_const`
-- `role_hypothesis_const`
-- `role_head`
-- `role_other`
-- `other`
-- `unknown`
-
-The family names are stable diagnostic vocabulary. They are not a promise about storage tables, posting keys, or Lean
-feature encodings.
-
-## Evidence Commands
-
-Fast fixture evidence:
-
-```sh
-cargo run -p lean-dup-cli -- eval --suite default --format json
-cargo run -p lean-dup-cli -- eval --suite hard-negatives --format json
+```
+statement_fingerprint
+safe_permutation_fingerprint
+connective_fingerprint
+conclusion_fingerprint
+role_conclusion_const
+role_hypothesis_const
+role_head
+role_other
+other
+unknown
 ```
 
-Production-gate evidence:
+## Why stage metrics, not raw retrieval contributions
+
+Raw contribution keys make short-term debugging easy and leak Lean-owned encodings, SQLite query shape, and retrieval
+internals into the report contract. Later retrieval refactors become JSON migrations. Stable family vocabulary keeps
+the eval boundary owning observability while retrieval keeps its internal keys private.
+
+## Commands
 
 ```sh
+# Fast fixture evidence
+cargo run -p lean-dup-cli -- eval --suite default --format json
+cargo run -p lean-dup-cli -- eval --suite hard-negatives --format json
+
+# Production-gate evidence
 cargo run -p lean-dup-cli -- eval --suite production-gate --format json \
   --output target/eval/prompt30-production-gate.json
 ```
 
-The aggregate `status` still reports command/gate execution status. Release-quality claims must use the raw stage
-denominators, especially KanProofs/mathlib recall and hard-negative survival.
+The aggregate `status` still reports command/gate execution. Release-quality claims use the raw stage denominators,
+especially KanProofs/mathlib recall and hard-negative survival.
 
-## Current Limitations
+## Known limitations
 
-The stage metrics do not tune retrieval or ranking. They may therefore reveal existing bad behavior, such as positives
-missing from bounded retrieval output or hard negatives surviving into the visible queue.
-
-The semantic-verification counters are zero for retrieval-only suites. Audit-backed eval observations are a later
-extension; this prompt only creates the stable metric slots.
-
-Top-k recall before final ranking still uses the current first-stage selection order. Prompt 33 introduces calibrated
-symbolic scoring.
-
-## Red Flag Review
-
-- **Shallow module:** mitigated. The stage-metrics module computes stage denominators and feature-family diagnostics; it
-  is not a pass-through alias for existing recall.
-- **Pass-through wrapper:** mitigated. Existing recall remains for compatibility, but the new object adds generated,
-  top-k, visible, origin, feature-family, and semantic counters.
-- **Temporal decomposition:** residual and documented. Current eval observes retrieval output as the candidate stage
-  because retrieval has not yet been split internally; Prompt 32 removes this limitation.
-- **Information leakage:** mitigated. JSON exposes stable feature families, not raw retrieval keys, SQLite tables, Lean
-  worker rows, or JSONL frames.
-- **Special-general mixture:** mitigated. KanProofs evidence uses the same stage schema as fixtures; private path policy
-  remains in suite orchestration.
-- **Conjoined methods:** mitigated. Scoring still consumes normalized pairs and shown membership; stage metrics consume
-  richer observation facts without changing scorer thresholds.
-- **Hard-to-describe public API:** mitigated. The public addition is one `metrics.stage_metrics` object.
-- **Implementation details contaminating interface comments:** mitigated. Interface comments describe stage meanings and
-  stable family labels, not storage layout or retrieval algorithms.
+- Stage metrics measure existing behavior. They reveal bad behavior; they do not fix it.
+- The semantic-verification counters are zero for retrieval-only suites. Audit-backed observations are a later
+  extension; the slots exist now so artifacts stay stable when they land.
+- Top-k recall before final ranking still uses the current first-stage selection order.
+- *Residual temporal decomposition.* Current eval observes retrieval output as the candidate stage because retrieval
+  has not yet been split internally. Until that split lands, generated and ranked are aliases for the current single
+  stage.

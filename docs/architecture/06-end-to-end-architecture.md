@@ -1,147 +1,139 @@
 # End-to-End Architecture
 
-This is the primary as-built architecture reference for `lean-dup`. The implementation is now a Rust/Lean-only local
-auditor: Rust owns workflow, persistence, scale, ranking, reporting, evaluation, and release diagnostics; Lean owns
-facts that require the elaborated Lean environment.
+The as-built reference for `lean-dup`. Rust owns workflow, persistence, scale, ranking, reporting, evaluation, and
+release. Lean owns facts that require the elaborated environment. Everything else flows from that.
 
-For historical context, see [00-overview.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/00-overview.md). For
-release status, see
-[04-production-readiness.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/04-production-readiness.md).
-For Rust crate boundaries, see
-[07-crate-factoring.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/07-crate-factoring.md).
+For the layering rule, see [00-overview.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/00-overview.md). For
+release status, see [04-production-readiness.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/04-production-readiness.md).
+For Rust crate boundaries, see [07-crate-factoring.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/07-crate-factoring.md).
 
-## Scope
+## Current status
 
-This document owns the current end-to-end mental model: user workflows, internal boundaries, data flow, design
-rationale, and known production blockers. It intentionally avoids SQLite table layouts, worker JSONL framing details,
-Lean expression traversal algorithms, and probe chunking policy except where those details explain a boundary.
+Operational, Rust/Lean-only. Not release-ready.
 
-The public command surface is:
+Implemented:
 
-- `doctor`: inspect workspace, worker, Lake, and cache health.
-- `index`: build or reuse a workspace index.
-- `index-mathlib`: build or reuse the audited project's pinned mathlib index.
-- `audit`: produce duplicate-review groups from local, imported, mathlib, or external comparison evidence.
-- `show`: explain one group that can be resolved from the current workspace/index context.
-- `diff`: compare two saved audit baselines.
-- `eval`: run fixture, hard-negative, KanProofs, or aggregate quality suites.
-- hidden `perf`: run named performance workloads and write profiling artifacts.
-- hidden `cache-cleanup`: inspect or remove unprotected stale cache entries.
+- Python implementation removed (modules, tests, packaging).
+- Source-backed/static provenance.
+- Cache lifecycle diagnostics and protected cleanup.
+- Additive report contract.
 
-The CLI remains read-only with respect to audited Lean source. It may build Lean artifacts through Lake and write
-indexes, reports, and diagnostics under the cache root or `target/`, but it does not edit the audited workspace.
+Open:
 
-## System Thesis
+- KanProofs regression quality unproven; KanProofs/mathlib recall poor; hard-negative leakage remains.
+- Useful proof-grade probe yield needs real-workload validation.
+- Full mathlib comparison expensive even with warm caches.
+- CI, packaging, version output, install docs, release reproducibility.
 
-The core rule is still the Lean/Rust boundary:
+Search-quality is now governed by
+[search-quality.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/search-quality.md), which defines the match
+classes, stage objectives, and evidence thresholds release hardening waits on.
 
-- Lean owns semantic facts and bounded semantic probes.
-- Rust owns scale, persistence, orchestration, retrieval, ranking, reporting, and validation.
+No FFI spike is currently justified. Measured work points to import, index, retrieval, report shaping, and quality
+issues, not subprocess framing.
 
-This division keeps each layer deep. Lean hides elaborated expression structure, binder handling, canonicalization, and
-definitional-equality checks. Rust hides SQLite, cache lifecycle, suite policy, progress rendering, report contracts,
-and performance artifacts. JSON and JSONL are transport encodings, not semantic architecture.
+## Commands
+
+| Command | Purpose |
+| --- | --- |
+| `doctor` | inspect workspace, worker, Lake, and cache health |
+| `index` | build or reuse a workspace index |
+| `index-mathlib` | build or reuse the audited project's pinned mathlib index |
+| `audit` | produce duplicate-review groups from local, imported, mathlib, or external evidence |
+| `show` | explain one group resolvable from the current workspace/index context |
+| `diff` | compare two saved audit baselines |
+| `eval` | run fixture, hard-negative, KanProofs, or aggregate quality suites |
+| *hidden* `perf` | run named performance workloads and write profiling artifacts |
+| *hidden* `cache-cleanup` | inspect or remove unprotected stale cache entries |
+
+The CLI is read-only with respect to audited Lean source. It may build Lean artifacts through Lake and write indexes,
+reports, and diagnostics under the cache root or `target/`, but it does not edit the audited workspace.
 
 ## Pipeline
 
 ```mermaid
 flowchart TD
-  CLI["CLI command"] --> Workspace["Workspace and mathlib resolution"]
-  Workspace --> WorkerPolicy["Worker version/build policy"]
-  WorkerPolicy --> IndexDecision["Index build or reuse"]
-  IndexDecision --> SQLite["SQLite index store and cache lifecycle"]
-  SQLite --> Retrieval["Retrieval over semantic postings"]
-  Retrieval --> Probes["Bounded semantic verification"]
-  Probes --> Ranking["Ranking and review profiles"]
-  Ranking --> SourceFacts["Source facts and replacement hints"]
-  SourceFacts --> Contract["Report contract explanations"]
-  Contract --> Render["Text, JSON, show, diff"]
-  Contract --> EvalPerf["Eval and perf diagnostics"]
-  SQLite --> Doctor["doctor and cache-cleanup"]
+  CLI["CLI"] --> Workspace["Workspace"]
+  Workspace --> Worker["Worker"]
+  Worker --> Index["Index"]
+  Index --> SQLite["SQLite"]
+  SQLite --> Retrieval["Retrieval"]
+  Retrieval --> Probes["Verification"]
+  Probes --> Ranking["Ranking"]
+  Ranking --> SourceFacts["Source facts"]
+  SourceFacts --> Contract["Report contract"]
+  Contract --> Render["text / JSON / show / diff"]
+  Contract --> EvalPerf["eval / perf"]
+  SQLite --> Doctor["doctor / cache-cleanup"]
 ```
 
-The normal audit path starts with command parsing, resolves the Lake workspace and selected modules, ensures a compatible
-Lean worker, opens or builds the required indexes, retrieves bounded candidates, optionally verifies high-value pairs in
-Lean, ranks and filters groups, attaches source-backed context, builds stable explanation facts, and renders text or
-JSON. Evaluation and performance tooling use the same lower layers; they differ only in suite/workload ownership and
-artifact policy.
+A normal audit: parse command, resolve workspace and modules, ensure a compatible worker, open or build the required
+indexes, retrieve bounded candidates, optionally verify high-value pairs in Lean, rank and filter groups, attach
+source-backed context, build stable explanation facts, render text or JSON. Eval and perf use the same lower layers
+with different suite/workload ownership and artifact policy.
 
 ## Components
 
-### CLI And Commands
+### CLI and commands
 
-`crates/cli/src/cli.rs` defines the user and hidden developer command surface. `commands.rs` routes commands, constructs
-domain requests, and writes stdout/stderr or output files. It does not own Lake layout, worker transport, SQLite schema,
-audit phase ordering, ranking policy, probe details, or text/JSON formatting. That keeps command handling from becoming
-a temporal script in Rust.
+`crates/cli/src/cli.rs` defines the user and hidden developer command surface. `commands.rs` routes commands and
+writes stdout/stderr or output files. It does not own Lake layout, worker transport, SQLite schema, audit phase
+ordering, ranking policy, probe details, or text/JSON formatting. Hidden `perf` and `cache-cleanup` exist for
+production engineering only.
 
-The public UX is deliberately small: users ask to inspect, index, audit, show, diff, or evaluate. Hidden commands exist
-only for production engineering: `perf` for named workload artifacts and `cache-cleanup` for protected cache lifecycle
-maintenance.
+### Workspace and mathlib resolution
 
-### Workspace And Mathlib Resolution
+`workspace.rs` owns Lake workspace discovery, module root resolution, and source-file enumeration. `mathlib.rs` owns
+the project-pinned mathlib contract: `index-mathlib --workspace <project>` indexes the mathlib package under that
+project's Lake dependency graph, not a global mathlib checkout. The boundary hides `.lake/packages`, source-root
+attribution, module enumeration, and project execution root policy. The shared mathlib cache key excludes the audited
+project's absolute path and includes the pinned mathlib content and relevant toolchain/worker semantics.
 
-`workspace.rs` owns Lake workspace discovery, module root resolution, and source-file enumeration. `mathlib.rs` owns the
-project-pinned mathlib contract: `index-mathlib --workspace <project>` indexes the mathlib package under that project's
-Lake dependency graph, not a global mathlib checkout used as the audited workspace.
+### Lean worker and protocol
 
-This boundary hides `.lake/packages`, source-root attribution, module enumeration, and project execution root policy.
-The shared mathlib cache key excludes the audited project's absolute path and includes the pinned mathlib content and
-the relevant toolchain/worker semantics.
+The worker under `lean/LeanDup/` imports selected modules and emits typed semantic rows through the versioned protocol
+in [01-worker-protocol.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/01-worker-protocol.md). Six commands:
+`extract`, `features`, `index`, `probe`, `doctor`, `version`. Rust may rely on declaration rows, feature rows, probe
+results, progress, completion, and structured errors. Rust may not rely on Lean `Expr` constructors, pretty-printed
+statement text, private worker batching, or stderr wording.
 
-### Lean Worker And Protocol
+Worker construction has separate policies for small interactive operations and long index-building work. Large
+index-worker timeout policy lives inside the worker/index boundary, so production-gate mathlib indexing completes
+without user-facing timeout flags.
 
-The Lean worker lives under `lean/LeanDup/`. It imports selected modules and emits typed semantic rows through the
-versioned protocol documented in
-[01-worker-protocol.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/01-worker-protocol.md).
+### Index store and cache lifecycle
 
-The worker supports `extract`, `features`, `index`, `probe`, `doctor`, and `version`. Rust may rely on declaration rows,
-feature rows, probe results, progress, completion, and structured errors. Rust must not rely on Lean `Expr` constructors,
-pretty-printed statement text, private worker batching details, or stderr wording.
-
-Worker construction has separate policies for small interactive operations and long index-building work. Prompt 27 moved
-large index-worker timeout policy into the worker/index boundary so production-gate mathlib indexing can complete
-without adding user-facing timeout flags.
-
-### Index Store And Cache Lifecycle
-
-`index.rs` persists local, external, and mathlib indexes in SQLite. Callers ask for capabilities: build or reuse an
-index, query postings, hydrate declarations, or read provenance. They do not inspect table names, row IDs, insertion
+`index.rs` persists local, external, and mathlib indexes in SQLite. Callers ask for capabilities—build or reuse an
+index, query postings, hydrate declarations, read provenance—and do not inspect table names, row ids, insertion
 phases, or transaction order.
 
 `cache.rs` and `cache_lifecycle.rs` own cache roots, source-relevant fingerprints, latest-pointer interpretation,
-diagnostics, disk usage, and protected cleanup. The default shared cache root is `~/.cache/lean-dup`, overrideable by
-environment. Index invalidation is based on inputs that affect semantic rows: Lean source, Lake files, toolchain,
-worker/protocol/index semantic versions, include policies, selected roots, and relevant dependency sources. It is not
+diagnostics, disk usage, and protected cleanup. Default shared cache root: `~/.cache/lean-dup` (override with
+`LEAN_DUP_CACHE_DIR`). Invalidation is based on inputs that affect semantic rows: Lean source, Lake files, toolchain,
+worker/protocol/index semantic versions, include policies, selected roots, relevant dependency sources. It is not
 based on unrelated non-Lean files or broad repository dirtiness.
 
-`doctor --format json` is the user-facing diagnostic surface for cache health. Hidden `cache-cleanup` is dry-run by
-default and protects active latest targets and expected current indexes before deletion.
+`doctor --format json` is the user-facing diagnostic surface. Hidden `cache-cleanup` is dry-run by default and
+protects active latest targets and expected current indexes before deletion.
 
-### External Provenance
+### External provenance
 
-`external_provenance.rs` owns the distinction between static and source-backed comparison evidence, documented in
+`external_provenance.rs` owns the source-backed vs static distinction. See
 [05-external-comparison-provenance.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/05-external-comparison-provenance.md).
-
-`--compare-mathlib` is source-backed and project-centered by construction. `--compare-index <label>` may be:
-
-- `proof-grade`: source-backed and importable in the current audit Lake environment;
-- `source-backed-not-importable`: source-backed but not importable from the current execution root;
-- `static`: old, minimal, or intentionally static index metadata.
-
-Ranking and semantic verification consume a policy object, not label strings. A static index named `mathlib` remains
-usable, but it cannot silently claim proof-grade Lean evidence.
+Ranking and semantic verification consume a typed policy object, not label strings. A static index named `mathlib`
+remains usable but cannot silently claim proof-grade Lean evidence.
 
 ### Retrieval
 
-`lean-dup-search` owns the full audit workflow through `audit::run_audit`. Internally, `retrieval.rs` turns indexed semantic keys into bounded candidate pairs. It combines exact, permutation, connective,
-conclusion, role-aware, and other indexed postings without exposing key shape or posting tables upward. Retrieval is
-where candidate volume is controlled before ranking and semantic verification.
+`lean-dup-search` owns the full audit workflow through `audit::run_audit`. `retrieval.rs` turns indexed semantic keys
+into bounded candidate pairs, combining exact, permutation, connective, conclusion, role-aware, and other indexed
+postings without exposing key shape or posting tables upward. Retrieval controls candidate volume before ranking and
+semantic verification.
 
-Hot unordered paths use hash-based accumulators where deterministic ordering is not required. Stable output ordering is
-applied at selected boundaries, not throughout every inner loop.
+Hot unordered paths use hash-based accumulators where deterministic ordering is not required. Stable output ordering
+is applied at selected boundaries, not throughout every inner loop.
 
-### Semantic Verification
+### Semantic verification
 
 `semantic_verification.rs` owns probe planning, budgets, cache keys, source-backed module import planning, private and
 generated declaration filters, unavailable classification, and diagnostics. The verifier receives hydrated facts and a
@@ -152,132 +144,65 @@ semantic work over weak feature-only overlaps. Pair-local failures become typed 
 missing declaration, unsupported, opaque or unreducible, timeout, or internal error. Batch-fatal worker failures are a
 fallback path, not normal control flow.
 
-This design is intentionally bounded. Parallel Lean probe workers are not the default because each worker imports a
-large environment; measured work has so far favored removing weak obligations and improving reuse before multiplying
-imports.
+Parallel Lean probe workers are not the default because each worker imports a large environment; measured work has so
+far favored removing weak obligations and improving reuse before multiplying imports.
 
-### Ranking And Review Profiles
+### Ranking and review profiles
 
-`ranking.rs` consumes candidates, indexed facts, semantic evidence, provenance policy, source facts, and review profile
+`ranking.rs` consumes candidates, indexed facts, semantic evidence, provenance policy, source facts, and review-profile
 settings. It produces ranked groups with signals, blockers, evidence mode, visibility, priority, and recommended
 actions. It does not know SQLite tables or Lean worker messages.
 
 Default output favors actionable findings. Feature-only and noisy groups are hidden unless the user asks for broader
-profiles or `--show-noise`. This is a production UX choice: broad exploration remains available, but the default queue
-is not a dump of every indexed overlap.
+profiles or `--show-noise`. Broad exploration remains available; the default queue is not a dump of every indexed
+overlap.
 
-### Source Facts And Replacement Hints
+### Source facts and replacement hints
 
 `source_refs.rs` owns local source scans, imports, source fingerprints, and scoped caller-reference collection.
 `replacement_hints.rs` owns whether a visible group can receive import/replacement guidance and what caller impact can
 be shown.
 
-Prompt 25 made this boundary important for throughput: source-reference scanning is scoped to groups that can use the
-facts, rather than scanning every hidden/noise group. The search audit workflow coordinates the phases but does not
-expose import parsing or caller-token policy to CLI callers.
+Source-reference scanning is scoped to groups that can use the facts, instead of scanning every hidden/noise group.
+The search audit workflow coordinates phases without exposing import parsing or caller-token policy to CLI callers.
 
-### Report Contract, Rendering, Show, And Diff
+### Report contract, rendering, show, diff
 
-`lean-dup-report` builds stable explanation facts from the audit model before renderers format anything. The contract is
-documented in [report-contract.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/report-contract.md).
+`lean-dup-report` builds stable explanation facts from the audit model before renderers format anything. See
+[report-contract.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/report-contract.md).
 
 Audit JSON is additive and includes `report_schema_version` plus `explanations` for visible queues, hidden groups,
 semantic probes, and comparison provenance. Text output explains empty queues directly. `show` explains one group in
 terms of evidence mode, semantic evidence or blockers, visibility, and replacement/import/caller impact. Progress and
-profile output remain stderr-only so JSON stdout stays parseable.
+profile output remain stderr-only so JSON stdout stays parseable. `diff` compares saved baselines.
 
-`diff` compares saved baselines. It operates on report artifacts and remains a review workflow, not a source rewrite
-tool.
-
-### Evaluation And Performance
+### Evaluation and performance
 
 `eval.rs` owns suite definitions, label provenance, manual/private-path policy, audit observation, hard-negative gate
-enforcement, and raw denominator metrics. The scorer remains general: it scores unordered pairs and queue membership
-without learning KanProofs paths or cache internals. Production-gate details are documented in
+enforcement, and raw denominator metrics. The scorer is general: it scores unordered pairs and queue membership
+without learning KanProofs paths or cache internals. Production-gate detail:
 [evaluation/production-gates.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/evaluation/production-gates.md).
 
-`perf.rs` owns named workloads, cost-class extraction, and artifact naming. The hidden command makes performance claims
-reproducible without exposing cache deletion, SQL probes, or shell timing sequences as public workflow.
+`perf.rs` owns named workloads, cost-class extraction, and artifact naming. The hidden command makes performance
+claims reproducible without exposing cache deletion, SQL probes, or shell timing sequences as public workflow.
 
-## Workflow Semantics
+## Workflow notes
 
-### `doctor`
+- **`audit`** compares selected workspace declarations with local candidates, direct imports, explicit import roots, a
+  project-pinned mathlib index, or named external indexes. With source-backed evidence, proof-grade visible claims
+  require semantic verification. With static indexes, findings remain explicitly static.
+- **`show`** explains a ranked group resolvable from the current workspace/index context. It is not yet a full
+  report-file browser.
+- **`eval --suite default` / `eval --suite hard-negatives`** are fast fixture gates. `kanproofs-internal` and
+  `kanproofs-mathlib` are explicit manual suites. `production-gate` aggregates them and reports raw denominators.
+- **`perf`** workloads measure realistic runtime and cost classes. Outputs land under `target/perf/`.
 
-`doctor` resolves the workspace, checks Lake/Lean/worker availability, and reports cache lifecycle diagnostics. In JSON
-mode it is the release diagnostic surface for cache root, labels, active latest targets, schema status, provenance,
-declaration counts when readable, and disk usage.
+## Guardrails
 
-### `index`
-
-`index` builds or reuses a source-backed workspace index for selected modules. The index records source provenance and
-semantic versions. Old or missing provenance remains readable as static evidence rather than forcing a migration.
-
-### `index-mathlib`
-
-`index-mathlib` builds or reuses the audited project's pinned mathlib index. It runs in the local project Lake
-environment and attributes declarations to the pinned mathlib source root. The cache is content-addressed for reuse
-across projects pinned to the same relevant mathlib/toolchain/worker semantics.
-
-### `audit`
-
-`audit` compares selected workspace declarations with local candidates, direct imports, explicit import roots, a
-project-pinned mathlib index, or named external indexes. With source-backed comparison evidence, proof-grade visible
-claims require semantic verification. With static indexes, findings remain explicitly static.
-
-### `show`
-
-`show` explains a ranked group that can be resolved from the current workspace/index context. It is not yet a full
-report-file browser. Prompt 39 may decide whether real workload review needs report-file-backed `show`.
-
-### `eval`
-
-`eval --suite default` and `eval --suite hard-negatives` are fast fixture gates. `kanproofs-internal` and
-`kanproofs-mathlib` are explicit manual suites. `production-gate` aggregates them and reports raw denominators.
-
-The current production-gate command completes, but quality is not production-ready: the Prompt 27 artifact reports
-aggregate recall@10 `15/32`, aggregate hard-negative hits `3/16`, KanProofs/mathlib recall@10 `0/11`, and
-KanProofs/mathlib hard-negative hits `3/4`.
-
-### `perf`
-
-Hidden `perf` workloads measure realistic runtime and cost classes. Reports under
-`docs/architecture/performance/` preserve historical measurements; current notes identify where later prompts supersede
-old failures.
-
-## Current Production Status
-
-The implementation is operational and Rust/Lean-only. It is not production-ready.
-
-Closed or implemented gates:
-
-- Python implementation deprecation is complete; Python code, tests, and packaging are removed.
-- Source-backed/static provenance is implemented.
-- Cache lifecycle diagnostics and protected cleanup are implemented.
-- The report contract is implemented additively.
-
-Open quality/release blockers:
-
-- KanProofs regression quality is not proven.
-- KanProofs/mathlib recall is currently poor in the production-gate artifact.
-- KanProofs/mathlib hard-negative leakage remains.
-- Semantic probes are safer and more recoverable, but useful proof-grade yield still needs real-workload validation.
-- Full mathlib comparison remains expensive even with warm caches.
-- CI, packaging, version output, install docs, and release reproducibility are still prompt 38 work.
-
-The search-quality problem is now specified in
-[search-quality.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/search-quality.md). That charter defines the
-match classes, stage objectives, and evidence thresholds that must be validated before release hardening can close the
-quality gates.
-
-No FFI spike is currently justified. The measured work so far points to import/index/retrieval/report shaping and
-quality issues, not subprocess framing as the dominant release blocker.
-
-## Design Guardrails
-
-- Do not move Lean semantic interpretation into Rust through pretty-printed text.
-- Do not expose SQLite layout, cache-key JSON, or latest-pointer details to audit/ranking/reporting callers.
-- Do not make labels such as `mathlib` imply proof-grade evidence without provenance.
-- Do not make broad/noisy candidate dumps the default report.
-- Do not make private KanProofs paths part of default CI.
-- Do not treat aggregate eval command completion as release quality when raw recall and hard-negative denominators fail.
-- Do not preserve Python compatibility shells; preserve validated capabilities through Rust/Lean code and fixture labels.
+The doctrine these guardrails come from lives in
+[00-overview.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/00-overview.md). The short form: do not move Lean
+semantic interpretation into Rust through pretty-printed text; do not expose SQLite layout, cache-key JSON, or
+latest-pointer details to audit/ranking/reporting; do not let a label such as `mathlib` imply proof-grade evidence
+without provenance; do not make broad/noisy candidate dumps the default; do not put private KanProofs paths in default
+CI; do not treat aggregate eval command completion as release quality when raw recall and hard-negative denominators
+fail; do not preserve Python compatibility shells.

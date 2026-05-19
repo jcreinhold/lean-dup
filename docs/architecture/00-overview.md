@@ -1,244 +1,140 @@
-# Lean-Dup Architecture Overview
+# Architecture Charter
 
-This document is the architecture charter for `lean-dup`. It records the main design doctrine and historical boundary
-choices. For the current as-built system, component walkthrough, and command-by-command data flow, see
-[06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md).
+This is the doctrine document for `lean-dup`: the layer boundaries, the design rules other
+documents rely on, and the non-goals. For the as-built pipeline, see
+[06-end-to-end-architecture.md](06-end-to-end-architecture.md). For release gates, see
+[04-production-readiness.md](04-production-readiness.md).
 
-The Lean/Rust boundary is the central rule:
+## The Lean/Rust boundary
 
-- Lean owns semantic facts and probes.
-- Rust owns scale, persistence, workflow, retrieval, ranking, reporting, evaluation, and release diagnostics.
+One rule sits above everything else:
 
-Rust asks Lean semantic questions through a narrow, versioned Lean worker protocol. Lean types and Rust domain structs
-are the semantic model. JSON and JSONL are subprocess transport encodings chosen by the worker runtime; they are not the
-architecture. Rust must not inspect Lean expressions, recompute semantic fingerprints from pretty-printed types, or let
-SQLite storage details leak into audit, ranking, or reporting code.
+- **Lean** computes semantic facts that require the elaborated Lean environment.
+- **Rust** owns everything else: persistence, workflow, retrieval, ranking, reporting,
+  evaluation, release.
 
-## References
+Rust asks Lean semantic questions through a narrow, versioned
+[worker protocol](01-worker-protocol.md). JSON and JSONL are transport encodings, not
+architecture. Rust must not inspect Lean expressions, recompute semantic fingerprints from
+pretty-printed types, or let SQLite layout leak into audit, ranking, or reporting code.
 
-- [End-to-end architecture](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md)
-- [Production readiness](/Users/jcreinhold/Code/lean-dup/docs/architecture/04-production-readiness.md)
-- [Lean-Dup prompt sequence](/Users/jcreinhold/Code/prompts/lean-dup/README.md)
-- [KanProofs mathlib duplicate audit](/Users/jcreinhold/Code/prompts/kanproofs-mathlib-duplicate-audit.md)
-- [KanProofs internal duplicate audit](/Users/jcreinhold/Code/prompts/kanproofs-internal-duplicate-audit.md)
-- [Loogle.lean](https://github.com/nomeata/loogle/blob/master/Loogle.lean)
+### What each side computes
 
-## Problem And Thesis
+| Lean                                                                                        | Rust                                                                |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| declaration identity, kind, visibility, modifiers, source spans                             | workspace discovery, Lake invocation, worker lifecycle              |
+| pretty-printed statement text (display only)                                                | cache keys, cache validation, index labels, index paths             |
+| exact, safe-binder-permutation, connective, and conclusion fingerprints                     | SQLite indexes (local, mathlib, external)                           |
+| role-aware feature keys for constants, heads, binders, conclusions                          | weighted retrieval, broad-key suppression, candidate caps           |
+| binder count, low-signal markers                                                            | source-reference scans, name-token features                         |
+| bounded probe results: same-statement, safe reordering, structural specialization, guarded reducible-definition equality | ranking, blockers, priorities, recommended actions, replacement hints |
+| —                                                                                           | text, JSON, `show`, profile, and baseline diff reports              |
 
-The retired Python tool proved useful capabilities: extract Lean declarations, compare local declarations against local
-and external indexes such as mathlib, and turn confirmed duplication into cleanup hints. It remains a source of lessons
-and regression evidence, but it is no longer an implementation dependency, compatibility target, package surface, or
-cache-layout authority. Prompt 27 removed the Python modules, tests, and packaging after Rust/Lean parity evidence was
-recorded.
+## Why this shape
 
-The production tool remains read-only, local, and deterministic. It does not edit audited workspaces, call network
-services, use embeddings, or run broad proof search. Its job is to produce a high-precision cleanup queue with enough
-evidence for a human or later cleanup prompt to act safely.
+The rejected alternative had Lean emit names and pretty-printed types and let Rust recompute
+fingerprints, statement features, and probe-like checks from strings. It looks convenient because
+Rust owns the CLI and index, but it leaks Lean semantics into the scale layer, turns display text
+into a false abstraction, and reproduces the mistake that hurt the retired Python tool.
 
-Lean owns:
+The chosen design hides Lean expression traversal entirely behind the worker. Rust stores opaque
+ids and keys, never parses Lean syntax, and never calls into a Lean FFI on the default path. A
+measured FFI spike remains optional; it is not the production starting point.
 
-- elaborated declaration facts from the Lean environment;
-- Lean expression traversal and canonicalization;
-- exact, permutation, connective, and conclusion fingerprints;
-- role-aware statement features, including generated/private visibility facts where Lean can supply them;
-- bounded semantic probes such as same-statement, safe binder reordering, structural specialization, and guarded
-  reducible-definition equality.
+## The five layers
 
-Rust owns:
+| Layer                                        | Abstraction                                                                                          |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Lean worker package                          | semantic capabilities: `extract`, `features`, `index`, `probe`, `doctor`, `version`                  |
+| Versioned worker protocol                    | schema-versioned requests, responses, progress events, structured errors                             |
+| Rust CLI engine                              | workspace discovery, module roots, Lake invocation, worker validation, command coordination          |
+| SQLite indexes + cache lifecycle             | persisted truth for local/mathlib/external; reuse, validation, doctor, protected cleanup             |
+| Retrieval, verification, ranking, reporting | candidates, proof-grade evidence, ranked groups, stable explanations, text/JSON/`show`/diff          |
 
-- workspace discovery, Lake orchestration, progress, profiling, and CLI workflow;
-- worker process lifecycle, transport handling, timeout policy, and protocol validation;
-- local, mathlib, and external SQLite indexes;
-- cache-key construction, cache validation, cache diagnostics, and protected cleanup;
-- weighted top-k retrieval without broad mathlib hydration;
-- candidate ranking, review priorities, replacement hints, report rendering, baselines, evaluation, perf workloads, and
-  release engineering.
+Each layer presents a different abstraction; each hides decisions likely to change.
 
-## Design Note
+## Information-hiding boundaries
 
-This overview owns the hidden knowledge that later work must not rediscover: the architectural doctrine, layer
-responsibilities, design red flags, and production-readiness sequence. Its smallest public interface is this charter.
-Detailed current behavior belongs in the end-to-end architecture document and boundary-specific docs.
+Each boundary owns one decision that changes.
 
-These decisions must not leak upward or sideways:
+| Boundary                  | Hides                                                                                              |
+| ------------------------- | -------------------------------------------------------------------------------------------------- |
+| Lean semantics            | expression traversal, binder dependency, universe-sensitive canonicalization, generated-declaration detection, reducibility guards |
+| Worker protocol           | transport encoding, process framing, schema compatibility, stderr policy, progress delivery, error mapping |
+| Index persistence         | SQLite schema, cache-key storage, posting tables, declaration hydration, invalidation              |
+| External provenance       | source-root mapping, execution-root policy, importability, static fallback                         |
+| Retrieval                 | rare-key weighting, broad-key suppression, top-k heap maintenance, origin-aware pairing            |
+| Semantic verification     | probe obligations, budgets, module planning, private/generated filters, cache keys                 |
+| Ranking                   | confidence adjustment, blockers, suppression, review profiles, recommended actions                 |
+| Reporting                 | terminal layout, JSON shaping, `show` expansion, baseline diff presentation                        |
+| Evaluation and performance | suite/workload definitions, manual private-path policy, artifact names, cost-class extraction      |
 
-- Lean `Expr` structure and traversal rules;
-- worker command names and transport framing outside the Rust worker runtime and protocol types;
-- SQLite table names, row IDs, transaction order, bucket tables, or index insertion phases;
-- bucket-cap policy, heap policy, ranking thresholds, and report formatting details.
+A caller asks each boundary for the result it needs. It does not assemble the lower-level steps
+itself.
 
-Validated capabilities to preserve:
+## Design rules
 
-- `doctor`, `index`, `index-mathlib`, `audit`, `eval`, `show`, and `diff` workflows;
-- private/public filtering and optional direct or named import comparison;
-- project-pinned mathlib and other external-index comparison through cached indexes;
+- deep modules over shallow wrappers;
+- information hiding over shared conventions;
+- different layers, different abstractions;
+- somewhat general interfaces, not encodings of one caller's vocabulary;
+- errors and special cases defined out of public interfaces where possible;
+- performance designed around measured workloads, with critical-path simplification hidden.
+
+Red flags to watch for:
+
+- table-name leakage outside the index module;
+- worker-command leakage into retrieval, ranking, or reporting;
+- Rust recomputation of Lean semantic facts from pretty text;
+- temporal decomposition where modules are named after audit phases but share hidden knowledge;
+- special-general mixture where corpus-specific cleanup policy enters general ranking or
+  retrieval;
+- interface comments that describe SQLite layout, Lean traversal algorithms, or migration
+  scaffolding.
+
+The retired Python implementation is documented separately in
+[python-deprecation-map.md](python-deprecation-map.md); other docs do not relitigate it.
+
+## Validated capabilities
+
+These capabilities are preserved across the rewrite; new work must not regress them.
+
+- `doctor`, `index`, `index-mathlib`, `audit`, `eval`, `show`, `diff`;
+- private/public filtering and direct or named import comparison;
+- project-pinned mathlib and other external indexes;
 - source-backed versus static provenance in reports;
 - semantic probes for high-value candidates;
 - ranked actionable findings and review priorities;
 - text and JSON reports with stable explanation facts;
 - progress and profile output that never corrupts JSON;
-- read-only replacement/import hints with target declaration, import status, and bounded caller references;
-- baseline diff, production-gate evaluation, hidden perf workloads, and cache diagnostics.
+- read-only replacement/import hints with target declaration, import status, and bounded caller
+  references;
+- baseline diff, production-gate evaluation, hidden perf workloads, cache diagnostics.
 
-Python-era implementation behavior to discard:
+## Non-goals
 
-- Python-side semantic policy over Lean statements;
-- heuristic scoring leakage across candidate generation, ranking, and reporting;
-- source parsing as a fallback for facts Lean should own;
-- storage-aware audit code;
-- report policy mixed with candidate generation;
-- JSON/string-driven semantics;
-- Python packaging or cache layout as production architecture;
-- pass-through compatibility shells.
+`lean-dup` is not a theorem prover or a semantic search service. The default auditor does not
+perform broad proof search, use embeddings, call network services, or rewrite Lean files. The
+default route is a versioned worker API over subprocess transport. FFI is not used unless a
+future measurement justifies its safety and maintenance cost.
 
-## Design It Twice
+## Architectural commitments
 
-Two plausible designs were considered for the main boundary.
+**Mathlib indexing.** Indexes are built once from a project's pinned dependency, resolved by
+label, reused across compatible projects, invalidated by schema/toolchain/source changes, and
+queried without hydrating all mathlib declarations during ordinary audits.
 
-**Rejected: Rust-first semantic mirror.** Lean would emit declaration names and pretty-printed types, while Rust would
-recompute fingerprints, statement features, and probe-like checks from strings. This appears convenient because Rust
-owns the CLI and index, but it leaks Lean semantics into the scale layer. It turns pretty text into a false abstraction,
-makes binder dependency and definitional equality policy available to the wrong layer, and recreates the old Python
-mistake in a faster language.
+**Report quality.** Default text output is a high-precision cleanup queue. Empty queues explain
+themselves. `show` explains the evidence and blockers for one group. Replacement hints include
+import and caller impact. JSON retains typed evidence for deeper review without depending on
+terminal formatting.
 
-**Chosen: Lean semantic worker plus Rust audit engine.** Lean imports modules, extracts semantic rows, computes opaque
-fingerprints and role-aware features, and answers bounded probe requests. Rust stores and combines those facts through
-typed domain structs and index handles. This design is deeper because Rust has a smaller semantic interface, Lean
-expression traversal is hidden, cache/index choices stay out of Lean, and ordinary audits do not depend on a Lean/Rust
-FFI boundary. FFI remains an optional measured spike, not the production starting point.
+**Read-only by default.** The auditor never edits Lean source. Version output records binary,
+worker, protocol, index schema, report schema, and Git revision; that record makes any audit
+result reproducible.
 
-## Public Architecture
+## References
 
-The public architecture has five layers, each with a different abstraction.
-
-1. **Lean worker package.** The worker exposes `extract`, `features`, `index`, `probe`, `doctor`, and `version`. These
-   are semantic capabilities, not storage phases. The worker may report structured progress and diagnostics, but callers
-   must not depend on Lean internal names, expression constructors, or traversal algorithms.
-
-1. **Versioned worker protocol.** The protocol carries schema-versioned requests, responses, progress events, and
-   structured errors. Declaration rows, feature rows, and probe results are caller-facing facts. Lean types and Rust
-   domain structs are the semantic model; JSON and JSONL are transport encodings private to the worker runtime. Cache
-   layout, SQLite tables, and report formatting are not protocol facts.
-
-1. **Rust CLI engine.** Rust discovers workspaces, resolves module roots, invokes Lake, locates and validates the
-   worker, tracks progress/profile events, and coordinates audit, eval, perf, and diagnostic workflows. Command-line
-   parsing must not leak into workspace discovery, Lake orchestration, indexing, ranking, or rendering modules.
-
-1. **SQLite indexes and cache lifecycle.** The index layer is the persisted source of truth for local, mathlib, and
-   external indexes. It exposes operations such as "build or reuse this index", "query postings for these semantic
-   keys", and "hydrate these declaration handles". Cache lifecycle code exposes health and cleanup policy through
-   `doctor` and hidden cleanup, not through table-level APIs.
-
-1. **Retrieval, verification, ranking, and reporting.** Retrieval returns bounded candidate sets. Semantic verification
-   adds proof-grade evidence only for source-backed importable comparisons. Ranking consumes candidates, probe results,
-   source-reference facts, and review profiles to produce signals, blockers, priorities, actions, and replacement
-   hints. Renderers consume a stable report contract to produce text, JSON, `show`, and baseline diff output.
-
-## Information-Hiding Boundaries
-
-The rewrite is organized around decisions that are likely to change.
-
-- **Lean expression semantics.** Lean hides expression traversal, binder dependency, universe-sensitive
-  canonicalization, generated declaration detection, and reducibility guards.
-- **Worker protocol.** The protocol hides transport encoding, process framing, schema compatibility, stderr policy,
-  progress delivery, structured error mapping, and worker-version validation from audit logic.
-- **Index persistence.** The index layer hides SQLite schema, cache-key storage, posting tables, declaration hydration,
-  and cache invalidation mechanics.
-- **External provenance.** Provenance hides source-root mapping, execution-root policy, importability, and static
-  fallback behavior from ranking and reporting.
-- **Retrieval strategy.** Retrieval hides rare-key weighting, broad-key suppression, top-k heap maintenance, pruning
-  diagnostics, and origin-aware pairing.
-- **Semantic verification.** Verification hides probe obligations, budgets, module planning, private/generated filters,
-  cache keys, and unavailable classification.
-- **Ranking policy.** Ranking hides confidence adjustment, blockers, suppression of weaker groups, review profiles, and
-  recommended action selection.
-- **Report rendering.** Rendering hides terminal layout, JSON shaping, `show` detail expansion, and baseline diff
-  presentation behind typed explanation facts.
-- **Evaluation and performance.** Eval/perf hide suite/workload definitions, manual private-path policy, artifact names,
-  and cost-class extraction.
-
-Each boundary should have a capability-oriented interface. A caller should ask for the result it needs, not assemble the
-lower-level steps itself.
-
-## POSD Doctrine And Red Flags
-
-This project follows these POSD rules as operational constraints:
-
-- deep modules over shallow wrappers;
-- information hiding over shared conventions;
-- different layers with different abstractions;
-- somewhat general interfaces that serve current workflows without encoding one caller's vocabulary;
-- errors and special cases defined out of public interfaces where possible;
-- performance designed around measured workloads and hidden critical-path simplification.
-
-Later work must enforce these red flags:
-
-- no table-name leakage outside the index module;
-- no worker-command leakage into retrieval, ranking, or reporting;
-- no Rust recomputation of Lean semantic facts from pretty text;
-- no Python-era pass-through facade modules;
-- no temporal decomposition where modules are named after audit phases but share the same hidden knowledge;
-- no special-general mixture where KanProofs-specific cleanup policy enters general ranking or retrieval;
-- no interface comments that describe SQLite layout, Lean traversal algorithms, or temporary migration details.
-
-If a red flag is temporarily unavoidable, the implementing prompt must name it, explain why it is temporary, and name
-the later prompt that removes it.
-
-## Non-Goals
-
-`lean-dup` is not a theorem prover or semantic search service. The default auditor does not perform broad proof search,
-use embeddings, call network services, or depend on remote APIs. It does not rewrite Lean files. It does not use
-Lean/Rust FFI as the primary route. The production path is a versioned worker API over subprocess transport unless a
-future measured report proves that an FFI migration is worth the safety and maintenance cost.
-
-## Production-Readiness Prompt Map
-
-Prompts 20 through 30 are the active production-readiness sequence. Prompt 19 remains skipped unless measurements show
-startup or transport framing is still dominant after ordinary batching, caching, and Rust/Lean optimization.
-
-| Prompt | Responsibility | Current state |
-| --- | --- | --- |
-| 20 | Define production readiness gates. | Complete. |
-| 21 | Add regression corpus and production-gate quality suites. | Complete, but current KanProofs quality gates fail. |
-| 22 | Define source-backed/static external comparison provenance. | Implemented. |
-| 23 | Improve semantic probe availability and evidence yield. | Implemented, needs more real-workload yield validation. |
-| 24 | Implement cache validity, reuse, doctor, and cleanup lifecycle. | Implemented. |
-| 25 | Profile and improve full-audit throughput. | Implemented, with remaining mathlib throughput work. |
-| 26 | Define report UX, explanations, and JSON contract. | Implemented. |
-| 27 | Retire Python implementation safely. | Complete. |
-| 28 | Harden CI, packaging, versioning, and release docs. | Pending. |
-| 29 | Validate real workloads and inspect visible findings. | Pending. |
-| 30 | Decide final production/go-no-go. | Pending. |
-
-## Success Criteria
-
-Mathlib indexing succeeds when a mathlib index can be built once from a project's pinned dependency, resolved by label,
-reused across compatible projects, invalidated by schema/toolchain/source changes, and queried without hydrating all
-mathlib declarations during ordinary local audits.
-
-KanProofs auditing succeeds when full internal audits and targeted or full mathlib-comparison audits complete with
-profile/progress data, regression validation preserves known inspected cleanup findings, and broad-head or generated
-noise stays out of the default queue.
-
-Report quality succeeds when default text output is a high-precision cleanup queue, empty queues explain themselves,
-`show` explains the evidence and blockers for one group, replacement hints include import and caller impact, and JSON
-retains enough typed evidence for deeper review without depending on terminal formatting.
-
-Release readiness succeeds when CI covers the Rust engine, Lean worker, schema compatibility, fixture audits, and
-default report behavior; version output records the binary, worker, protocol, index schema, report schema, and Git
-revision; docs explain common workflows and architecture boundaries; and the auditor remains read-only by default.
-
-## Red Flag Review
-
-- **Shallow module:** avoided by making this document a boundary charter rather than a file-by-file wrapper list.
-- **Pass-through wrapper:** avoided by requiring capability-oriented Lean, worker, index, retrieval, verification,
-  ranking, and rendering interfaces.
-- **Temporal decomposition:** avoided by organizing around hidden decisions, not audit execution order.
-- **Information leakage:** explicitly guarded at Lean semantics, worker protocol, SQLite, retrieval, verification,
-  ranking, reporting, eval, and perf boundaries.
-- **Special-general mixture:** avoided by keeping Lean semantic facts and core ranking general while KanProofs-specific
-  expectations live in fixtures, reports, manual suites, or review profiles.
-- **Conjoined methods:** avoided by requiring typed outputs between subsystems rather than shared mutable phase state.
-- **Hard-to-describe public API:** kept small at this level; boundary-specific docs own detailed contracts.
-- **Implementation details contaminating interface comments:** avoided by stating what callers may rely on, not how
-  tables, caches, Lean traversals, or historical migration scaffolding work.
+- [End-to-end architecture](06-end-to-end-architecture.md)
+- [Production readiness](04-production-readiness.md)
+- [Loogle.lean](https://github.com/nomeata/loogle/blob/master/Loogle.lean)
