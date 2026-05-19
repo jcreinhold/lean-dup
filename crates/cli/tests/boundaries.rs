@@ -108,7 +108,7 @@ fn dependency_direction_keeps_lower_crates_out_of_report_and_cli() {
                 .filter(|dependency| dependency.starts_with("lean-dup-"))
             {
                 assert!(
-                    forbidden == "lean-dup-embedding",
+                    forbidden == "lean-dup-embedding" || forbidden == "lean-dup-diagnostics",
                     "embedding must not depend on {forbidden}"
                 );
             }
@@ -131,18 +131,23 @@ fn embedding_acquisition_dependency_stays_inside_embedding_crate() {
             !has_hf_hub || name == "lean-dup-embedding",
             "{name} must not depend on hf-hub"
         );
-        for forbidden in [
+        for runtime_dependency in [
             "tokenizers",
             "candle-core",
             "candle-nn",
             "candle-transformers",
             "safetensors",
-            "fastembed",
-            "ort",
         ] {
+            let has_runtime_dependency = dependencies.iter().any(|dependency| dependency == runtime_dependency);
+            assert!(
+                !has_runtime_dependency || name == "lean-dup-embedding",
+                "{name} must not depend on embedding runtime dependency {runtime_dependency}"
+            );
+        }
+        for forbidden in ["fastembed", "ort", "accelerate-src", "intel-mkl-src", "cudarc"] {
             assert!(
                 !dependencies.iter().any(|dependency| dependency == forbidden),
-                "{name} must not depend on embedding runtime dependency {forbidden} before Prompt 35C"
+                "{name} must not depend on forbidden embedding runtime dependency {forbidden}"
             );
         }
     }

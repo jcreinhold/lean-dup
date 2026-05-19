@@ -8,6 +8,10 @@
 //! vector-cache storage.
 
 mod error;
+mod model_cache;
+mod pooling;
+mod runtime;
+mod vector_cache;
 
 pub use error::{Error, Result};
 use std::path::PathBuf;
@@ -182,6 +186,8 @@ pub struct TextEmbeddingBatchRequest {
     pub model: EmbeddingModelSpec,
     pub input_policy: EmbeddingInputPolicy,
     pub inputs: Vec<TextEmbeddingInput>,
+    pub model_cache_root: Option<PathBuf>,
+    pub vector_cache_root: Option<PathBuf>,
 }
 
 /// A normalized embedding vector for one input.
@@ -201,6 +207,7 @@ pub struct EmbeddingRuntimeCounters {
     pub cache_hits: u64,
     pub cache_misses: u64,
     pub batch_count: u64,
+    pub peak_rss_bytes: Option<u64>,
 }
 
 /// Batch embedding result visible to eval artifacts.
@@ -214,13 +221,14 @@ pub struct TextEmbeddingBatchResult {
     pub vectors: Vec<EmbeddingVector>,
 }
 
-/// Embed declaration-summary strings locally.
+/// Embed declaration-summary strings locally using a prepared CPU model.
 ///
-/// Prompt 35A defines the API boundary only. Prompt 35B will add explicit model
-/// preparation, and Prompt 35C will replace this unsupported result with a CPU
-/// runtime implementation.
-pub fn embed_text_batch(_request: TextEmbeddingBatchRequest) -> Result<TextEmbeddingBatchResult> {
-    Err(Error::UnsupportedUntilRuntimePrompt)
+/// This operation is cache-only: it validates model files prepared by
+/// `prepare_embedding_model` and never downloads. Callers receive normalized
+/// vectors and stable runtime counters without learning tokenizer, tensor,
+/// pooling, or vector-cache layout.
+pub fn embed_text_batch(request: TextEmbeddingBatchRequest) -> Result<TextEmbeddingBatchResult> {
+    runtime::embed_text_batch(request)
 }
 
 /// Validate or prepare an embedding model in the local Hugging Face cache.
@@ -333,12 +341,12 @@ pub fn prepare_embedding_model(request: EmbeddingPrepareRequest) -> Result<Embed
 }
 
 #[derive(Debug, Clone, Copy)]
-struct RequiredModelFile {
-    role: EmbeddingModelFileRole,
-    filename: &'static str,
+pub(crate) struct RequiredModelFile {
+    pub(crate) role: EmbeddingModelFileRole,
+    pub(crate) filename: &'static str,
 }
 
-fn required_model_files() -> &'static [RequiredModelFile] {
+pub(crate) fn required_model_files() -> &'static [RequiredModelFile] {
     &[
         RequiredModelFile {
             role: EmbeddingModelFileRole::Config,
@@ -368,7 +376,7 @@ fn required_model_files() -> &'static [RequiredModelFile] {
 }
 
 impl EmbeddingModelFileRole {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Config => "config",
             Self::Tokenizer => "tokenizer",
@@ -395,7 +403,7 @@ fn validate_prepare_request(request: &EmbeddingPrepareRequest) -> Result<()> {
     Ok(())
 }
 
-fn resolve_hf_cache_root(explicit: Option<PathBuf>) -> PathBuf {
+pub(crate) fn resolve_hf_cache_root(explicit: Option<PathBuf>) -> PathBuf {
     if let Some(path) = explicit {
         return path;
     }
@@ -408,7 +416,7 @@ fn resolve_hf_cache_root(explicit: Option<PathBuf>) -> PathBuf {
     Cache::from_env().path().clone()
 }
 
-fn model_repo(model: &EmbeddingModelSpec) -> Repo {
+pub(crate) fn model_repo(model: &EmbeddingModelSpec) -> Repo {
     match &model.revision {
         Some(revision) => Repo::with_revision(model.id.clone(), RepoType::Model, revision.clone()),
         None => Repo::new(model.id.clone(), RepoType::Model),
@@ -474,7 +482,8 @@ mod tests {
     }
 
     #[test]
-    fn runtime_is_explicitly_unsupported_until_prompt_35c() {
+    fn runtime_is_cache_only_and_requires_prepared_model() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::TempDir::new()?;
         let request = TextEmbeddingBatchRequest {
             model: EmbeddingModelSpec::default_experiment_model(),
             input_policy: EmbeddingInputPolicy::default(),
@@ -482,11 +491,11 @@ mod tests {
                 id: "Tiny.same_left".to_owned(),
                 text: "name: Tiny.same_left".to_owned(),
             }],
+            model_cache_root: Some(temp.path().to_path_buf()),
+            vector_cache_root: Some(temp.path().join("vectors")),
         };
-        assert!(matches!(
-            embed_text_batch(request),
-            Err(Error::UnsupportedUntilRuntimePrompt)
-        ));
+        assert!(matches!(embed_text_batch(request), Err(Error::ModelNotPrepared { .. })));
+        Ok(())
     }
 
     #[test]

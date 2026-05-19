@@ -1,9 +1,10 @@
 # Embedding Architecture
 
 This document records the architecture boundary for embedding experiments. Prompt 35A
-added the `lean-dup-embedding` crate skeleton and workspace boundary. Prompt 35B adds
-explicit model acquisition and cache validation. Tokenizer loading, Candle inference,
-vector cache, search integration, and eval artifact mode remain later work.
+added the `lean-dup-embedding` crate skeleton and workspace boundary. Prompt 35B added
+explicit model acquisition and cache validation. Prompt 35C adds local CPU inference
+and vector caching inside `lean-dup-embedding`. Search integration and eval artifact
+mode remain later work.
 
 For the current pipeline, see [end-to-end-architecture.md](../end-to-end-architecture.md).
 For crate boundaries, see [crate-factoring.md](../crate-factoring.md).
@@ -64,6 +65,15 @@ declaration-summary inputs and `lean-dup-eval` owns labels, experiment lifecycle
 artifact comparison. This design is deeper because callers learn a small text-embedding
 capability instead of Hugging Face, tokenizer, Candle, or cache internals.
 
+For the CPU runtime boundary, two designs were considered. A high-level wrapper around a
+generic embedding library would be easy to call, but it would hide tokenizer, pooling,
+normalization, and cache decisions before `lean-dup` can measure whether they are right
+for Lean declaration summaries. The chosen design is a dedicated runtime boundary inside
+`lean-dup-embedding`: callers still see only `embed_text_batch`, while the crate keeps
+tokenizer loading, BERT/MiniLM execution, attention-mask mean pooling, L2 normalization,
+batching, and vector-cache layout private. This is deeper because the public interface
+does not grow with each runtime mechanism.
+
 ## Crate Contract
 
 The crate is `lean-dup-embedding` at `crates/embedding`.
@@ -96,6 +106,14 @@ Public facts:
 - runtime counters for load, tokenization, inference, cache hits/misses, and batch count;
 - typed errors that callers can report without knowing model-file or tensor details.
 
+Runtime public interface:
+
+- `TextEmbeddingBatchRequest` names the model, the input-policy facts, declaration-summary
+  texts, and optional model/vector cache roots for tests or hidden experiments;
+- `embed_text_batch` validates that the model is already prepared and never downloads;
+- `TextEmbeddingBatchResult` returns model/cache summaries, vector dimension, runtime
+  counters, and normalized vectors in input order.
+
 Private decisions:
 
 - Hugging Face cache directory layout and file resolution;
@@ -105,6 +123,18 @@ Private decisions:
 - vector cache key ingredients and on-disk format;
 - download retry, cache-only, and download-if-missing mechanics;
 - model-specific compatibility shims.
+
+Prompt 35C runtime policy:
+
+- model loading is CPU-only through `tokenizers`, Candle, and `safetensors`;
+- only BERT-family sentence-transformer configs are accepted in this pass;
+- pooling follows the model's sentence-transformers pooling config and currently accepts
+  attention-mask mean pooling;
+- vectors are L2-normalized before they cross the crate boundary;
+- vector cache keys combine model fingerprint, embedding input-policy version, and a hash
+  of the declaration-summary string;
+- cache filenames, tensor shapes, token ids, raw tokenizer errors, and model-file paths
+  stay private.
 
 Prompt 35B required roles for the first model family are stable at the public boundary:
 `config`, `tokenizer`, `tokenizer-config`, `special-tokens`, `pooling-config`, and
@@ -160,6 +190,26 @@ Prompt 35B adds explicit model acquisition and validation through `hf-hub`, plus
 CLI preparation. It does not add tokenizer loading, Candle inference, vector caching,
 search integration, eval artifact writing, or default audit behavior.
 
+Prompt 35C replaces the unsupported batch-embedding path with a cache-only CPU runtime.
+It does not add search integration, eval artifact writing, user-facing ranking changes,
+or default audit behavior.
+
+## CPU Evidence
+
+Implementation evidence is intentionally modest in Prompt 35C. Unit tests cover fake
+deterministic vectors, pooling, vector-cache keys, cache hits/misses, missing prepared
+model handling, and boundary rules. A real-model smoke test is available but ignored by
+default; prepare the model first with:
+
+```sh
+cargo run -p lean-dup-cli -- embedding prepare --policy download-if-missing
+cargo test -p lean-dup-embedding -- --ignored prepared_default_model_produces_normalized_vectors_or_clean_skip
+```
+
+The smoke test checks the default model's 384-dimensional normalized output when local
+files are prepared, and skips cleanly when they are not. Prompt 35D will measure embedding
+rerank quality and artifact behavior over eval suites.
+
 ## Red Flag Review
 
 - Shallow module: mitigated at the design level. The future public surface is a text
@@ -168,16 +218,17 @@ search integration, eval artifact writing, or default audit behavior.
 - Pass-through wrapper: mitigated. The crate is not a facade over Hugging Face or
   Candle APIs; it hides model acquisition, local inference, pooling, normalization, and
   cache policy behind lean-dup-specific facts.
-- Temporal decomposition: partially mitigated. Callers run one prepare capability instead
-  of "check cache, download files, validate files" themselves. Prompt 35C will fold
-  tokenize/infer/pool/normalize/cache into the same crate boundary.
+- Temporal decomposition: mitigated. Callers run one prepare capability for acquisition
+  and one batch-embedding capability for runtime; they do not sequence tokenizer loading,
+  model loading, inference, pooling, normalization, or cache writes themselves.
 - Information leakage: mitigated by contract. Tokenizer files, tensor layout, model cache
   layout, and vector cache format are private decisions.
 - Special-general mixture: mitigated. `lean-dup-embedding` lives in the `lean-dup`
   workspace because `lean-dup` is the only current caller; extraction waits for a real
   second product caller.
-- Conjoined methods: residual risk deferred. Search summary construction, embedding
-  runtime, and eval artifact comparison must remain separate in prompts 35B-35D.
+- Conjoined methods: residual risk deferred. Search summary construction and eval
+  artifact comparison remain outside the embedding runtime and are still enforced by
+  later prompt boundaries.
 - Hard-to-describe public API: mitigated. The public story is local text embedding for
   declaration summaries plus stable model/cache/runtime facts.
 - Implementation details contaminating interface comments: mitigated. This document names
