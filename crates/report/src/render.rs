@@ -27,6 +27,10 @@ fn render_embedding_prepare(report: &EmbeddingPrepareReportDto) -> String {
         format!("status: {}", report.status),
         format!("model: {}", report.model_id),
         format!("revision: {}", report.revision.as_deref().unwrap_or("default")),
+        format!("profile: {}", report.profile_id),
+        format!("backend: {}", report.backend_family),
+        format!("dimension: {}", report.dimension),
+        format!("input roles: {}", report.input_roles.join(",")),
         format!("policy: {}", report.acquisition_policy),
         format!("cache status: {}", report.cache_status),
         format!(

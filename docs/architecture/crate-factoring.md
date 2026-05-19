@@ -42,10 +42,11 @@ Each crate root is the supported public facade. Submodules and internals stay pr
   keys, ranking constants, probe obligations, source-scan policy, and replacement-hint internals
   stay private.
 - **`lean-dup-embedding`** — `EmbeddingModelSpec`, `EmbeddingAcquisitionPolicy`,
-  `EmbeddingPrepareRequest`, `EmbeddingPrepareResult`, `prepare_embedding_model`, and future
-  batch text embedding request/result DTOs. Hugging Face cache layout, model filenames, tokenizer
-  internals, tensor layout, pooling, normalization, vector-cache format, and download mechanics
-  stay private. Normal audit/eval paths do not depend on this crate.
+  `EmbeddingPrepareRequest`, `EmbeddingPrepareResult`, `prepare_embedding_model`, and batch text
+  embedding request/result DTOs. Model profiles, FastEmbed/Candle backend selection, Hugging Face
+  cache layout, model filenames, tokenizer internals, tensor layout, pooling, normalization,
+  vector-cache format, and download mechanics stay private. Normal audit/eval paths do not depend
+  on this crate.
 - **`lean-dup-report`** — report DTOs, projection functions, explanation facts, `render_text`.
 - **`lean-dup-eval`** — `EvalSuite`, `EvalRequest`, `EvalOutput`, stage metrics, quality
   denominators. Text rendering belongs to report; runtime/memory measurement belongs to

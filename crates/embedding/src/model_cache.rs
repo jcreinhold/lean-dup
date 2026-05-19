@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     EmbeddingCacheStatus, EmbeddingCacheSummary, EmbeddingModelFileRole, EmbeddingModelSpec, EmbeddingModelSummary,
-    Error, Result, required_model_files, resolve_hf_cache_root,
+    Error, Result, profiles::ModelProfile, resolve_hf_cache_root,
 };
 
 pub(crate) struct PreparedModel {
@@ -22,7 +22,11 @@ pub(crate) struct PreparedModelFiles {
     pub(crate) weights: PathBuf,
 }
 
-pub(crate) fn resolve_prepared_model(model: EmbeddingModelSpec, cache_root: Option<PathBuf>) -> Result<PreparedModel> {
+pub(crate) fn resolve_prepared_model(
+    model: EmbeddingModelSpec,
+    profile: ModelProfile,
+    cache_root: Option<PathBuf>,
+) -> Result<PreparedModel> {
     let cache_root = resolve_hf_cache_root(cache_root);
     let cache = Cache::new(cache_root.clone());
     let cache_repo = cache.repo(crate::model_repo(&model));
@@ -33,7 +37,7 @@ pub(crate) fn resolve_prepared_model(model: EmbeddingModelSpec, cache_root: Opti
     let mut weights = None;
     let mut fingerprint_inputs = Vec::new();
 
-    for required in required_model_files() {
+    for required in profile.required_files() {
         let path = cache_repo
             .get(required.filename)
             .ok_or_else(|| Error::ModelNotPrepared {
@@ -45,17 +49,15 @@ pub(crate) fn resolve_prepared_model(model: EmbeddingModelSpec, cache_root: Opti
             EmbeddingModelFileRole::Tokenizer => tokenizer = Some(path),
             EmbeddingModelFileRole::PoolingConfig => pooling_config = Some(path),
             EmbeddingModelFileRole::Weights => weights = Some(path),
-            EmbeddingModelFileRole::TokenizerConfig | EmbeddingModelFileRole::SpecialTokens => {}
+            EmbeddingModelFileRole::TokenizerConfig
+            | EmbeddingModelFileRole::SpecialTokens
+            | EmbeddingModelFileRole::RuntimeModel => {}
         }
     }
 
     let fingerprint = fingerprint_files(&mut fingerprint_inputs)?;
     Ok(PreparedModel {
-        summary: EmbeddingModelSummary {
-            id: model.id.clone(),
-            revision: model.revision.clone(),
-            fingerprint: Some(fingerprint),
-        },
+        summary: profile.summary(&model, Some(fingerprint)),
         cache: EmbeddingCacheSummary {
             status: EmbeddingCacheStatus::Prepared,
             model,

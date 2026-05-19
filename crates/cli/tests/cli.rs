@@ -66,10 +66,14 @@ fn hidden_embedding_prepare_cache_only_reports_not_prepared() {
     let payload: Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(payload["command"], "embedding-prepare");
     assert_eq!(payload["status"], "warning");
-    assert_eq!(payload["model_id"], "sentence-transformers/all-MiniLM-L6-v2");
+    assert_eq!(payload["model_id"], "BAAI/bge-small-en-v1.5");
+    assert_eq!(payload["profile_id"], "bge-small-en-v1.5");
+    assert_eq!(payload["backend_family"], "fastembed");
     assert_eq!(payload["acquisition_policy"], "cache-only");
     assert_eq!(payload["cache_status"], "not-prepared");
-    assert!(payload["required_files"].as_array().unwrap().len() >= 6);
+    let required_files = payload["required_files"].as_array().unwrap();
+    assert!(required_files.iter().any(|file| file["role"] == "runtime-model"));
+    assert!(required_files.iter().any(|file| file["role"] == "tokenizer"));
     assert!(!stdout.contains("snapshots"));
     assert!(!stdout.contains("blobs"));
 }

@@ -9,6 +9,7 @@ use tokenizers::{Tokenizer, utils::truncation::TruncationDirection};
 
 use crate::model_cache::resolve_prepared_model;
 use crate::pooling::{mean_pool_and_normalize, normalize};
+use crate::profiles::ModelProfile;
 use crate::vector_cache::VectorCache;
 use crate::{
     EmbeddingRuntimeCounters, EmbeddingVector, Error, Result, TextEmbeddingBatchRequest, TextEmbeddingBatchResult,
@@ -16,8 +17,11 @@ use crate::{
 
 const DEFAULT_BATCH_SIZE: usize = 16;
 
-pub(crate) fn embed_text_batch(request: TextEmbeddingBatchRequest) -> Result<TextEmbeddingBatchResult> {
-    let prepared = resolve_prepared_model(request.model, request.model_cache_root)?;
+pub(crate) fn embed_text_batch(
+    request: TextEmbeddingBatchRequest,
+    profile: ModelProfile,
+) -> Result<TextEmbeddingBatchResult> {
+    let prepared = resolve_prepared_model(request.model, profile, request.model_cache_root)?;
     let model_fingerprint = prepared.summary.fingerprint.clone().ok_or_else(|| Error::Runtime {
         reason: "prepared model has no fingerprint".to_owned(),
     })?;
@@ -276,7 +280,7 @@ mod tests {
             source,
         })?;
         let request = TextEmbeddingBatchRequest {
-            model: crate::EmbeddingModelSpec::default_experiment_model(),
+            model: legacy_minilm_model(),
             input_policy: EmbeddingInputPolicy::default(),
             inputs: vec![TextEmbeddingInput {
                 id: "Tiny.same_left".to_owned(),
@@ -285,15 +289,19 @@ mod tests {
             model_cache_root: Some(temp.path().to_path_buf()),
             vector_cache_root: Some(temp.path().join("vectors")),
         };
-        assert!(matches!(embed_text_batch(request), Err(Error::ModelNotPrepared { .. })));
+        let profile = crate::profiles::resolve_profile(&request.model)?;
+        assert!(matches!(
+            embed_text_batch(request, profile),
+            Err(Error::ModelNotPrepared { .. })
+        ));
         Ok(())
     }
 
     #[test]
-    #[ignore = "requires `cargo run -p lean-dup-cli -- embedding prepare --policy download-if-missing` first"]
-    fn prepared_default_model_produces_normalized_vectors_or_clean_skip() -> Result<()> {
+    #[ignore = "requires `cargo run -p lean-dup-cli -- embedding prepare --policy download-if-missing --model-id sentence-transformers/all-MiniLM-L6-v2` first"]
+    fn prepared_legacy_minilm_model_produces_normalized_vectors_or_clean_skip() -> Result<()> {
         let request = TextEmbeddingBatchRequest {
-            model: crate::EmbeddingModelSpec::default_experiment_model(),
+            model: legacy_minilm_model(),
             input_policy: EmbeddingInputPolicy::default(),
             inputs: vec![TextEmbeddingInput {
                 id: "smoke".to_owned(),
@@ -302,7 +310,8 @@ mod tests {
             model_cache_root: None,
             vector_cache_root: Some(std::path::PathBuf::from("target/embedding-smoke/vectors")),
         };
-        match embed_text_batch(request) {
+        let profile = crate::profiles::resolve_profile(&request.model)?;
+        match embed_text_batch(request, profile) {
             Ok(result) => {
                 assert_eq!(result.vector_dimension, 384);
                 let vector = result.vectors.first().ok_or_else(|| Error::InvalidVector {
@@ -313,6 +322,13 @@ mod tests {
             }
             Err(Error::ModelNotPrepared { .. }) => Ok(()),
             Err(error) => Err(error),
+        }
+    }
+
+    fn legacy_minilm_model() -> crate::EmbeddingModelSpec {
+        crate::EmbeddingModelSpec {
+            id: "sentence-transformers/all-MiniLM-L6-v2".to_owned(),
+            revision: None,
         }
     }
 }

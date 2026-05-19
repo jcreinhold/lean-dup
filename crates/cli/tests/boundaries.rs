@@ -131,6 +131,11 @@ fn embedding_acquisition_dependency_stays_inside_embedding_crate() {
             !has_hf_hub || name == "lean-dup-embedding",
             "{name} must not depend on hf-hub"
         );
+        let has_fastembed = dependencies.iter().any(|dependency| dependency == "fastembed");
+        assert!(
+            !has_fastembed || name == "lean-dup-embedding",
+            "{name} must not depend on fastembed"
+        );
         for runtime_dependency in [
             "tokenizers",
             "candle-core",
@@ -144,7 +149,7 @@ fn embedding_acquisition_dependency_stays_inside_embedding_crate() {
                 "{name} must not depend on embedding runtime dependency {runtime_dependency}"
             );
         }
-        for forbidden in ["fastembed", "ort", "accelerate-src", "intel-mkl-src", "cudarc"] {
+        for forbidden in ["ort", "accelerate-src", "intel-mkl-src", "cudarc"] {
             assert!(
                 !dependencies.iter().any(|dependency| dependency == forbidden),
                 "{name} must not depend on forbidden embedding runtime dependency {forbidden}"
@@ -319,6 +324,21 @@ fn old_file_shaped_modules_are_not_public_api() {
                 !contents.contains("lean_dup_embedding::"),
                 "{display} imports lean_dup_embedding outside hidden CLI prepare or eval rerank experiment boundaries"
             );
+        }
+        if !path.starts_with(root.join("crates/embedding")) {
+            for forbidden in [
+                "fastembed::",
+                "candle_core::",
+                "candle_nn::",
+                "candle_transformers::",
+                "tokenizers::",
+                "safetensors::",
+            ] {
+                assert!(
+                    !contents.contains(forbidden),
+                    "{display} imports embedding runtime internals: {forbidden}"
+                );
+            }
         }
     }
 }

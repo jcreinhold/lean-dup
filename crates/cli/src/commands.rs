@@ -335,6 +335,10 @@ fn embedding_prepare_report(result: EmbeddingPrepareResult) -> EmbeddingPrepareR
         },
         model_id: result.model.id,
         revision: result.model.revision,
+        profile_id: result.model.profile_id,
+        backend_family: result.model.backend_family,
+        dimension: result.model.dimension,
+        input_roles: result.model.input_roles,
         acquisition_policy: acquisition_policy_name(result.acquisition_policy).to_owned(),
         cache_status: cache_status_name(result.cache.status).to_owned(),
         cache_root: result.cache.cache_label.map(PathBuf::from),
@@ -378,6 +382,7 @@ fn file_role_name(role: EmbeddingModelFileRole) -> &'static str {
         EmbeddingModelFileRole::SpecialTokens => "special-tokens",
         EmbeddingModelFileRole::PoolingConfig => "pooling-config",
         EmbeddingModelFileRole::Weights => "weights",
+        EmbeddingModelFileRole::RuntimeModel => "runtime-model",
     }
 }
 

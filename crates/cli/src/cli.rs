@@ -192,11 +192,7 @@ pub struct EvalArgs {
     #[arg(long = "embedding-acquisition", hide = true, value_enum, default_value_t = CliEmbeddingAcquisitionPolicy::CacheOnly)]
     pub embedding_acquisition: CliEmbeddingAcquisitionPolicy,
 
-    #[arg(
-        long = "embedding-model-id",
-        hide = true,
-        default_value = "sentence-transformers/all-MiniLM-L6-v2"
-    )]
+    #[arg(long = "embedding-model-id", hide = true, default_value = "BAAI/bge-small-en-v1.5")]
     pub embedding_model_id: String,
 
     #[arg(long = "embedding-revision", hide = true)]
@@ -228,7 +224,7 @@ pub struct EmbeddingPrepareArgs {
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
     pub format: OutputFormat,
 
-    #[arg(long = "model-id", default_value = "sentence-transformers/all-MiniLM-L6-v2")]
+    #[arg(long = "model-id", default_value = "BAAI/bge-small-en-v1.5")]
     pub model_id: String,
 
     #[arg(long)]

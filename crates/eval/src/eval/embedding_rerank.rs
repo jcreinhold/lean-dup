@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use lean_dup_embedding::{
-    EmbeddingAcquisitionPolicy, EmbeddingCacheStatus, EmbeddingInputPolicy, EmbeddingModelSpec,
+    EmbeddingAcquisitionPolicy, EmbeddingCacheStatus, EmbeddingInputPolicy, EmbeddingModelSpec, EmbeddingModelSummary,
     EmbeddingPrepareRequest, EmbeddingRuntimeCounters, TextEmbeddingBatchRequest, TextEmbeddingInput, embed_text_batch,
     prepare_embedding_model,
 };
@@ -89,6 +89,14 @@ pub(crate) struct EmbeddingRerankModelReport {
     pub revision: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fingerprint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dimension: Option<usize>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub input_roles: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -166,6 +174,7 @@ pub(crate) fn run(run: EmbeddingRerankRun<'_>) -> Result<EmbeddingRerankArtifact
                 Some(stable_error_reason(&error)),
                 EmbeddingCacheStatus::Skipped,
                 Vec::new(),
+                None,
             );
             let artifact = write_default_artifact(run.repo_root, &report)?;
             return Ok(EmbeddingRerankArtifactOutcome {
@@ -184,6 +193,7 @@ pub(crate) fn run(run: EmbeddingRerankRun<'_>) -> Result<EmbeddingRerankArtifact
             Some(skip_reason(cache_status.clone())),
             cache_status,
             Vec::new(),
+            Some(model_report_from_summary(prepare_result.model)),
         );
         let artifact = write_default_artifact(run.repo_root, &report)?;
         return Ok(EmbeddingRerankArtifactOutcome {
@@ -217,6 +227,7 @@ pub(crate) fn run(run: EmbeddingRerankRun<'_>) -> Result<EmbeddingRerankArtifact
                 Some(stable_error_reason(&error)),
                 EmbeddingCacheStatus::Prepared,
                 Vec::new(),
+                None,
             );
             let artifact = write_default_artifact(run.repo_root, &report)?;
             return Ok(EmbeddingRerankArtifactOutcome {
@@ -245,11 +256,7 @@ pub(crate) fn run(run: EmbeddingRerankRun<'_>) -> Result<EmbeddingRerankArtifact
         suite: run.suite.to_owned(),
         status: "ok".to_owned(),
         reason: None,
-        model: EmbeddingRerankModelReport {
-            id: embedding_result.model.id,
-            revision: embedding_result.model.revision,
-            fingerprint: embedding_result.model.fingerprint,
-        },
+        model: model_report_from_summary(embedding_result.model),
         cache: EmbeddingRerankCacheReport {
             status: embedding_result.cache.status,
         },
@@ -301,6 +308,10 @@ pub(crate) fn aggregate(
             id: request.model.id.clone(),
             revision: request.model.revision.clone(),
             fingerprint: None,
+            profile_id: None,
+            backend_family: None,
+            dimension: None,
+            input_roles: Vec::new(),
         },
         cache: EmbeddingRerankCacheReport {
             status: EmbeddingCacheStatus::Skipped,
@@ -343,17 +354,22 @@ fn skipped_or_failed_report(
     reason: Option<String>,
     cache_status: EmbeddingCacheStatus,
     children: Vec<EmbeddingRerankChildReport>,
+    model: Option<EmbeddingRerankModelReport>,
 ) -> EmbeddingRerankReport {
     EmbeddingRerankReport {
         schema_version: EMBEDDING_RERANK_SCHEMA_VERSION,
         suite: base.suite.to_owned(),
         status: status.to_owned(),
         reason,
-        model: EmbeddingRerankModelReport {
+        model: model.unwrap_or_else(|| EmbeddingRerankModelReport {
             id: base.request.model.id.clone(),
             revision: base.request.model.revision.clone(),
             fingerprint: None,
-        },
+            profile_id: None,
+            backend_family: None,
+            dimension: None,
+            input_roles: Vec::new(),
+        }),
         cache: EmbeddingRerankCacheReport { status: cache_status },
         acquisition_policy: base.request.acquisition_policy,
         input_policy_version: base.inputs.input_policy_version.clone(),
@@ -362,6 +378,18 @@ fn skipped_or_failed_report(
         embedding_rerank: None,
         pairs: Vec::new(),
         children,
+    }
+}
+
+fn model_report_from_summary(summary: EmbeddingModelSummary) -> EmbeddingRerankModelReport {
+    EmbeddingRerankModelReport {
+        id: summary.id,
+        revision: summary.revision,
+        fingerprint: summary.fingerprint,
+        profile_id: Some(summary.profile_id),
+        backend_family: Some(summary.backend_family),
+        dimension: Some(summary.dimension),
+        input_roles: summary.input_roles,
     }
 }
 
@@ -657,6 +685,7 @@ mod tests {
             Some("skipped_no_prepared_embedding_model".to_owned()),
             EmbeddingCacheStatus::NotPrepared,
             Vec::new(),
+            None,
         );
 
         let artifact = write_default_artifact(temp.path(), &report).unwrap();
