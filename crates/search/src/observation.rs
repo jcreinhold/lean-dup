@@ -316,8 +316,10 @@ fn embedding_documents(candidate_sets: &[crate::retrieval::CandidateSet]) -> Sea
     }
 }
 
-pub(crate) fn embedding_documents_for_declarations(declarations: &[HydratedDeclaration]) -> SearchEmbeddingDocuments {
-    let policy = SearchEmbeddingDocumentPolicy::default();
+pub(crate) fn embedding_documents_for_declarations_with_policy(
+    declarations: &[HydratedDeclaration],
+    policy: SearchEmbeddingDocumentPolicy,
+) -> SearchEmbeddingDocuments {
     let documents = declarations
         .iter()
         .map(|declaration| embedding_document_for(declaration, policy))

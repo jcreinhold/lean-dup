@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 use lean_dup_embedding::EmbeddingAcquisitionPolicy;
 use lean_dup_eval::EvalSuite;
-use lean_dup_search::{ProbePolicy, ReviewProfile, SearchVectorAcquisitionPolicy};
+use lean_dup_search::{ProbePolicy, ReviewProfile, SearchEmbeddingDocumentPolicy, SearchVectorAcquisitionPolicy};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
@@ -224,6 +224,9 @@ pub struct EvalArgs {
 
     #[arg(long = "vector-corpus-cache-root", hide = true)]
     pub vector_corpus_cache_root: Option<PathBuf>,
+
+    #[arg(long = "vector-document-policy", hide = true, value_enum, default_value_t = CliVectorDocumentPolicy::NameAndFormalStatement)]
+    pub vector_document_policy: CliVectorDocumentPolicy,
 }
 
 #[derive(Debug, Clone, clap::Args)]
@@ -324,6 +327,25 @@ pub enum EvalFormat {
 pub enum CliEmbeddingAcquisitionPolicy {
     CacheOnly,
     DownloadIfMissing,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum CliVectorDocumentPolicy {
+    FormalStatement,
+    NameAndFormalStatement,
+    InformalOrFormal,
+    LegacyRerankV1,
+}
+
+impl From<CliVectorDocumentPolicy> for SearchEmbeddingDocumentPolicy {
+    fn from(value: CliVectorDocumentPolicy) -> Self {
+        match value {
+            CliVectorDocumentPolicy::FormalStatement => Self::FormalStatement,
+            CliVectorDocumentPolicy::NameAndFormalStatement => Self::NameAndFormalStatement,
+            CliVectorDocumentPolicy::InformalOrFormal => Self::InformalOrFormal,
+            CliVectorDocumentPolicy::LegacyRerankV1 => Self::LegacyRerankV1,
+        }
+    }
 }
 
 impl From<CliEmbeddingAcquisitionPolicy> for EmbeddingAcquisitionPolicy {

@@ -373,6 +373,7 @@ fn eval_hidden_search_dataset_mode_writes_feature_artifact() {
     assert!(!help_stdout.contains("--embedding-acquisition"));
     assert!(!help_stdout.contains("--write-vector-search"));
     assert!(!help_stdout.contains("--vector-acquisition"));
+    assert!(!help_stdout.contains("--vector-document-policy"));
 
     let assert = Command::cargo_bin("lean-dup")
         .unwrap()

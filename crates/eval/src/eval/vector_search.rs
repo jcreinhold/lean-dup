@@ -2,8 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use lean_dup_search::{
-    SearchObservation, SearchObservedPair, SearchVectorAcquisitionPolicy, SearchVectorCandidateRequest,
-    SearchVectorCandidateStatus, SearchVectorCandidateSummary,
+    SearchEmbeddingDocumentPolicy, SearchObservation, SearchObservedPair, SearchVectorAcquisitionPolicy,
+    SearchVectorCandidateRequest, SearchVectorCandidateStatus, SearchVectorCandidateSummary,
 };
 use serde::Serialize;
 
@@ -21,6 +21,7 @@ pub struct VectorSearchRequest {
     pub model_cache_root: Option<PathBuf>,
     pub text_vector_cache_root: Option<PathBuf>,
     pub corpus_cache_root: Option<PathBuf>,
+    pub document_policy: SearchEmbeddingDocumentPolicy,
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +111,7 @@ impl VectorSearchRequest {
                 .corpus_cache_root
                 .clone()
                 .unwrap_or_else(|| PathBuf::from("target/search-quality/vector-corpus").join(suite)),
+            document_policy: self.document_policy,
         }
     }
 }

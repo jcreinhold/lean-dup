@@ -14,7 +14,9 @@ use lean_dup_vector_index::{
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::observation::{SearchEmbeddingDocuments, embedding_documents_for_declarations};
+use crate::observation::{
+    SearchEmbeddingDocumentPolicy, SearchEmbeddingDocuments, embedding_documents_for_declarations_with_policy,
+};
 
 const VECTOR_CANDIDATE_POLICY_VERSION: &str = "lean-dup.vector-candidate.v1";
 const VECTOR_CANDIDATE_TOP_K: usize = 32;
@@ -32,6 +34,7 @@ pub struct SearchVectorCandidateRequest {
     pub model_cache_root: Option<PathBuf>,
     pub text_vector_cache_root: Option<PathBuf>,
     pub corpus_cache_root: PathBuf,
+    pub document_policy: SearchEmbeddingDocumentPolicy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -124,13 +127,14 @@ pub(crate) fn generate_vector_candidates(
     workspace: &[HydratedDeclaration],
     comparison_declarations: &[HydratedDeclaration],
 ) -> VectorCandidateOutput {
-    let query_documents = embedding_documents_for_declarations(workspace);
+    let query_documents = embedding_documents_for_declarations_with_policy(workspace, request.document_policy);
     let corpus_declarations = if comparison_declarations.is_empty() {
         workspace
     } else {
         comparison_declarations
     };
-    let corpus_documents = embedding_documents_for_declarations(corpus_declarations);
+    let corpus_documents =
+        embedding_documents_for_declarations_with_policy(corpus_declarations, request.document_policy);
     let model = EmbeddingModelSpec {
         id: request.model_id.clone(),
         revision: request.revision.clone(),
