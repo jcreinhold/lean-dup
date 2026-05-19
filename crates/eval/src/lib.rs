@@ -17,8 +17,8 @@ pub use eval::{CountMetric, EvalOutput, EvalRequest, EvaluationMetrics, Evaluati
 pub enum EvalSuite {
     Default,
     HardNegatives,
-    KanproofsInternal,
-    KanproofsMathlib,
+    ManualInternal,
+    ManualMathlib,
     ProductionGate,
 }
 
@@ -27,8 +27,8 @@ impl EvalSuite {
         match self {
             Self::Default => "default",
             Self::HardNegatives => "hard-negatives",
-            Self::KanproofsInternal => "kanproofs-internal",
-            Self::KanproofsMathlib => "kanproofs-mathlib",
+            Self::ManualInternal => "manual-internal",
+            Self::ManualMathlib => "manual-mathlib",
             Self::ProductionGate => "production-gate",
         }
     }

@@ -157,19 +157,24 @@ fn cache_state(workload: PerfWorkload) -> &'static str {
     match workload {
         PerfWorkload::ColdMathlibIndex => "cold",
         PerfWorkload::WarmMathlibIndex => "warm",
-        PerfWorkload::KanproofsTargetedMathlib
-        | PerfWorkload::KanproofsFullNoMathlib
-        | PerfWorkload::KanproofsFullMathlibNoProbes
-        | PerfWorkload::KanproofsFullMathlib
+        PerfWorkload::ManualTargetedMathlib
+        | PerfWorkload::ManualFullNoMathlib
+        | PerfWorkload::ManualFullMathlibNoProbes
+        | PerfWorkload::ManualFullMathlib
         | PerfWorkload::FixtureAudit => "reuse-or-build",
     }
 }
 
 fn workload_command(args: &PerfArgs) -> Vec<String> {
-    let kanproofs = args
-        .kanproofs_workspace
+    let manual = args
+        .manual_workspace
         .clone()
-        .unwrap_or_else(|| PathBuf::from("/Users/jcreinhold/Code/kan-proofs"));
+        .unwrap_or_else(|| PathBuf::from("MANUAL-WORKSPACE-NOT-SET"));
+    let manual_module = args.manual_module.clone().unwrap_or_else(|| "Workspace".to_owned());
+    let manual_module_targeted = args
+        .manual_module
+        .clone()
+        .unwrap_or_else(|| "Workspace.Targeted".to_owned());
     let repo = repo_root();
     let mut command = vec!["lean-dup".to_owned(), "--profile".to_owned()];
     match args.workload {
@@ -177,7 +182,7 @@ fn workload_command(args: &PerfArgs) -> Vec<String> {
             command.extend([
                 "index-mathlib".to_owned(),
                 "--workspace".to_owned(),
-                kanproofs.display().to_string(),
+                manual.display().to_string(),
             ]);
             if let Some(mathlib) = &args.mathlib_workspace {
                 command.extend(["--mathlib-workspace".to_owned(), mathlib.display().to_string()]);
@@ -186,13 +191,13 @@ fn workload_command(args: &PerfArgs) -> Vec<String> {
                 command.push("--force".to_owned());
             }
         }
-        PerfWorkload::KanproofsTargetedMathlib => {
+        PerfWorkload::ManualTargetedMathlib => {
             command.extend([
                 "audit".to_owned(),
                 "--workspace".to_owned(),
-                kanproofs.display().to_string(),
+                manual.display().to_string(),
                 "--module".to_owned(),
-                "KanProofs.Mathlib4Backports".to_owned(),
+                manual_module_targeted,
                 "--compare-mathlib".to_owned(),
                 "--format".to_owned(),
                 "json".to_owned(),
@@ -201,24 +206,24 @@ fn workload_command(args: &PerfArgs) -> Vec<String> {
                 command.extend(["--mathlib-workspace".to_owned(), mathlib.display().to_string()]);
             }
         }
-        PerfWorkload::KanproofsFullNoMathlib => {
+        PerfWorkload::ManualFullNoMathlib => {
             command.extend([
                 "audit".to_owned(),
                 "--workspace".to_owned(),
-                kanproofs.display().to_string(),
+                manual.display().to_string(),
                 "--module".to_owned(),
-                "KanProofs".to_owned(),
+                manual_module.clone(),
                 "--format".to_owned(),
                 "json".to_owned(),
             ]);
         }
-        PerfWorkload::KanproofsFullMathlib => {
+        PerfWorkload::ManualFullMathlib => {
             command.extend([
                 "audit".to_owned(),
                 "--workspace".to_owned(),
-                kanproofs.display().to_string(),
+                manual.display().to_string(),
                 "--module".to_owned(),
-                "KanProofs".to_owned(),
+                manual_module.clone(),
                 "--compare-mathlib".to_owned(),
                 "--format".to_owned(),
                 "json".to_owned(),
@@ -227,13 +232,13 @@ fn workload_command(args: &PerfArgs) -> Vec<String> {
                 command.extend(["--mathlib-workspace".to_owned(), mathlib.display().to_string()]);
             }
         }
-        PerfWorkload::KanproofsFullMathlibNoProbes => {
+        PerfWorkload::ManualFullMathlibNoProbes => {
             command.extend([
                 "audit".to_owned(),
                 "--workspace".to_owned(),
-                kanproofs.display().to_string(),
+                manual.display().to_string(),
                 "--module".to_owned(),
-                "KanProofs".to_owned(),
+                manual_module,
                 "--compare-mathlib".to_owned(),
                 "--no-semantic-probes".to_owned(),
                 "--format".to_owned(),
@@ -325,11 +330,12 @@ mod tests {
     #[test]
     fn full_mathlib_no_probes_workload_disables_semantic_probes() {
         let command = workload_command(&PerfArgs {
-            workload: PerfWorkload::KanproofsFullMathlibNoProbes,
+            workload: PerfWorkload::ManualFullMathlibNoProbes,
             format: PerfFormat::Json,
             output: None,
             cache_root: None,
-            kanproofs_workspace: Some(std::path::PathBuf::from("/tmp/kanproofs")),
+            manual_workspace: Some(std::path::PathBuf::from("/tmp/manual")),
+            manual_module: None,
             mathlib_workspace: None,
         });
 
@@ -338,7 +344,7 @@ mod tests {
         assert!(
             command
                 .windows(2)
-                .any(|window| window[0] == "--module" && window[1] == "KanProofs")
+                .any(|window| window[0] == "--module" && window[1] == "Workspace")
         );
     }
 

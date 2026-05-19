@@ -31,7 +31,7 @@ reports, and reproducible releases. Concretely, all of:
 | Gate                                | Evidence artifact                                                                                                                            |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `G1 regression_quality`             | [search-quality.md](search-quality.md), [evaluation/production-gates.md](evaluation/production-gates.md), `target/eval/production-gate.json` |
-| `G2 precision_control`              | search-quality.md, production-gates.md hard-negative section, fixture/KanProofs eval JSON                                                    |
+| `G2 precision_control`              | search-quality.md, production-gates.md hard-negative section, fixture and manual eval JSON                                                   |
 | `G3 semantic_probe_yield`           | real-workload probe evidence under `target/audit-runs/`                                                                                      |
 | `G4 external_comparison_provenance` | [external-comparison-provenance.md](external-comparison-provenance.md) + JSON/profile fixtures                                         |
 | `G5 cache_validity_lifecycle`       | [cache-validity-lifecycle.md](cache-validity-lifecycle.md) + `target/cache/doctor-production.json`                                           |
@@ -41,7 +41,7 @@ reports, and reproducible releases. Concretely, all of:
 
 Production claim per gate:
 
-- **G1**: KanProofs and fixture quality proven with raw denominators and stage-level search
+- **G1**: fixture and manual-corpus quality proven with raw denominators and stage-level search
   metrics.
 - **G2**: Hard negatives and known bogus mathlib matches do not leak into the default visible
   queue.
@@ -124,8 +124,8 @@ Evidence locations: `docs/architecture/evaluation/` for quality gates,
 The release is a no-go if any of these remain true:
 
 - default reports show known hard negatives or weak mathlib noise as actionable;
-- full KanProofs audits fail, require `--no-semantic-probes` for ordinary use, or lack clear
-  unavailable-probe diagnostics;
+- full manual-corpus audits fail, require `--no-semantic-probes` for ordinary use, or lack
+  clear unavailable-probe diagnostics;
 - source-backed and static external evidence are indistinguishable in JSON or text output;
 - cache reuse depends on unrelated project dirtiness or absolute paths;
 - release artifacts cannot identify binary, Git revision, Lean version, worker version, protocol

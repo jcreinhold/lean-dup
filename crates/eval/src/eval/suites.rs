@@ -29,6 +29,7 @@ pub struct EvalRequest {
     pub suite: EvalSuite,
     pub workspace: Option<PathBuf>,
     pub mathlib_workspace: Option<PathBuf>,
+    pub manual_module: Option<String>,
     pub k_values: Vec<usize>,
     pub write_search_dataset: bool,
     pub write_scorer_ablations: bool,
@@ -129,7 +130,7 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
     let workspace_rows = local.hydrate(&handles)?;
     let external =
         match &definition.external {
-            Some(external) if definition.suite == EvalSuite::KanproofsMathlib => Some(
+            Some(external) if definition.suite == EvalSuite::ManualMathlib => Some(
                 build_or_load_project_mathlib_index(&definition, external, &cache_root, reporter)?,
             ),
             Some(external) => Some(build_or_load_index(
@@ -289,6 +290,7 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
                 suite: child,
                 workspace: None,
                 mathlib_workspace: None,
+                manual_module: None,
                 k_values: request.k_values.clone(),
                 write_search_dataset: false,
                 write_scorer_ablations: request.write_scorer_ablations,
@@ -298,12 +300,13 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
         ));
     }
 
-    for child in [EvalSuite::KanproofsInternal, EvalSuite::KanproofsMathlib] {
+    for child in [EvalSuite::ManualInternal, EvalSuite::ManualMathlib] {
         runs.push(run_child_suite(
             EvalRequest {
                 suite: child,
                 workspace: request.workspace.clone(),
                 mathlib_workspace: request.mathlib_workspace.clone(),
+                manual_module: request.manual_module.clone(),
                 k_values: request.k_values.clone(),
                 write_search_dataset: false,
                 write_scorer_ablations: request.write_scorer_ablations,
@@ -437,11 +440,11 @@ fn aggregate_scorer_ablations(runs: &[EvaluationRunReport]) -> Vec<ScorerAblatio
 }
 
 fn manual_workspace_exists(request: &EvalRequest) -> bool {
-    request
-        .workspace
-        .clone()
-        .unwrap_or_else(|| PathBuf::from("/Users/jcreinhold/Code/kan-proofs"))
-        .exists()
+    request.workspace.as_ref().is_some_and(|path| path.exists())
+}
+
+fn manual_module(request: &EvalRequest) -> String {
+    request.manual_module.clone().unwrap_or_else(|| "Workspace".to_owned())
 }
 
 fn is_manual_prerequisite_error(reason: &str) -> bool {
@@ -557,34 +560,25 @@ fn suite_definition(request: &EvalRequest) -> SuiteDefinition {
             build_before_index: true,
             require_oleans: false,
         },
-        EvalSuite::KanproofsInternal => SuiteDefinition {
+        EvalSuite::ManualInternal => SuiteDefinition {
             suite: request.suite,
-            workspace: request
-                .workspace
-                .clone()
-                .unwrap_or_else(|| PathBuf::from("/Users/jcreinhold/Code/kan-proofs")),
-            module_root: "KanProofs".to_owned(),
+            workspace: request.workspace.clone().unwrap_or_default(),
+            module_root: manual_module(request),
             origin: "workspace".to_owned(),
             external: None,
             mathlib_source_override: None,
             build_before_index: false,
             require_oleans: true,
         },
-        EvalSuite::KanproofsMathlib => SuiteDefinition {
+        EvalSuite::ManualMathlib => SuiteDefinition {
             suite: request.suite,
-            workspace: request
-                .workspace
-                .clone()
-                .unwrap_or_else(|| PathBuf::from("/Users/jcreinhold/Code/kan-proofs")),
-            module_root: "KanProofs".to_owned(),
+            workspace: request.workspace.clone().unwrap_or_default(),
+            module_root: manual_module(request),
             origin: "workspace".to_owned(),
             external: Some(ExternalSuiteIndex {
-                workspace: request
-                    .workspace
-                    .clone()
-                    .unwrap_or_else(|| PathBuf::from("/Users/jcreinhold/Code/kan-proofs")),
+                workspace: request.workspace.clone().unwrap_or_default(),
                 module_root: "Mathlib".to_owned(),
-                label: "eval-kanproofs-mathlib".to_owned(),
+                label: "eval-manual-mathlib".to_owned(),
                 origin: "mathlib".to_owned(),
                 require_oleans: true,
             }),
@@ -779,6 +773,7 @@ mod tests {
                 suite: EvalSuite::Default,
                 workspace: None,
                 mathlib_workspace: None,
+                manual_module: None,
                 k_values: vec![1, 5, 10],
                 write_search_dataset: false,
                 write_scorer_ablations: false,
@@ -828,12 +823,13 @@ mod tests {
 
     #[test]
     fn manual_child_suite_with_missing_workspace_is_skipped() {
-        let missing = TempDir::new().unwrap().path().join("missing-kanproofs");
+        let missing = TempDir::new().unwrap().path().join("missing-manual");
         let report = run_child_suite(
             EvalRequest {
-                suite: EvalSuite::KanproofsInternal,
+                suite: EvalSuite::ManualInternal,
                 workspace: Some(missing),
                 mathlib_workspace: None,
+                manual_module: None,
                 k_values: vec![1, 5, 10],
                 write_search_dataset: false,
                 write_scorer_ablations: false,
@@ -842,7 +838,7 @@ mod tests {
             &mut Reporter::new(false, false),
         );
 
-        assert_eq!(report.suite, "kanproofs-internal");
+        assert_eq!(report.suite, "manual-internal");
         assert_eq!(report.status, "skipped");
         assert!(report.manual);
     }
@@ -853,7 +849,7 @@ mod tests {
             "index error: missing compiled oleans for index"
         ));
         assert!(super::is_manual_prerequisite_error(
-            "worker returned a fatal diagnostic: import_failed fatal: object file '/tmp/KanProofs.olean' does not exist"
+            "worker returned a fatal diagnostic: import_failed fatal: object file '/tmp/Workspace.olean' does not exist"
         ));
         assert!(!super::is_manual_prerequisite_error(
             "evaluation error: default suite recall@10 gate failed"
@@ -861,13 +857,14 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "manual slow suite over KanProofs workspace"]
-    fn kanproofs_internal_suite_runs_when_requested() {
+    #[ignore = "manual slow suite over private corpus"]
+    fn manual_internal_suite_runs_when_requested() {
         let report = run(
             EvalRequest {
-                suite: EvalSuite::KanproofsInternal,
+                suite: EvalSuite::ManualInternal,
                 workspace: None,
                 mathlib_workspace: None,
+                manual_module: None,
                 k_values: vec![1, 5, 10],
                 write_search_dataset: false,
                 write_scorer_ablations: false,
@@ -879,13 +876,14 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "manual slow suite over KanProofs and mathlib indexes"]
-    fn kanproofs_mathlib_suite_runs_when_requested() {
+    #[ignore = "manual slow suite over private corpus and mathlib indexes"]
+    fn manual_mathlib_suite_runs_when_requested() {
         let report = run(
             EvalRequest {
-                suite: EvalSuite::KanproofsMathlib,
+                suite: EvalSuite::ManualMathlib,
                 workspace: None,
                 mathlib_workspace: None,
+                manual_module: None,
                 k_values: vec![1, 5, 10],
                 write_search_dataset: false,
                 write_scorer_ablations: false,

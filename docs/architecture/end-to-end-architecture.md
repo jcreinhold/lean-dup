@@ -18,7 +18,7 @@ For the layering rule, see [overview.md](overview.md). For release gates, see
 | `audit`                   | produce duplicate-review groups from local, imported, mathlib, or external evidence              |
 | `show`                    | explain one group resolvable from the current workspace/index context                            |
 | `diff`                    | compare two saved audit baselines                                                                |
-| `eval`                    | run fixture, hard-negative, KanProofs, or aggregate quality suites                               |
+| `eval`                    | run fixture, hard-negative, manual-corpus, or aggregate quality suites                           |
 | *hidden* `perf`           | run named performance workloads and write profiling artifacts                                    |
 | *hidden* `cache-cleanup`  | inspect or remove unprotected stale cache entries                                                |
 
@@ -183,8 +183,8 @@ timing sequences as public workflow.
 - **`show`** explains a ranked group resolvable from the current workspace/index context. It is
   not a full report-file browser.
 - **`eval --suite default` / `eval --suite hard-negatives`** are fast fixture gates.
-  `kanproofs-internal` and `kanproofs-mathlib` are explicit manual suites. `production-gate`
-  aggregates them and reports raw denominators.
+  `manual-internal` and `manual-mathlib` are explicit manual suites against an operator-supplied
+  private corpus. `production-gate` aggregates them and reports raw denominators.
 - **`perf`** workloads measure realistic runtime and cost classes. The hidden command writes
   JSON artifacts under `target/perf/` for reproducible comparison.
 

@@ -270,6 +270,7 @@ fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<lean_dup_report::Eval
             suite: args.suite.into(),
             workspace: args.workspace,
             mathlib_workspace: args.mathlib_workspace,
+            manual_module: args.manual_module,
             k_values: args.k_values,
             write_search_dataset: args.write_search_dataset,
             write_scorer_ablations: args.write_scorer_ablations,

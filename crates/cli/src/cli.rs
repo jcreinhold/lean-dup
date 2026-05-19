@@ -166,6 +166,11 @@ pub struct EvalArgs {
     #[arg(long)]
     pub mathlib_workspace: Option<PathBuf>,
 
+    /// Lean module root for the manual suites, when running with `--workspace`.
+    /// Defaults to `Workspace`; operators with a private corpus pass their actual root.
+    #[arg(long)]
+    pub manual_module: Option<String>,
+
     #[arg(long = "k", value_delimiter = ',', default_value = "1,5,10")]
     pub k_values: Vec<usize>,
 
@@ -194,7 +199,12 @@ pub struct PerfArgs {
     pub cache_root: Option<PathBuf>,
 
     #[arg(long)]
-    pub kanproofs_workspace: Option<PathBuf>,
+    pub manual_workspace: Option<PathBuf>,
+
+    /// Lean module root for the manual workloads. Defaults to `Workspace` (or
+    /// `Workspace.Targeted` for targeted variants); operators override.
+    #[arg(long)]
+    pub manual_module: Option<String>,
 
     #[arg(long)]
     pub mathlib_workspace: Option<PathBuf>,
@@ -243,8 +253,8 @@ pub enum EvalFormat {
 pub enum CliEvalSuite {
     Default,
     HardNegatives,
-    KanproofsInternal,
-    KanproofsMathlib,
+    ManualInternal,
+    ManualMathlib,
     ProductionGate,
 }
 
@@ -253,8 +263,8 @@ impl From<CliEvalSuite> for EvalSuite {
         match value {
             CliEvalSuite::Default => Self::Default,
             CliEvalSuite::HardNegatives => Self::HardNegatives,
-            CliEvalSuite::KanproofsInternal => Self::KanproofsInternal,
-            CliEvalSuite::KanproofsMathlib => Self::KanproofsMathlib,
+            CliEvalSuite::ManualInternal => Self::ManualInternal,
+            CliEvalSuite::ManualMathlib => Self::ManualMathlib,
             CliEvalSuite::ProductionGate => Self::ProductionGate,
         }
     }
@@ -307,10 +317,10 @@ pub enum PerfFormat {
 pub enum PerfWorkload {
     ColdMathlibIndex,
     WarmMathlibIndex,
-    KanproofsTargetedMathlib,
-    KanproofsFullNoMathlib,
-    KanproofsFullMathlibNoProbes,
-    KanproofsFullMathlib,
+    ManualTargetedMathlib,
+    ManualFullNoMathlib,
+    ManualFullMathlibNoProbes,
+    ManualFullMathlib,
     FixtureAudit,
 }
 
@@ -319,10 +329,10 @@ impl PerfWorkload {
         match self {
             Self::ColdMathlibIndex => "cold-mathlib-index",
             Self::WarmMathlibIndex => "warm-mathlib-index",
-            Self::KanproofsTargetedMathlib => "kanproofs-targeted-mathlib",
-            Self::KanproofsFullNoMathlib => "kanproofs-full-no-mathlib",
-            Self::KanproofsFullMathlibNoProbes => "kanproofs-full-mathlib-no-probes",
-            Self::KanproofsFullMathlib => "kanproofs-full-mathlib",
+            Self::ManualTargetedMathlib => "manual-targeted-mathlib",
+            Self::ManualFullNoMathlib => "manual-full-no-mathlib",
+            Self::ManualFullMathlibNoProbes => "manual-full-mathlib-no-probes",
+            Self::ManualFullMathlib => "manual-full-mathlib",
             Self::FixtureAudit => "fixture-audit",
         }
     }

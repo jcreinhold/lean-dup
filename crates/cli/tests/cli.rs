@@ -51,7 +51,8 @@ fn index_mathlib_help_has_no_standalone_mathlib_default() {
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
 
     assert!(stdout.contains("--workspace"));
-    assert!(!stdout.contains("/Users/jcreinhold/Code/mathlib4"));
+    // Confirm there is no hardcoded mathlib path baked into the help text.
+    assert!(!stdout.contains("/Users/"));
 }
 
 #[test]

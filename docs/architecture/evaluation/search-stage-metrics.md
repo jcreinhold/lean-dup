@@ -62,7 +62,7 @@ cargo run -p lean-dup-cli -- eval --suite production-gate --format json \
 ```
 
 The aggregate `status` reports command/gate execution. Release-quality claims use the raw stage
-denominators, especially KanProofs/mathlib recall and hard-negative survival.
+denominators, especially manual-corpus mathlib recall and hard-negative survival.
 
 ## Known limitations
 

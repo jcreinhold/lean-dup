@@ -125,8 +125,8 @@ pub fn load_builtin(suite: EvalSuite) -> Result<GoldLabels> {
     let json = match suite {
         EvalSuite::Default => include_str!("../../eval-data/default.json"),
         EvalSuite::HardNegatives => include_str!("../../eval-data/hard-negatives.json"),
-        EvalSuite::KanproofsInternal => include_str!("../../eval-data/kanproofs-internal.json"),
-        EvalSuite::KanproofsMathlib => include_str!("../../eval-data/kanproofs-mathlib.json"),
+        EvalSuite::ManualInternal => include_str!("../../eval-data/manual-internal.json"),
+        EvalSuite::ManualMathlib => include_str!("../../eval-data/manual-mathlib.json"),
         EvalSuite::ProductionGate => {
             return Err(Error::Eval {
                 message: "production-gate is an aggregate suite without one label file".to_owned(),

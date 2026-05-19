@@ -13,12 +13,12 @@ denominators, see [search-stage-metrics.md](search-stage-metrics.md).
 | -------------------- | ----- | ----------- | -------------------------------------------------------------------------------------- |
 | `default`            | fast  | yes         | small fixture quality gate; all positives at recall@10; zero hard-negative leakage     |
 | `hard-negatives`     | fast  | yes         | fixture precision gate (same-conclusion, broad-key, known static-fingerprint collisions) |
-| `kanproofs-internal` | slow  | no          | targeted KanProofs internal labels                                                     |
-| `kanproofs-mathlib`  | slow  | no          | targeted KanProofs/mathlib labels including known bogus collisions                     |
+| `manual-internal`    | slow  | no          | targeted manual-corpus internal labels                                                 |
+| `manual-mathlib`     | slow  | no          | targeted manual-corpus/mathlib labels including known bogus collisions                 |
 | `production-gate`    | slow  | no          | aggregates the four above; `status = incomplete` when a manual suite is unavailable    |
 
-The `production-gate` suite may be `incomplete` on machines without the KanProofs workspace.
-That status is a recorded fact, not a pass.
+The `production-gate` suite may be `incomplete` on machines without a manual-corpus workspace
+(`--workspace <path> --manual-module <Root>`). That status is a recorded fact, not a pass.
 
 ## Metrics
 
@@ -55,11 +55,11 @@ cargo run -p lean-dup-cli -- eval --suite production-gate --format json \
 
 ## Why a general scorer plus suite orchestration
 
-Adding KanProofs checks directly to the scorer would mix a special corpus with general metric
-policy. The scorer would learn private paths, slow-suite rules, and audit execution details;
-every future corpus would become a scorer change.
+Adding manual-corpus checks directly to the scorer would mix a special corpus with general
+metric policy. The scorer would learn private paths, slow-suite rules, and audit execution
+details; every future corpus would become a scorer change.
 
 The general scorer knows only unordered pairs, ranks, shown membership, and raw denominators.
-Suite definitions own corpus loading, fixture/KanProofs execution, manual skip policy, and gate
-enforcement. Callers ask for a suite result instead of coordinating label files, cache roots,
-retrieval output, and skip rules themselves.
+Suite definitions own corpus loading, fixture and manual-suite execution, manual skip policy,
+and gate enforcement. Callers ask for a suite result instead of coordinating label files,
+cache roots, retrieval output, and skip rules themselves.

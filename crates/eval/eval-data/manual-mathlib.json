@@ -1,5 +1,5 @@
 {
-  "suite": "kanproofs-mathlib",
+  "suite": "manual-mathlib",
   "positive_clusters": [
     {
       "id": "quasicategory-inner-fibration",

@@ -61,11 +61,11 @@ Every current core match class is represented; `skipped_classes` is `[]`.
 | non-actionable related theorem | `Tiny.related_left` ↔ `Tiny.related_right` |
 | hard negative | `Tiny.same_conclusion_nat_domain` ↔ `Tiny.same_conclusion_bool_domain`; `Tiny.broad_eq_only` ↔ `Tiny.symmetric_eq_left` |
 
-## KanProofs labels
+## Manual labels
 
-KanProofs suites stay manual and private-path aware. Their typed labels are adjudication
-targets, not a claim that the current search stack finds them. Files:
-`kanproofs-internal.json`, `kanproofs-mathlib.json`.
+The manual suites stay slow and private-path aware. Their typed labels are adjudication targets,
+not a claim that the current search stack finds them. Files: `manual-internal.json`,
+`manual-mathlib.json`.
 
 ## Why a typed layer instead of a new format
 

@@ -220,8 +220,9 @@ The release-readiness gates `G1 regression_quality` and `G2 precision_control` d
 
 - *Intra-workspace audits* (no `--compare-mathlib`) are the most useful invocation. The fixture suite passes its
   quality bar and the same path scales to real Lake projects.
-- *`--compare-mathlib` is implemented but unvalidated.* The aggregate quality and the KanProofs/mathlib gate suites do
-  not currently pass; recall against real mathlib corpora has not been demonstrated. Do not expect strong recall yet.
+- *`--compare-mathlib` is implemented but unvalidated.* The aggregate quality and the
+  manual-corpus mathlib gate suites do not currently pass; recall against real mathlib corpora
+  has not been demonstrated. Do not expect strong recall yet.
 - *Semantic probes* are bounded and recoverable, but their proof-grade yield on full mathlib runs is still partial.
   `--no-semantic-probes` is supported and is the fastest way to start.
 - *No `--version` flag yet*; release diagnostics are still being shaped.
