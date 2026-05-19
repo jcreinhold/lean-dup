@@ -14,7 +14,6 @@ Reference material for contributors. For a Lean-developer-facing walkthrough, se
 **Boundaries and contracts**
 
 - [worker-protocol.md](worker-protocol.md) — Lean worker protocol (six commands, JSONL transport, v1 schema).
-- [rust-cli-foundation.md](rust-cli-foundation.md) — CLI engine module map.
 - [crate-factoring.md](crate-factoring.md) — the eight Rust crates and their boundaries.
 - [report-contract.md](report-contract.md) — stable explanation facts every report must carry.
 
