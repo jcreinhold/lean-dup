@@ -2,9 +2,12 @@
 
 This document records the architecture boundary for embedding experiments. Prompt 35A
 added the `lean-dup-embedding` crate skeleton and workspace boundary. Prompt 35B added
-explicit model acquisition and cache validation. Prompt 35C added the MiniLM/Candle CPU
-runtime used for the rerank-only negative probe. Prompt 35G replaces that narrow runtime
-assumption with private model profiles and a FastEmbed-backed BGE-small baseline.
+explicit model acquisition and cache validation. Prompt 35C tried a narrow
+MiniLM/Candle CPU runtime for the rerank-only probe. Prompt 35G replaced that mistaken
+extension point with private model profiles and a FastEmbed-backed BGE-small baseline.
+Because this code is pre-release, the legacy MiniLM/Candle implementation was removed
+instead of preserved for compatibility; historical results remain in
+[embedding-validation.md](embedding-validation.md).
 
 For the current pipeline, see [end-to-end-architecture.md](../end-to-end-architecture.md).
 For crate boundaries, see [crate-factoring.md](../crate-factoring.md).
@@ -14,7 +17,7 @@ For crate boundaries, see [crate-factoring.md](../crate-factoring.md).
 Hidden knowledge: the embedding subsystem owns model profiles, model acquisition policy,
 text embedding input policy, model/cache/runtime summaries, local CPU runtime facts, and
 the rules for keeping embedding artifacts reproducible. It is also the place where model
-download, tokenizer compatibility, tensor layout, pooling, normalization, batching,
+download, tokenizer compatibility, runtime selection, normalization, batching,
 query/document wrapping, backend selection, and vector cache decisions live.
 
 Smallest public interface: the `lean-dup-embedding` crate root accepts explicit model
@@ -23,10 +26,10 @@ cache, acquisition-policy, input-role, vector-dimension, runtime-counter, and ty
 facts.
 
 Decisions that must not leak upward or sideways: Hugging Face/FastEmbed cache layout,
-tokenizer/model filenames, Candle tensor shapes, FastEmbed enums, ONNX/ORT mechanics,
-pooling and normalization details, query/document prefix strings, vector cache format,
-download mechanics, runtime batching, and any model-specific fallbacks. Search, eval,
-report, and CLI callers should not learn those details.
+tokenizer/model filenames, FastEmbed enums, ONNX/ORT mechanics, normalization details,
+query/document prefix strings, vector cache format, download mechanics, runtime batching,
+and any model-specific fallbacks. Search, eval, report, and CLI callers should not learn
+those details.
 
 Preserved capability: the default `lean-dup` auditor remains read-only, local,
 deterministic, symbolic, and independent of embedding models. Existing audit, doctor,
@@ -64,16 +67,15 @@ through crate-root APIs only. It owns model acquisition, local CPU embedding, an
 cache policy, while `lean-dup-search` supplies stable
 declaration-summary inputs and `lean-dup-eval` owns labels, experiment lifecycle, and
 artifact comparison. This design is deeper because callers learn a small text-embedding
-capability instead of Hugging Face, tokenizer, Candle, or cache internals.
+capability instead of Hugging Face, FastEmbed, ONNX, tokenizer, or cache internals.
 
-For the CPU runtime boundary, two designs were considered. A high-level wrapper around a
-generic embedding library would be easy to call, but it would hide tokenizer, pooling,
-normalization, and cache decisions before `lean-dup` can measure whether they are right
-for Lean declaration summaries. The chosen design is a dedicated runtime boundary inside
-`lean-dup-embedding`: callers still see only `embed_text_batch`, while the crate keeps
-tokenizer loading, BERT/MiniLM execution, attention-mask mean pooling, L2 normalization,
-batching, and vector-cache layout private. This is deeper because the public interface
-does not grow with each runtime mechanism.
+For the CPU runtime boundary, two designs were considered. Hand-owning tokenizer, model,
+pooling, and tensor code looked controllable, but it made the first probe's BERT/MiniLM
+assumptions look like a general embedding subsystem. The replacement design is a
+profile-resolved FastEmbed runtime boundary inside `lean-dup-embedding`: callers still
+see only `embed_text_batch`, while the crate keeps model-specific runtime mechanics,
+normalization, wrapping, batching, and vector-cache layout private. This is deeper
+because the public interface does not grow with each runtime mechanism.
 
 For the model-profile boundary, three designs were considered. Keeping
 `EmbeddingModelSpec { id, revision }` open-ended looks flexible, but it is a false
@@ -115,8 +117,8 @@ Public facts:
 - required model-file roles and their present/missing/downloaded/unavailable state;
 - input-policy version for declaration-summary text;
 - batch embedding result with vector dimension and per-input outcome;
-- runtime counters for load, tokenization, inference, cache hits/misses, and batch count;
-- typed errors that callers can report without knowing model-file or tensor details.
+- runtime counters for model load, inference, cache hits/misses, and batch count;
+- typed errors that callers can report without knowing model-file or runtime details.
 
 Runtime public interface:
 
@@ -128,10 +130,10 @@ Runtime public interface:
 
 Private decisions:
 
-- Hugging Face cache directory layout and file resolution;
+- Hugging Face/FastEmbed cache directory layout and file resolution;
 - tokenizer/config/model filenames and validation rules;
-- Candle tensor construction, attention masks, dtype, and device selection;
-- pooling, L2 normalization, and batch sizing;
+- ONNX/ORT/FastEmbed initialization details;
+- L2 normalization and batch sizing;
 - vector cache key ingredients and on-disk format;
 - download retry, cache-only, and download-if-missing mechanics;
 - model-specific compatibility shims.
@@ -156,31 +158,27 @@ model id `BAAI/bge-small-en-v1.5`. It exposes the stable backend-family label
 applies FastEmbed/BGE-specific wrapping internally; callers do not pass `query:` or
 `passage:` strings as policy.
 
-The previous `sentence-transformers/all-MiniLM-L6-v2` path is retained only as
-`legacy-minilm-rerank-baseline`. It exists to reproduce Prompt 35E's negative rerank-only
-evidence. It is not the default model and not the production extension point.
+The previous `sentence-transformers/all-MiniLM-L6-v2` implementation is removed from the
+codebase. It remains only as historical evidence in Prompt 35E's validation document. It
+is not a supported profile, not the default model, and not an extension point.
 
 FastEmbed types, model enums, ONNX/ORT details, and cache layout are private to
 `lean-dup-embedding`. The crate may use FastEmbed to acquire or run a supported profile,
 but search, eval, report, and CLI see only stable profile/model/cache/runtime facts.
 
-Prompt 35C runtime policy:
+Current runtime policy:
 
-- model loading is CPU-only through `tokenizers`, Candle, and `safetensors`;
-- only BERT-family sentence-transformer configs are accepted in this pass;
-- pooling follows the model's sentence-transformers pooling config and currently accepts
-  attention-mask mean pooling;
+- model loading is CPU-only through FastEmbed;
+- supported model ids resolve through private profiles before acquisition or embedding;
 - vectors are L2-normalized before they cross the crate boundary;
 - vector cache keys combine model fingerprint, embedding input-policy version, and a hash
   of the declaration-summary string;
-- cache filenames, tensor shapes, token ids, raw tokenizer errors, and model-file paths
-  stay private.
+- cache filenames, token ids, raw runtime errors, ONNX details, and model-file paths stay
+  private.
 
 Prompt 35G makes required roles profile-derived. The FastEmbed-backed BGE profile reports
 stable roles such as `runtime-model`, `config`, `tokenizer`, `tokenizer-config`, and
-`special-tokens`, while FastEmbed-specific filenames remain private. The legacy MiniLM
-profile reports `config`, `tokenizer`, `tokenizer-config`, `special-tokens`,
-`pooling-config`, and `weights` only for historical negative-baseline reproducibility.
+`special-tokens`, while FastEmbed-specific filenames remain private.
 Callers must not depend on private filenames, snapshot paths, or FastEmbed cache layout.
 
 ## Acquisition Policy
@@ -228,8 +226,8 @@ workspace. The crate may expose skeleton request/result/error DTOs, but embeddin
 acquisition and inference remain unsupported during Prompt 35A.
 
 Prompt 35B adds explicit model acquisition and validation through `hf-hub`, plus hidden
-CLI preparation. It does not add tokenizer loading, Candle inference, vector caching,
-search integration, eval artifact writing, or default audit behavior.
+CLI preparation. It does not add runtime inference, vector caching, search integration,
+eval artifact writing, or default audit behavior.
 
 Prompt 35C replaces the unsupported batch-embedding path with a cache-only CPU runtime.
 It does not add search integration, eval artifact writing, user-facing ranking changes,
@@ -237,21 +235,13 @@ or default audit behavior.
 
 ## CPU Evidence
 
-Implementation evidence is intentionally modest in Prompt 35C and 35G. Unit tests cover
-fake deterministic vectors, pooling, vector-cache keys, cache hits/misses, missing
-prepared model handling, model-profile resolution, unsupported-model rejection, and
-boundary rules. A legacy MiniLM real-model smoke test remains available but ignored by
-default; prepare that historical model explicitly with:
-
-```sh
-cargo run -p lean-dup-cli -- embedding prepare --policy download-if-missing --model-id sentence-transformers/all-MiniLM-L6-v2
-cargo test -p lean-dup-embedding -- --ignored prepared_legacy_minilm_model_produces_normalized_vectors_or_clean_skip
-```
-
-The smoke test checks the legacy model's 384-dimensional normalized output when local
-files are prepared, and skips cleanly when they are not. The current default experiment
-profile is BGE-small through FastEmbed; Prompt 35F and later vector-search prompts decide
-whether that model helps candidate generation.
+Implementation evidence is intentionally modest in Prompt 35G. Unit tests cover
+vector-cache keys, cache hits/misses, missing prepared model handling, BGE profile
+resolution, unsupported-model rejection, and boundary rules. Prompt 35E's MiniLM
+rerank-only artifact remains historical negative evidence; no runnable legacy MiniLM
+runtime is kept in the pre-release codebase. The current default experiment profile is
+BGE-small through FastEmbed; Prompt 35F and later vector-search prompts decide whether
+that model helps candidate generation.
 
 ## Red Flag Review
 
@@ -259,13 +249,13 @@ whether that model helps candidate generation.
   embedding capability with stable summaries; runtime complexity stays inside the
   embedding crate.
 - Pass-through wrapper: mitigated. The crate is not a facade over Hugging Face or
-  Candle APIs; it hides model acquisition, local inference, pooling, normalization, and
-  cache policy behind lean-dup-specific facts.
+  FastEmbed APIs; it hides model acquisition, local inference, normalization, wrapping,
+  and cache policy behind lean-dup-specific facts.
 - Temporal decomposition: mitigated. Callers run one prepare capability for acquisition
   and one batch-embedding capability for runtime; they do not sequence tokenizer loading,
-  model loading, inference, pooling, normalization, or cache writes themselves.
-- Information leakage: mitigated by contract. Tokenizer files, tensor layout, model cache
-  layout, and vector cache format are private decisions.
+  model loading, inference, normalization, or cache writes themselves.
+- Information leakage: mitigated by contract. Tokenizer files, runtime internals, model
+  cache layout, and vector cache format are private decisions.
 - Special-general mixture: mitigated. `lean-dup-embedding` lives in the `lean-dup`
   workspace because `lean-dup` is the only current caller; extraction waits for a real
   second product caller.

@@ -1,26 +1,21 @@
 //! Local text embedding boundary for search-quality experiments.
 //!
-//! This crate owns future model acquisition, tokenizer compatibility, CPU
-//! inference, pooling, normalization, batching, vector caching, and embedding
-//! runtime counters. Callers provide declaration-summary strings and receive
-//! stable model/cache/runtime facts; they do not learn Hugging Face cache
-//! layout, model filenames, tokenizer internals, Candle tensor shapes, or
-//! vector-cache storage.
+//! This crate owns model profiles, explicit model acquisition, CPU embedding,
+//! normalization, batching, vector caching, and embedding runtime counters.
+//! Callers provide declaration-summary strings and receive stable
+//! model/cache/runtime facts; they do not learn Hugging Face cache layout,
+//! model filenames, FastEmbed/ONNX internals, or vector-cache storage.
 
 mod error;
 mod fastembed_backend;
-mod model_cache;
-mod pooling;
 mod profiles;
-mod runtime;
 mod vector_cache;
 
 pub use error::{Error, Result};
 use std::path::PathBuf;
-use std::time::Instant;
 
-use hf_hub::{Cache, Repo, RepoType, api::sync::ApiBuilder};
-use profiles::{BGE_SMALL_MODEL_ID, BackendFamily, resolve_profile};
+use hf_hub::Cache;
+use profiles::{BGE_SMALL_MODEL_ID, resolve_profile};
 use serde::{Deserialize, Serialize};
 
 /// Version of the declaration-summary input contract consumed by embeddings.
@@ -113,7 +108,7 @@ pub struct EmbeddingCacheSummary {
     pub cache_label: Option<String>,
 }
 
-/// Stable model-file role used in preparation diagnostics.
+/// Stable prepared-model role used in preparation diagnostics.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "kebab-case")]
 pub enum EmbeddingModelFileRole {
@@ -121,8 +116,6 @@ pub enum EmbeddingModelFileRole {
     Tokenizer,
     TokenizerConfig,
     SpecialTokens,
-    PoolingConfig,
-    Weights,
     RuntimeModel,
 }
 
@@ -210,7 +203,6 @@ pub struct EmbeddingVector {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EmbeddingRuntimeCounters {
     pub model_load_ms: u128,
-    pub tokenization_ms: u128,
     pub inference_ms: u128,
     pub cache_hits: u64,
     pub cache_misses: u64,
@@ -238,10 +230,7 @@ pub struct TextEmbeddingBatchResult {
 pub fn embed_text_batch(request: TextEmbeddingBatchRequest) -> Result<TextEmbeddingBatchResult> {
     let profile = resolve_profile(&request.model)?;
     ensure_profile_enabled(profile)?;
-    match profile.backend {
-        BackendFamily::FastEmbed => fastembed_backend::embed_text_batch(request, profile),
-        BackendFamily::LegacyCandleBert => runtime::embed_text_batch(request, profile),
-    }
+    fastembed_backend::embed_text_batch(request, profile)
 }
 
 /// Validate or prepare an embedding model in the local Hugging Face cache.
@@ -253,10 +242,7 @@ pub fn prepare_embedding_model(request: EmbeddingPrepareRequest) -> Result<Embed
     validate_prepare_request(&request)?;
     let profile = resolve_profile(&request.model)?;
     ensure_profile_enabled(profile)?;
-    if profile.backend == BackendFamily::FastEmbed {
-        return fastembed_backend::prepare_embedding_model(request, profile);
-    }
-    prepare_legacy_model(request, profile)
+    fastembed_backend::prepare_embedding_model(request, profile)
 }
 
 fn ensure_profile_enabled(profile: profiles::ModelProfile) -> Result<()> {
@@ -268,127 +254,6 @@ fn ensure_profile_enabled(profile: profiles::ModelProfile) -> Result<()> {
     Ok(())
 }
 
-fn prepare_legacy_model(
-    request: EmbeddingPrepareRequest,
-    profile: profiles::ModelProfile,
-) -> Result<EmbeddingPrepareResult> {
-    let start = Instant::now();
-    let cache_root = resolve_hf_cache_root(request.cache_root.clone());
-    let cache = Cache::new(cache_root.clone());
-    let repo = model_repo(&request.model);
-    let cache_repo = cache.repo(repo.clone());
-    let api_repo = if request.acquisition_policy == EmbeddingAcquisitionPolicy::DownloadIfMissing {
-        ApiBuilder::from_cache(cache).build().map(|api| api.repo(repo)).ok()
-    } else {
-        None
-    };
-    let api_build_error =
-        if request.acquisition_policy == EmbeddingAcquisitionPolicy::DownloadIfMissing && api_repo.is_none() {
-            Some("could-not-create-hugging-face-api".to_owned())
-        } else {
-            None
-        };
-
-    let mut required_files = Vec::new();
-    for required in profile.required_files() {
-        let cached_path = cache_repo.get(required.filename);
-        let status = if let Some(path) = cached_path {
-            file_status(required.role, EmbeddingModelFileState::Present, &path, None)
-        } else if let Some(api_repo) = &api_repo {
-            match api_repo.get(required.filename) {
-                Ok(path) => file_status(required.role, EmbeddingModelFileState::Downloaded, &path, None),
-                Err(error) => EmbeddingRequiredFileStatus {
-                    role: required.role,
-                    state: EmbeddingModelFileState::Unavailable,
-                    bytes: None,
-                    reason: Some(stable_download_reason(error.to_string())),
-                },
-            }
-        } else if request.acquisition_policy == EmbeddingAcquisitionPolicy::DownloadIfMissing {
-            EmbeddingRequiredFileStatus {
-                role: required.role,
-                state: EmbeddingModelFileState::Unavailable,
-                bytes: None,
-                reason: Some("api-unavailable".to_owned()),
-            }
-        } else {
-            EmbeddingRequiredFileStatus {
-                role: required.role,
-                state: EmbeddingModelFileState::Missing,
-                bytes: None,
-                reason: Some("not-present-in-cache".to_owned()),
-            }
-        };
-        required_files.push(status);
-    }
-
-    let mut reasons = Vec::new();
-    if let Some(reason) = api_build_error {
-        reasons.push(reason);
-    }
-    for file in &required_files {
-        if !matches!(
-            file.state,
-            EmbeddingModelFileState::Present | EmbeddingModelFileState::Downloaded
-        ) {
-            reasons.push(format!(
-                "{}:{}",
-                file.role.as_str(),
-                file.reason.as_deref().unwrap_or("unavailable")
-            ));
-        }
-    }
-
-    let status = if required_files.iter().all(|file| {
-        matches!(
-            file.state,
-            EmbeddingModelFileState::Present | EmbeddingModelFileState::Downloaded
-        )
-    }) {
-        EmbeddingCacheStatus::Prepared
-    } else if required_files
-        .iter()
-        .any(|file| file.state == EmbeddingModelFileState::Unavailable)
-    {
-        EmbeddingCacheStatus::Unusable
-    } else {
-        EmbeddingCacheStatus::NotPrepared
-    };
-    let total_bytes = sum_known_bytes(&required_files);
-    Ok(EmbeddingPrepareResult {
-        model: EmbeddingModelSummary {
-            id: request.model.id.clone(),
-            revision: request.model.revision.clone(),
-            fingerprint: None,
-            profile_id: profile.profile_id.to_owned(),
-            backend_family: profile.backend.label().to_owned(),
-            dimension: profile.dimension,
-            input_roles: profile.input_roles.iter().map(|role| role.label().to_owned()).collect(),
-        },
-        cache: EmbeddingCacheSummary {
-            status,
-            model: request.model,
-            cache_label: Some(cache_root.display().to_string()),
-        },
-        acquisition_policy: request.acquisition_policy,
-        elapsed_ms: start.elapsed().as_millis(),
-        required_files,
-        total_bytes,
-        reasons,
-    })
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct RequiredModelFile {
-    pub(crate) role: EmbeddingModelFileRole,
-    pub(crate) filename: &'static str,
-}
-
-#[cfg(test)]
-pub(crate) fn required_model_files(model: &EmbeddingModelSpec) -> Result<&'static [RequiredModelFile]> {
-    Ok(resolve_profile(model)?.required_files())
-}
-
 impl EmbeddingModelFileRole {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
@@ -396,8 +261,6 @@ impl EmbeddingModelFileRole {
             Self::Tokenizer => "tokenizer",
             Self::TokenizerConfig => "tokenizer-config",
             Self::SpecialTokens => "special-tokens",
-            Self::PoolingConfig => "pooling-config",
-            Self::Weights => "weights",
             Self::RuntimeModel => "runtime-model",
         }
     }
@@ -431,52 +294,9 @@ pub(crate) fn resolve_hf_cache_root(explicit: Option<PathBuf>) -> PathBuf {
     Cache::from_env().path().clone()
 }
 
-pub(crate) fn model_repo(model: &EmbeddingModelSpec) -> Repo {
-    match &model.revision {
-        Some(revision) => Repo::with_revision(model.id.clone(), RepoType::Model, revision.clone()),
-        None => Repo::new(model.id.clone(), RepoType::Model),
-    }
-}
-
-fn file_status(
-    role: EmbeddingModelFileRole,
-    state: EmbeddingModelFileState,
-    path: &std::path::Path,
-    reason: Option<String>,
-) -> EmbeddingRequiredFileStatus {
-    EmbeddingRequiredFileStatus {
-        role,
-        state,
-        bytes: path.metadata().ok().map(|metadata| metadata.len()),
-        reason,
-    }
-}
-
-fn stable_download_reason(error: String) -> String {
-    let lower = error.to_ascii_lowercase();
-    if lower.contains("404") || lower.contains("not found") {
-        "remote-file-missing".to_owned()
-    } else if lower.contains("dns") || lower.contains("network") || lower.contains("connection") {
-        "network-error".to_owned()
-    } else {
-        "download-failed".to_owned()
-    }
-}
-
-pub(crate) fn sum_known_bytes(files: &[EmbeddingRequiredFileStatus]) -> Option<u64> {
-    let mut total = 0_u64;
-    for file in files {
-        let bytes = file.bytes?;
-        total = total.saturating_add(bytes);
-    }
-    Some(total)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use std::path::Path;
 
     #[test]
     fn default_model_is_the_prompt_35_candidate() {
@@ -565,83 +385,23 @@ mod tests {
             result.model.profile_id, "bge-small-en-v1.5",
             "cache-only default uses the FastEmbed BGE profile"
         );
-        assert_eq!(
-            result.required_files.len(),
-            required_model_files(&EmbeddingModelSpec::default_experiment_model())?.len()
+        assert!(result.required_files.len() >= 5);
+        assert!(
+            result
+                .required_files
+                .iter()
+                .any(|file| file.role == EmbeddingModelFileRole::RuntimeModel)
+        );
+        assert!(
+            result
+                .required_files
+                .iter()
+                .any(|file| file.role == EmbeddingModelFileRole::Tokenizer)
         );
         assert!(result.required_files.iter().all(|file| {
             file.state == EmbeddingModelFileState::Missing && file.reason.as_deref() == Some("not-present-in-cache")
         }));
         assert_eq!(result.total_bytes, None);
-        Ok(())
-    }
-
-    #[test]
-    fn fake_prepared_cache_validates_required_roles() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let temp = tempfile::TempDir::new()?;
-        write_fake_model_cache(temp.path(), true)?;
-        let result = prepare_embedding_model(EmbeddingPrepareRequest {
-            model: legacy_minilm_model(),
-            acquisition_policy: EmbeddingAcquisitionPolicy::CacheOnly,
-            cache_root: Some(temp.path().to_path_buf()),
-        })?;
-        assert_eq!(result.cache.status, EmbeddingCacheStatus::Prepared);
-        assert_eq!(result.model.profile_id, "legacy-minilm-rerank-baseline");
-        assert!(result.reasons.is_empty());
-        assert_eq!(result.model.fingerprint, None);
-        assert!(result.total_bytes.is_some());
-        assert!(result.required_files.iter().all(|file| {
-            file.state == EmbeddingModelFileState::Present && file.bytes.is_some() && file.reason.is_none()
-        }));
-        Ok(())
-    }
-
-    #[test]
-    fn missing_safetensors_weight_keeps_cache_not_prepared() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let temp = tempfile::TempDir::new()?;
-        write_fake_model_cache(temp.path(), false)?;
-        let result = prepare_embedding_model(EmbeddingPrepareRequest {
-            model: legacy_minilm_model(),
-            acquisition_policy: EmbeddingAcquisitionPolicy::CacheOnly,
-            cache_root: Some(temp.path().to_path_buf()),
-        })?;
-        assert_eq!(result.cache.status, EmbeddingCacheStatus::NotPrepared);
-        let weights = result
-            .required_files
-            .iter()
-            .find(|file| file.role == EmbeddingModelFileRole::Weights);
-        assert!(matches!(
-            weights,
-            Some(file) if file.state == EmbeddingModelFileState::Missing
-        ));
-        Ok(())
-    }
-
-    fn legacy_minilm_model() -> EmbeddingModelSpec {
-        EmbeddingModelSpec {
-            id: "sentence-transformers/all-MiniLM-L6-v2".to_owned(),
-            revision: None,
-        }
-    }
-
-    fn write_fake_model_cache(root: &Path, include_weights: bool) -> std::io::Result<()> {
-        let repo = root.join("models--sentence-transformers--all-MiniLM-L6-v2");
-        let commit = "fake-commit";
-        fs::create_dir_all(repo.join("refs"))?;
-        fs::write(repo.join("refs/main"), commit)?;
-        let snapshot = repo.join("snapshots").join(commit);
-        let required_files =
-            required_model_files(&legacy_minilm_model()).map_err(|error| std::io::Error::other(error.to_string()))?;
-        for required in required_files {
-            if !include_weights && required.role == EmbeddingModelFileRole::Weights {
-                continue;
-            }
-            let path = snapshot.join(required.filename);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            fs::write(path, format!("fake {}", required.role.as_str()))?;
-        }
         Ok(())
     }
 }

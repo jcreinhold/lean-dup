@@ -5,17 +5,17 @@ name = "lean-dup-eval"
 version.workspace = true
 
 [dependencies]
-lean-dup-diagnostics = { path = "../diagnostics" }
-lean-dup-embedding = { path = "../embedding" }
-lean-dup-index = { path = "../index" }
-lean-dup-project = { path = "../project" }
-lean-dup-search = { path = "../search" }
-lean-dup-worker = { path = "../worker" }
-rustc-hash = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "2"
-walkdir = "2"
+lean-dup-diagnostics.workspace = true
+lean-dup-embedding.workspace = true
+lean-dup-index.workspace = true
+lean-dup-project.workspace = true
+lean-dup-search.workspace = true
+lean-dup-worker.workspace = true
+rustc-hash.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+walkdir.workspace = true
 
 [dev-dependencies]
-tempfile = "3"
+tempfile.workspace = true

@@ -2,9 +2,6 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("embedding runtime is not implemented until Prompt 35C")]
-    UnsupportedUntilRuntimePrompt,
-
     #[error("embedding model id must not be empty")]
     EmptyModelId,
 
@@ -30,9 +27,6 @@ pub enum Error {
         #[source]
         source: serde_json::Error,
     },
-
-    #[error("embedding tokenizer failed: {reason}")]
-    Tokenizer { reason: String },
 
     #[error("embedding runtime failed: {reason}")]
     Runtime { reason: String },

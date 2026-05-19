@@ -6,14 +6,13 @@ use fastembed::{InitOptionsUserDefined, TextEmbedding, TokenizerFiles, UserDefin
 use hf_hub::{Cache, Repo, RepoType, api::sync::ApiBuilder};
 use sha2::Digest;
 
-use crate::pooling::normalize;
 use crate::profiles::ModelProfile;
 use crate::vector_cache::VectorCache;
 use crate::{
     EmbeddingAcquisitionPolicy, EmbeddingCacheStatus, EmbeddingCacheSummary, EmbeddingModelFileRole,
     EmbeddingModelFileState, EmbeddingModelSpec, EmbeddingPrepareRequest, EmbeddingPrepareResult,
     EmbeddingRequiredFileStatus, EmbeddingRuntimeCounters, EmbeddingVector, Error, Result, TextEmbeddingBatchRequest,
-    TextEmbeddingBatchResult, resolve_hf_cache_root, sum_known_bytes,
+    TextEmbeddingBatchResult, resolve_hf_cache_root,
 };
 
 const DEFAULT_FASTEMBED_BATCH_SIZE: usize = 256;
@@ -394,7 +393,6 @@ fn files_from_paths(paths: Vec<(EmbeddingModelFileRole, PathBuf)>) -> Option<Fas
             EmbeddingModelFileRole::Tokenizer => tokenizer = Some(path),
             EmbeddingModelFileRole::TokenizerConfig => tokenizer_config = Some(path),
             EmbeddingModelFileRole::SpecialTokens => special_tokens = Some(path),
-            EmbeddingModelFileRole::PoolingConfig | EmbeddingModelFileRole::Weights => {}
         }
     }
     Some(FastEmbedPreparedFiles {
@@ -450,4 +448,30 @@ fn stable_fastembed_error(error: String) -> String {
     } else {
         first.to_owned()
     }
+}
+
+fn normalize(values: Vec<f32>) -> Result<Vec<f32>> {
+    let norm = values
+        .iter()
+        .map(|value| f64::from(*value) * f64::from(*value))
+        .sum::<f64>()
+        .sqrt();
+    if !norm.is_finite() || norm <= f64::EPSILON {
+        return Err(Error::InvalidVector {
+            reason: "zero-or-nonfinite-norm".to_owned(),
+        });
+    }
+    Ok(values
+        .into_iter()
+        .map(|value| (f64::from(value) / norm) as f32)
+        .collect())
+}
+
+fn sum_known_bytes(files: &[EmbeddingRequiredFileStatus]) -> Option<u64> {
+    let mut total = 0_u64;
+    for file in files {
+        let bytes = file.bytes?;
+        total = total.saturating_add(bytes);
+    }
+    Some(total)
 }

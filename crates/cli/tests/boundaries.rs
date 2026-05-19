@@ -145,8 +145,8 @@ fn embedding_acquisition_dependency_stays_inside_embedding_crate() {
         ] {
             let has_runtime_dependency = dependencies.iter().any(|dependency| dependency == runtime_dependency);
             assert!(
-                !has_runtime_dependency || name == "lean-dup-embedding",
-                "{name} must not depend on embedding runtime dependency {runtime_dependency}"
+                !has_runtime_dependency,
+                "{name} must not depend on removed legacy embedding runtime dependency {runtime_dependency}"
             );
         }
         for forbidden in ["ort", "accelerate-src", "intel-mkl-src", "cudarc"] {

@@ -117,8 +117,9 @@ belongs in the embedding crate's profile registry and backend adapters.
 
 `lean-dup-embedding` exposes model-profile operations. Profiles own model id, backend
 family, dimension, input role behavior, max length, normalization expectation, and cache
-requirements. Runtime code may use FastEmbed, Candle, or a later backend, but callers see
-only stable preparation, embedding, and runtime facts.
+requirements. Runtime code currently uses FastEmbed; a later backend is allowed only
+behind the same profile facade. Callers see only stable preparation, embedding, and
+runtime facts.
 
 `lean-dup-vector-index` exposes corpus operations. It builds or opens a persisted
 declaration-vector corpus identified by source corpus provenance, embedding model
@@ -149,8 +150,8 @@ FastEmbed is a plausible first embedding runtime path because current Rust docs 
 `BAAI/bge-small-en-v1.5` as the default text embedding model, list Qwen3 embedding
 models behind an explicit feature, and hide tokenizer/runtime details behind a batch
 embedding API. The backend still belongs behind `lean-dup-embedding` profiles because
-FastEmbed's model set, ONNX/Candle split, and prefix conventions are runtime details, not
-search or eval facts. Source: <https://docs.rs/crate/fastembed/latest>.
+FastEmbed's model set, ONNX/ORT mechanics, and prefix conventions are runtime details,
+not search or eval facts. Source: <https://docs.rs/crate/fastembed/latest>.
 
 LanceDB is the first persistent local vector database candidate because it supports an
 embedded local filesystem path, Rust, persistent storage, metadata filtering, and vector
@@ -214,4 +215,3 @@ backend-specific manifests or decide whether a persisted index can be reused.
 - Implementation details contaminating interface comments: mitigated. Backend names are
   recorded as architecture evidence only and must not become search/eval/report interface
   comments.
-

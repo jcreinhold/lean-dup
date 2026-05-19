@@ -509,10 +509,7 @@ fn build_pairs_and_metrics(
 }
 
 fn runtime_total_ms(counters: &EmbeddingRuntimeCounters) -> u128 {
-    counters
-        .model_load_ms
-        .saturating_add(counters.tokenization_ms)
-        .saturating_add(counters.inference_ms)
+    counters.model_load_ms.saturating_add(counters.inference_ms)
 }
 
 fn pair_similarity(pair: &SearchObservedPair, vectors: &BTreeMap<String, Vec<f32>>) -> Option<f64> {

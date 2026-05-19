@@ -380,8 +380,6 @@ fn file_role_name(role: EmbeddingModelFileRole) -> &'static str {
         EmbeddingModelFileRole::Tokenizer => "tokenizer",
         EmbeddingModelFileRole::TokenizerConfig => "tokenizer-config",
         EmbeddingModelFileRole::SpecialTokens => "special-tokens",
-        EmbeddingModelFileRole::PoolingConfig => "pooling-config",
-        EmbeddingModelFileRole::Weights => "weights",
         EmbeddingModelFileRole::RuntimeModel => "runtime-model",
     }
 }
