@@ -34,8 +34,8 @@ pretty-printed types, or let SQLite layout leak into audit, ranking, or reportin
 
 The rejected alternative had Lean emit names and pretty-printed types and let Rust recompute
 fingerprints, statement features, and probe-like checks from strings. It looks convenient because
-Rust owns the CLI and index, but it leaks Lean semantics into the scale layer, turns display text
-into a false abstraction, and reproduces the mistake that hurt the retired Python tool.
+Rust owns the CLI and index, but it leaks Lean semantics into the scale layer and turns display
+text into a false abstraction.
 
 The chosen design hides Lean expression traversal entirely behind the worker. Rust stores opaque
 ids and keys, never parses Lean syntax, and never calls into a Lean FFI on the default path. A
@@ -91,9 +91,6 @@ Red flags to watch for:
   retrieval;
 - interface comments that describe SQLite layout, Lean traversal algorithms, or migration
   scaffolding.
-
-The retired Python implementation is documented separately in
-[python-deprecation-map.md](python-deprecation-map.md); other docs do not relitigate it.
 
 ## Validated capabilities
 

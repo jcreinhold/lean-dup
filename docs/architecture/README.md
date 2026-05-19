@@ -27,7 +27,3 @@ Reference material for contributors. For a Lean-developer-facing walkthrough, se
 
 - [search-quality.md](search-quality.md) — match-class taxonomy, four-stage pipeline, quality contract.
 - [evaluation/](evaluation/) — labels, metrics, gates, scorer, dataset artifacts.
-
-**Historical**
-
-- [python-deprecation-map.md](python-deprecation-map.md) — what the retired Python implementation was superseded by.

@@ -10,8 +10,7 @@ For the search-quality contract that governs `G1`–`G3`, see [search-quality.md
 
 `lean-dup` is production-ready when it is a local, deterministic, read-only duplicate auditor
 with proven correctness, high-precision default output, stable cache behavior, explainable
-reports, reproducible releases, and no dependency on Python-era implementation paths.
-Concretely, all of:
+reports, and reproducible releases. Concretely, all of:
 
 - correctness and regression quality from labeled denominators, not anecdote;
 - precision control: default queues do not show weak feature-only or known-bogus mathlib matches
@@ -25,8 +24,7 @@ Concretely, all of:
 - empty visible queues that explain themselves; hidden evidence summarized; JSON with a
   documented stable contract;
 - CI, packaging, version output, doctor diagnostics, and supported-commands docs at release
-  grade;
-- Python-era modules, tests, and packaging removed or quarantined.
+  grade.
 
 ## Gates
 
@@ -40,7 +38,6 @@ Concretely, all of:
 | `G6 full_audit_performance`         | `target/perf/` outputs                                                                                                                       |
 | `G7 report_contract`                | [report-contract.md](report-contract.md) + `target/report-contract/` golden outputs                                                          |
 | `G8 release_hardening`              | release-hardening.md, CI config, `target/release-diagnostics/`                                                                               |
-| `G9 python_deprecation`             | [python-deprecation-map.md](python-deprecation-map.md) + eval artifacts                                                                      |
 
 Production claim per gate:
 
@@ -56,7 +53,6 @@ Production claim per gate:
 - **G7**: Empty queues, hidden groups, unavailable probes, provenance, and JSON schema are
   explained.
 - **G8**: CI, packaging, version output, install docs, and reproducibility are release-grade.
-- **G9**: Validated Python-era capabilities are preserved; superseded Python paths removed.
 
 ## Required commands
 
@@ -131,7 +127,7 @@ The release is a no-go if any of these remain true:
 - full KanProofs audits fail, require `--no-semantic-probes` for ordinary use, or lack clear
   unavailable-probe diagnostics;
 - source-backed and static external evidence are indistinguishable in JSON or text output;
-- cache reuse depends on unrelated project dirtiness, absolute paths, or Python-era layout;
+- cache reuse depends on unrelated project dirtiness or absolute paths;
 - release artifacts cannot identify binary, Git revision, Lean version, worker version, protocol
   version, index schema, and report schema;
-- README examples rely on Python entry points or private local paths for common workflows.
+- README examples rely on private local paths for common workflows.

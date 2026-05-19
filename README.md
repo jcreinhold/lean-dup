@@ -71,10 +71,6 @@ as-built pipeline. Then:
 - [Production readiness](docs/architecture/production-readiness.md)
 - [Search quality](docs/architecture/search-quality.md)
 
-The Python implementation has been retired; the production command surface is the Rust
-`lean-dup` binary. The [deprecation map](docs/architecture/python-deprecation-map.md) records what
-each Python module was superseded by.
-
 ## License
 
 Apache-2.0 OR MIT, at your option. See `LICENSE-APACHE` and `LICENSE-MIT`.

@@ -196,4 +196,4 @@ do not expose SQLite layout, cache-key JSON, or latest-pointer details to audit/
 reporting; do not let a label such as `mathlib` imply proof-grade evidence without provenance;
 do not make broad/noisy candidate dumps the default; do not put private corpus paths in default
 CI; do not treat aggregate eval command completion as release quality when raw recall and
-hard-negative denominators fail; do not preserve Python compatibility shells.
+hard-negative denominators fail.

@@ -46,7 +46,6 @@ None of these details leak into command parsing or output routing.
 Text and JSON reports render from typed report facts. Progress and profile output go to stderr. JSON stdout remains a
 single parseable value even when progress/profile flags are enabled.
 
-The CLI is a thin command shell over deep internal boundaries. The two rejected alternatives —
-inlining workspace/worker/cache/retrieval/ranking/rendering into `main.rs`, and a Rust binary
-that delegates to retired Python — both create two production surfaces against one set of
-contracts and let parsing or output routing drift with every production change.
+The CLI is a thin command shell over deep internal boundaries. Inlining workspace, worker, cache,
+retrieval, ranking, and rendering into `main.rs` was rejected: every production change would risk
+perturbing parsing or output routing.
