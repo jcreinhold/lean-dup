@@ -3,8 +3,8 @@
 What every audit report—text, JSON, and `show`—must explain. Renderers consume typed explanation facts and never
 invent the policy themselves.
 
-For the pipeline that builds these facts, see [06-end-to-end-architecture.md](06-end-to-end-architecture.md).
-This document defines `G7 report_contract` in [04-production-readiness.md](04-production-readiness.md).
+For the pipeline that builds these facts, see [end-to-end-architecture.md](end-to-end-architecture.md).
+This document defines `G7 report_contract` in [production-readiness.md](production-readiness.md).
 
 ## Schema
 

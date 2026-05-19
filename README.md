@@ -56,19 +56,19 @@ references to replace or preserve behind a transitional alias.
 Intra-workspace audits are usable today. `--compare-mathlib` runs but the release-quality gates
 `G1 regression_quality` and `G2 precision_control` are open: recall against real mathlib corpora
 has not been demonstrated yet. See
-[docs/architecture/04-production-readiness.md](docs/architecture/04-production-readiness.md) for
+[docs/architecture/production-readiness.md](docs/architecture/production-readiness.md) for
 the gate table. The CLI is read-only with respect to your Lean source, so trying it costs only
 time.
 
 ## Architecture
 
-Start with the [end-to-end architecture](docs/architecture/06-end-to-end-architecture.md) for the
+Start with the [end-to-end architecture](docs/architecture/end-to-end-architecture.md) for the
 as-built pipeline. Then:
 
-- [Architecture charter](docs/architecture/00-overview.md)
-- [Worker protocol](docs/architecture/01-worker-protocol.md)
-- [Crate factoring](docs/architecture/07-crate-factoring.md)
-- [Production readiness](docs/architecture/04-production-readiness.md)
+- [Architecture charter](docs/architecture/overview.md)
+- [Worker protocol](docs/architecture/worker-protocol.md)
+- [Crate factoring](docs/architecture/crate-factoring.md)
+- [Production readiness](docs/architecture/production-readiness.md)
 - [Search quality](docs/architecture/search-quality.md)
 
 The Python implementation has been retired; the production command surface is the Rust

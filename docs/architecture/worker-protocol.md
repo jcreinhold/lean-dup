@@ -4,8 +4,8 @@ The Lean worker answers six commands over a JSON request → JSONL response wire
 document is the caller-facing contract: schema versions, command guarantees, what Rust may rely
 on, and what stays hidden inside the worker.
 
-For the pipeline that uses this protocol, see [06-end-to-end-architecture.md](06-end-to-end-architecture.md).
-For the layering rule behind the boundary, see [00-overview.md](00-overview.md).
+For the pipeline that uses this protocol, see [end-to-end-architecture.md](end-to-end-architecture.md).
+For the layering rule behind the boundary, see [overview.md](overview.md).
 
 ## Commands
 

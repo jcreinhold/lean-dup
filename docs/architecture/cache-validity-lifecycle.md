@@ -3,7 +3,7 @@
 `lean-dup` reuses indexes across audits. This document defines when an index is still good, when it must be rebuilt,
 and how `doctor` and the hidden `cache-cleanup` keep the cache directory honest.
 
-For the pipeline that uses the cache, see [06-end-to-end-architecture.md](06-end-to-end-architecture.md).
+For the pipeline that uses the cache, see [end-to-end-architecture.md](end-to-end-architecture.md).
 
 ## What makes an index stale
 

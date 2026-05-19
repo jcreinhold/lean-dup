@@ -2,9 +2,9 @@
 
 The retired Python implementation, what replaced each piece, and the design mistake each
 replacement eliminated. This document defines `G9 python_deprecation` in
-[04-production-readiness.md](04-production-readiness.md).
+[production-readiness.md](production-readiness.md).
 
-For the current Rust/Lean architecture, see [06-end-to-end-architecture.md](06-end-to-end-architecture.md).
+For the current Rust/Lean architecture, see [end-to-end-architecture.md](end-to-end-architecture.md).
 
 Stale Python worker tests were not retained. They expected worker stdout to contain only row
 payloads; the production worker streams progress and data events through JSONL. Rust protocol

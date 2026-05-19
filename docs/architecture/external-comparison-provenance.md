@@ -4,7 +4,7 @@ Every external comparison index has one of three evidence modes. Ranking, semant
 consume this mode; nothing else gates how strongly a non-workspace match can be claimed.
 
 For the audit flow that uses this boundary, see
-[06-end-to-end-architecture.md](06-end-to-end-architecture.md).
+[end-to-end-architecture.md](end-to-end-architecture.md).
 
 ## Evidence modes
 

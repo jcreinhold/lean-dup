@@ -3,7 +3,7 @@
 Quality is measured before release work continues. This boundary defines the suites, their gate
 status, and the raw counts they emit.
 
-For the pipeline that produces the observations, see [../06-end-to-end-architecture.md](../06-end-to-end-architecture.md).
+For the pipeline that produces the observations, see [../end-to-end-architecture.md](../end-to-end-architecture.md).
 For the typed adjudication schema, see [search-labels.md](search-labels.md). For stage-level
 denominators, see [search-stage-metrics.md](search-stage-metrics.md).
 

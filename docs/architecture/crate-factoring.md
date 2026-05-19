@@ -4,7 +4,7 @@ Eight Rust crates, each owning one kind of hidden knowledge. The split is functi
 class of change (Lean protocol mechanics, Lake project resolution, persisted storage, search and review policy,
 report projection, quality measurement, terminal I/O), not to mirror one old source file.
 
-For the pipeline the crates implement, see [06-end-to-end-architecture.md](06-end-to-end-architecture.md).
+For the pipeline the crates implement, see [end-to-end-architecture.md](end-to-end-architecture.md).
 
 ## Crates
 

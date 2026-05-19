@@ -4,8 +4,8 @@ The `lean-dup` binary parses commands, routes orchestration, and writes output. 
 discovery, worker management, indexing, retrieval, ranking, reporting, evaluation, performance,
 and cache lifecycle live behind capability-oriented modules.
 
-For the full pipeline this CLI drives, see [06-end-to-end-architecture.md](06-end-to-end-architecture.md).
-For the layering rule, see [00-overview.md](00-overview.md).
+For the full pipeline this CLI drives, see [end-to-end-architecture.md](end-to-end-architecture.md).
+For the layering rule, see [overview.md](overview.md).
 
 ## Commands
 

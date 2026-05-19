@@ -4,9 +4,9 @@ The as-built reference for `lean-dup`. Rust owns workflow, persistence, scale, r
 reporting, evaluation, and release. Lean owns facts that require the elaborated environment.
 Everything else flows from that.
 
-For the layering rule, see [00-overview.md](00-overview.md). For release gates, see
-[04-production-readiness.md](04-production-readiness.md). For Rust crate boundaries, see
-[07-crate-factoring.md](07-crate-factoring.md).
+For the layering rule, see [overview.md](overview.md). For release gates, see
+[production-readiness.md](production-readiness.md). For Rust crate boundaries, see
+[crate-factoring.md](crate-factoring.md).
 
 ## Commands
 
@@ -72,7 +72,7 @@ toolchain/worker semantics.
 ### Lean worker and protocol
 
 The worker under `lean/LeanDup/` imports selected modules and emits typed semantic rows through
-the versioned protocol in [01-worker-protocol.md](01-worker-protocol.md). Six commands:
+the versioned protocol in [worker-protocol.md](worker-protocol.md). Six commands:
 `extract`, `features`, `index`, `probe`, `doctor`, `version`. Rust may rely on declaration rows,
 feature rows, probe results, progress, completion, and structured errors. Rust may not rely on
 Lean `Expr` constructors, pretty-printed statement text, private worker batching, or stderr
@@ -101,7 +101,7 @@ by default and protects active latest targets and expected current indexes befor
 ### External provenance
 
 `external_provenance.rs` owns the source-backed vs static distinction. See
-[05-external-comparison-provenance.md](05-external-comparison-provenance.md). Ranking and
+[external-comparison-provenance.md](external-comparison-provenance.md). Ranking and
 semantic verification consume a typed policy object, not label strings. A static index named
 `mathlib` remains usable but cannot silently claim proof-grade Lean evidence.
 
@@ -190,7 +190,7 @@ timing sequences as public workflow.
 
 ## Guardrails
 
-The architectural rules live in [00-overview.md](00-overview.md#design-rules). The short form for
+The architectural rules live in [overview.md](overview.md#design-rules). The short form for
 this pipeline: do not move Lean semantic interpretation into Rust through pretty-printed text;
 do not expose SQLite layout, cache-key JSON, or latest-pointer details to audit/ranking/
 reporting; do not let a label such as `mathlib` imply proof-grade evidence without provenance;

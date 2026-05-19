@@ -3,7 +3,7 @@
 The release contract: named gates, required evidence, no-go criteria. A gate is open until
 concrete command output or a checked artifact proves it. Prose alone never closes a gate.
 
-For the pipeline these gates measure, see [06-end-to-end-architecture.md](06-end-to-end-architecture.md).
+For the pipeline these gates measure, see [end-to-end-architecture.md](end-to-end-architecture.md).
 For the search-quality contract that governs `G1`–`G3`, see [search-quality.md](search-quality.md).
 
 ## Definition
@@ -35,7 +35,7 @@ Concretely, all of:
 | `G1 regression_quality`             | [search-quality.md](search-quality.md), [evaluation/production-gates.md](evaluation/production-gates.md), `target/eval/production-gate.json` |
 | `G2 precision_control`              | search-quality.md, production-gates.md hard-negative section, fixture/KanProofs eval JSON                                                    |
 | `G3 semantic_probe_yield`           | real-workload probe evidence under `target/audit-runs/`                                                                                      |
-| `G4 external_comparison_provenance` | [05-external-comparison-provenance.md](05-external-comparison-provenance.md) + JSON/profile fixtures                                         |
+| `G4 external_comparison_provenance` | [external-comparison-provenance.md](external-comparison-provenance.md) + JSON/profile fixtures                                         |
 | `G5 cache_validity_lifecycle`       | [cache-validity-lifecycle.md](cache-validity-lifecycle.md) + `target/cache/doctor-production.json`                                           |
 | `G6 full_audit_performance`         | `target/perf/` outputs                                                                                                                       |
 | `G7 report_contract`                | [report-contract.md](report-contract.md) + `target/report-contract/` golden outputs                                                          |

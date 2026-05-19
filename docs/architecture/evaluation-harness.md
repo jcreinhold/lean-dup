@@ -4,7 +4,7 @@ The harness scores observed candidate pairs against gold labels and emits raw co
 ranking, or probe change is shown to be an improvement rather than a vibe shift.
 
 For the production-gate suite, see [evaluation/production-gates.md](evaluation/production-gates.md).
-For the full pipeline, see [06-end-to-end-architecture.md](06-end-to-end-architecture.md).
+For the full pipeline, see [end-to-end-architecture.md](end-to-end-architecture.md).
 
 ## Metrics
 
@@ -46,6 +46,6 @@ definitions keeps the metric interface small and reusable.
 
 Command-level success means the suite ran. Release readiness depends on the raw denominators
 satisfying `G1 regression_quality` and `G2 precision_control` in
-[04-production-readiness.md](04-production-readiness.md). The `production-gate` aggregate may
+[production-readiness.md](production-readiness.md). The `production-gate` aggregate may
 report `status = incomplete` on machines without the KanProofs workspace; that is a recorded
 fact, not a pass.

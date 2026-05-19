@@ -2,8 +2,8 @@
 
 This is the doctrine document for `lean-dup`: the layer boundaries, the design rules other
 documents rely on, and the non-goals. For the as-built pipeline, see
-[06-end-to-end-architecture.md](06-end-to-end-architecture.md). For release gates, see
-[04-production-readiness.md](04-production-readiness.md).
+[end-to-end-architecture.md](end-to-end-architecture.md). For release gates, see
+[production-readiness.md](production-readiness.md).
 
 ## The Lean/Rust boundary
 
@@ -14,7 +14,7 @@ One rule sits above everything else:
   evaluation, release.
 
 Rust asks Lean semantic questions through a narrow, versioned
-[worker protocol](01-worker-protocol.md). JSON and JSONL are transport encodings, not
+[worker protocol](worker-protocol.md). JSON and JSONL are transport encodings, not
 architecture. Rust must not inspect Lean expressions, recompute semantic fingerprints from
 pretty-printed types, or let SQLite layout leak into audit, ranking, or reporting code.
 
@@ -135,6 +135,6 @@ result reproducible.
 
 ## References
 
-- [End-to-end architecture](06-end-to-end-architecture.md)
-- [Production readiness](04-production-readiness.md)
+- [End-to-end architecture](end-to-end-architecture.md)
+- [Production readiness](production-readiness.md)
 - [Loogle.lean](https://github.com/nomeata/loogle/blob/master/Loogle.lean)

@@ -187,7 +187,7 @@ Each group describes one kind of relationship between declarations. The full tax
 ### Evidence mode
 
 Each group declares how strong the evidence behind it is. See
-[external comparison provenance](architecture/05-external-comparison-provenance.md) for the policy.
+[external comparison provenance](architecture/external-comparison-provenance.md) for the policy.
 
 - `proof-grade` — Lean verified the relationship, or the comparison index is source-backed and importable in the
   current Lean environment.
@@ -216,7 +216,7 @@ You can act on a hint by hand, or save the JSON for later tooling. `lean-dup` it
 ## Current limitations
 
 The release-readiness gates `G1 regression_quality` and `G2 precision_control` documented in
-[architecture/04-production-readiness.md](architecture/04-production-readiness.md) are both open. Today:
+[architecture/production-readiness.md](architecture/production-readiness.md) are both open. Today:
 
 - *Intra-workspace audits* (no `--compare-mathlib`) are the most useful invocation. The fixture suite passes its
   quality bar and the same path scales to real Lake projects.
@@ -266,7 +266,7 @@ For deeper diagnosis run `doctor --format json` and inspect the cache + provenan
 
 For bugs and feature requests, open an issue on the project's GitHub repository.
 
-For contributors, start with the [architecture charter](architecture/00-overview.md) and the
-[end-to-end architecture](architecture/06-end-to-end-architecture.md).
+For contributors, start with the [architecture charter](architecture/overview.md) and the
+[end-to-end architecture](architecture/end-to-end-architecture.md).
 
 License: Apache-2.0 OR MIT. See `LICENSE-APACHE` and `LICENSE-MIT`.
