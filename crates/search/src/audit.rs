@@ -20,6 +20,10 @@ use crate::replacement_hints::{
 use crate::retrieval::RetrievalDiagnostics;
 use crate::retrieval::retrieve_candidates;
 use crate::scorer::{SearchScoringSummary, default_summary};
+use crate::semantic_reranking::{
+    SearchSemanticObligationFact, SearchSemanticObligationYield, SearchSemanticRerankingSummary, sorted_yield,
+    summary as semantic_reranking_summary,
+};
 use crate::semantic_verification::{
     ProbeDiagnostics, ProbeSettings, SemanticVerificationInput, VerificationIndex, candidate_sets_for_review,
     verify_candidate_probes,
@@ -135,6 +139,7 @@ pub struct AuditRetrievalSummary {
 /// Stable semantic-probe counters exposed by audit workflows.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AuditProbeSummary {
+    pub semantic_reranking: SearchSemanticRerankingSummary,
     pub enabled: bool,
     pub policy: String,
     pub budget: usize,
@@ -165,6 +170,7 @@ pub struct AuditProbeSummary {
     pub unavailable_by_module: BTreeMap<String, usize>,
     pub unavailable_by_origin: BTreeMap<String, usize>,
     pub verified_results: usize,
+    pub obligation_yield: Vec<SearchSemanticObligationYield>,
 }
 
 /// Review queue facts computed by the search workflow.
@@ -199,6 +205,7 @@ pub struct AuditGroup {
     pub target_module: Option<String>,
     pub evidence_mode: String,
     pub probe_summary: Option<String>,
+    pub semantic_obligations: Vec<SearchSemanticObligationFact>,
     pub local_caller_count: usize,
     pub replacement_hint: Option<AuditReplacementHint>,
     pub visibility: AuditVisibility,
@@ -572,6 +579,7 @@ fn audit_retrieval_summary(diagnostics: &RetrievalDiagnostics) -> AuditRetrieval
 
 fn audit_probe_summary(diagnostics: &ProbeDiagnostics) -> AuditProbeSummary {
     AuditProbeSummary {
+        semantic_reranking: semantic_reranking_summary(),
         enabled: diagnostics.enabled,
         policy: diagnostics.policy.clone(),
         budget: diagnostics.budget,
@@ -602,6 +610,7 @@ fn audit_probe_summary(diagnostics: &ProbeDiagnostics) -> AuditProbeSummary {
         unavailable_by_module: diagnostics.unavailable_by_module.clone(),
         unavailable_by_origin: diagnostics.unavailable_by_origin.clone(),
         verified_results: diagnostics.verified_results,
+        obligation_yield: sorted_yield(diagnostics.obligation_yield.clone()),
     }
 }
 
@@ -637,6 +646,7 @@ fn audit_group(group: &RankedGroup, filter: ReviewFilter) -> AuditGroup {
         target_module: group.target_module.clone(),
         evidence_mode: evidence_mode_label(group.evidence_mode).to_owned(),
         probe_summary: group.probe_summary.clone(),
+        semantic_obligations: group.semantic_obligations.clone(),
         local_caller_count: group.local_caller_count,
         replacement_hint: group.replacement_hint.as_ref().map(audit_replacement_hint),
         visibility: audit_visibility(group, filter),

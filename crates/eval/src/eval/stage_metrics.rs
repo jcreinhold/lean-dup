@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use lean_dup_search::{SearchSemanticObligationKind, SearchSemanticObligationYield, SearchSemanticRerankingSummary};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
 
@@ -41,10 +42,12 @@ pub struct CountAtK {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct SemanticVerificationStageMetrics {
+    pub semantic_reranking: SearchSemanticRerankingSummary,
     pub planned: usize,
     pub cached: usize,
     pub worker: usize,
     pub unavailable: usize,
+    pub obligation_yield: Vec<SearchSemanticObligationYield>,
 }
 
 pub fn score(labels: &GoldLabels, observed: &ObservedRun, k_values: &[usize]) -> SearchStageMetrics {
@@ -173,6 +176,7 @@ pub fn aggregate(_suite: &str, runs: &[&SearchStageMetrics]) -> SearchStageMetri
                 .map(|metrics| &metrics.hard_negative_generated_by_feature_family),
         ),
         semantic_verification: SemanticVerificationStageMetrics {
+            semantic_reranking: SearchSemanticRerankingSummary::default(),
             planned: runs.iter().map(|metrics| metrics.semantic_verification.planned).sum(),
             cached: runs.iter().map(|metrics| metrics.semantic_verification.cached).sum(),
             worker: runs.iter().map(|metrics| metrics.semantic_verification.worker).sum(),
@@ -180,8 +184,33 @@ pub fn aggregate(_suite: &str, runs: &[&SearchStageMetrics]) -> SearchStageMetri
                 .iter()
                 .map(|metrics| metrics.semantic_verification.unavailable)
                 .sum(),
+            obligation_yield: aggregate_obligation_yield(
+                runs.iter()
+                    .flat_map(|metrics| metrics.semantic_verification.obligation_yield.iter()),
+            ),
         },
     }
+}
+
+fn aggregate_obligation_yield<'a>(
+    items: impl Iterator<Item = &'a SearchSemanticObligationYield>,
+) -> Vec<SearchSemanticObligationYield> {
+    let mut by_kind = BTreeMap::<SearchSemanticObligationKind, SearchSemanticObligationYield>::new();
+    for item in items {
+        let aggregate = by_kind
+            .entry(item.kind)
+            .or_insert_with(|| SearchSemanticObligationYield {
+                kind: item.kind,
+                ..SearchSemanticObligationYield::default()
+            });
+        aggregate.planned += item.planned;
+        aggregate.verified += item.verified;
+        aggregate.rejected += item.rejected;
+        aggregate.unavailable += item.unavailable;
+        aggregate.cached += item.cached;
+        aggregate.worker_pairs += item.worker_pairs;
+    }
+    by_kind.into_values().collect()
 }
 
 fn count_by_origin(observed: &ObservedRun) -> BTreeMap<String, usize> {
@@ -332,7 +361,7 @@ fn sum_maps<'a>(maps: impl Iterator<Item = &'a BTreeMap<String, usize>>) -> BTre
 mod tests {
     use rustc_hash::FxHashSet;
 
-    use super::{SemanticVerificationStageMetrics, score};
+    use super::{SearchStageMetrics, SemanticVerificationStageMetrics, aggregate, score};
     use crate::eval::labels::GoldLabels;
     use crate::eval::scoring::{CountMetric, GoldPair, ObservedPair, ObservedRun, TimingMetrics};
 
@@ -388,6 +417,41 @@ mod tests {
             metrics.semantic_verification,
             SemanticVerificationStageMetrics::default()
         );
+    }
+
+    #[test]
+    fn semantic_obligation_yield_aggregates_by_kind() {
+        let mut first = SearchStageMetrics::default();
+        first.semantic_verification.obligation_yield = vec![lean_dup_search::SearchSemanticObligationYield {
+            kind: lean_dup_search::SearchSemanticObligationKind::ExactTheorem,
+            planned: 2,
+            verified: 1,
+            rejected: 0,
+            unavailable: 1,
+            cached: 1,
+            worker_pairs: 1,
+        }];
+        let mut second = SearchStageMetrics::default();
+        second.semantic_verification.obligation_yield = vec![lean_dup_search::SearchSemanticObligationYield {
+            kind: lean_dup_search::SearchSemanticObligationKind::ExactTheorem,
+            planned: 3,
+            verified: 2,
+            rejected: 1,
+            unavailable: 0,
+            cached: 0,
+            worker_pairs: 3,
+        }];
+
+        let metrics = aggregate("unit", &[&first, &second]);
+
+        assert_eq!(metrics.semantic_verification.obligation_yield.len(), 1);
+        let exact = &metrics.semantic_verification.obligation_yield[0];
+        assert_eq!(exact.planned, 5);
+        assert_eq!(exact.verified, 3);
+        assert_eq!(exact.rejected, 1);
+        assert_eq!(exact.unavailable, 1);
+        assert_eq!(exact.cached, 1);
+        assert_eq!(exact.worker_pairs, 4);
     }
 
     fn labels<const P: usize, const N: usize>(positives: [&str; P], negatives: [&str; N]) -> GoldLabels {

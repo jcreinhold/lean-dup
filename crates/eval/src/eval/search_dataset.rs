@@ -16,6 +16,8 @@ pub struct SearchDataset {
     pub schema_version: &'static str,
     pub suite: String,
     pub scoring: SearchScoringSummary,
+    pub semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary,
+    pub semantic_obligation_yield: Vec<lean_dup_search::SearchSemanticObligationYield>,
     pub pairs: Vec<SearchDatasetPair>,
 }
 
@@ -76,6 +78,8 @@ pub fn build(suite: &str, labels: &GoldLabels, observation: &SearchObservation) 
         schema_version: SEARCH_DATASET_SCHEMA_VERSION,
         suite: suite.to_owned(),
         scoring: observation.scoring.clone(),
+        semantic_reranking: observation.semantic_reranking.clone(),
+        semantic_obligation_yield: observation.semantic_obligation_yield.clone(),
         pairs,
     }
 }
@@ -169,12 +173,16 @@ mod tests {
             visible_groups_found: 1,
             visible_groups_total: 2,
             scoring: lean_dup_search::SearchScoringSummary::new(lean_dup_search::SearchScoringVariant::AllFeatures),
+            semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary::default(),
+            semantic_obligation_yield: Vec::new(),
             retrieval: SearchRetrievalObservation::default(),
         };
 
         let dataset = build("unit", &labels, &observation);
 
         assert_eq!(dataset.schema_version, SEARCH_DATASET_SCHEMA_VERSION);
+        assert_eq!(dataset.semantic_reranking.version, "lean-dup.semantic-reranking.v1");
+        assert!(dataset.semantic_obligation_yield.is_empty());
         assert_eq!(dataset.pairs[0].left, "A.unlabeled");
         assert_eq!(dataset.pairs[0].label_status, "unlabeled");
         assert!(dataset.pairs[0].label.is_none());
@@ -197,6 +205,8 @@ mod tests {
                 visible_groups_found: 1,
                 visible_groups_total: 1,
                 scoring: lean_dup_search::SearchScoringSummary::new(lean_dup_search::SearchScoringVariant::AllFeatures),
+                semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary::default(),
+                semantic_obligation_yield: Vec::new(),
                 retrieval: SearchRetrievalObservation::default(),
             },
         );
@@ -252,7 +262,9 @@ mod tests {
                 module_relation: SearchModuleRelation::SameModule {
                     module: "Tiny".to_owned(),
                 },
+                semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary::default(),
                 semantic_evidence_state: SearchSemanticEvidenceState::NotRun,
+                semantic_obligations: Vec::new(),
                 cheap_blockers: Vec::new(),
             },
             scoring: lean_dup_search::SearchPairScoring {

@@ -7,6 +7,10 @@ use sha2::{Digest, Sha256};
 
 use crate::ranking::{ConfidenceTier, RankedReview, ReviewAction, ReviewPriority, ReviewRelation};
 use crate::retrieval::{CandidateSet, RetrievedCandidate};
+use crate::semantic_reranking::{
+    SearchSemanticObligationFact, SearchSemanticObligationKind, SearchSemanticObligationStatus,
+    SearchSemanticObligationYield, SearchSemanticUnavailableReason,
+};
 use crate::{ProbePolicy, Result, ReviewProfile};
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_index::ComparisonEvidencePolicy;
@@ -79,6 +83,8 @@ pub struct SemanticEvidence {
     pub pair_id: String,
     pub kind: EvidenceKind,
     pub status: EvidenceStatus,
+    pub obligation: SearchSemanticObligationKind,
+    pub unavailable_reason: Option<SearchSemanticUnavailableReason>,
     pub summary: Option<String>,
 }
 
@@ -92,7 +98,21 @@ impl SemanticEvidence {
             pair_id,
             kind,
             status: EvidenceStatus::Rejected,
+            obligation: evidence_kind_obligation(kind),
+            unavailable_reason: None,
             summary: Some(summary.into()),
+        }
+    }
+
+    pub(crate) fn semantic_obligation_fact(&self) -> SearchSemanticObligationFact {
+        SearchSemanticObligationFact {
+            kind: self.obligation,
+            status: match self.status {
+                EvidenceStatus::Verified => SearchSemanticObligationStatus::Verified,
+                EvidenceStatus::Rejected => SearchSemanticObligationStatus::Rejected,
+                EvidenceStatus::Unavailable => SearchSemanticObligationStatus::Unavailable,
+            },
+            unavailable_reason: self.unavailable_reason,
         }
     }
 }
@@ -152,6 +172,7 @@ pub struct ProbeDiagnostics {
     pub unavailable_by_module: BTreeMap<String, usize>,
     pub unavailable_by_origin: BTreeMap<String, usize>,
     pub verified_results: usize,
+    pub obligation_yield: Vec<SearchSemanticObligationYield>,
 }
 
 impl Default for ProbeDiagnostics {
@@ -187,6 +208,7 @@ impl Default for ProbeDiagnostics {
             unavailable_by_module: BTreeMap::new(),
             unavailable_by_origin: BTreeMap::new(),
             verified_results: 0,
+            obligation_yield: Vec::new(),
         }
     }
 }
@@ -257,6 +279,11 @@ pub fn verify_candidate_probes(
     for planned_probe in plan.planned {
         if let Some(cached) = input.local_index.index.cached_probe_result(&planned_probe.cache_key)? {
             diagnostics.cached_hits += 1;
+            increment_yield(
+                &mut diagnostics.obligation_yield,
+                planned_probe.obligation.semantic_kind(),
+                SearchSemanticObligationStatus::Cached,
+            );
             let semantic = semantic_evidence(&planned_probe, &cached);
             record_evidence_diagnostic(&semantic, &planned_probe, &mut diagnostics);
             evidence.insert(semantic.pair_id.clone(), semantic);
@@ -298,6 +325,19 @@ enum ProbeObligation {
     LocalDuplicate,
 }
 
+impl ProbeObligation {
+    fn semantic_kind(self) -> SearchSemanticObligationKind {
+        match self {
+            Self::ExactTheorem => SearchSemanticObligationKind::ExactTheorem,
+            Self::PermutedTheorem => SearchSemanticObligationKind::PermutedTheorem,
+            Self::Replacement => SearchSemanticObligationKind::Replacement,
+            Self::ReducibleDefinition => SearchSemanticObligationKind::ReducibleDefinition,
+            Self::Specialization => SearchSemanticObligationKind::Specialization,
+            Self::LocalDuplicate => SearchSemanticObligationKind::LocalDuplicate,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 struct ProbePlan {
     planned: Vec<PlannedProbe>,
@@ -336,6 +376,16 @@ impl UnavailableReason {
             Self::OpaqueOrUnreducible => "opaque-or-unreducible",
             Self::Timeout => "timeout",
             Self::InternalError => "internal-error",
+        }
+    }
+
+    fn semantic_reason(self) -> SearchSemanticUnavailableReason {
+        match self {
+            Self::MissingDeclaration => SearchSemanticUnavailableReason::MissingDeclaration,
+            Self::Unsupported => SearchSemanticUnavailableReason::Unsupported,
+            Self::OpaqueOrUnreducible => SearchSemanticUnavailableReason::OpaqueOrUnreducible,
+            Self::Timeout => SearchSemanticUnavailableReason::Timeout,
+            Self::InternalError => SearchSemanticUnavailableReason::InternalError,
         }
     }
 }
@@ -501,10 +551,17 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
                     include_private: false,
                     include_generated: false,
                 };
+                increment_yield(
+                    &mut diagnostics.obligation_yield,
+                    synthetic.obligation.semantic_kind(),
+                    SearchSemanticObligationStatus::Planned,
+                );
                 let semantic = SemanticEvidence {
                     pair_id: pair.pair_id,
                     kind: EvidenceKind::Unavailable,
                     status: EvidenceStatus::Unavailable,
+                    obligation: synthetic.obligation.semantic_kind(),
+                    unavailable_reason: Some(reason.semantic_reason()),
                     summary: Some(reason.label().to_owned()),
                 };
                 record_unavailable_reason(reason, &synthetic, diagnostics);
@@ -529,6 +586,9 @@ fn run_probe_chunk(
 ) -> Result<()> {
     diagnostics.worker_batches += 1;
     diagnostics.worker_pairs += chunk.len();
+    for planned in chunk {
+        increment_worker_pairs(&mut diagnostics.obligation_yield, planned.obligation.semantic_kind(), 1);
+    }
     reporter.event(
         "semantic.probe.chunk",
         Some(diagnostics.worker_pairs as u64),
@@ -773,12 +833,34 @@ fn worker_error_reason(error: &WorkerError) -> UnavailableReason {
     }
 }
 
+fn unavailable_reason_from_summary(summary: Option<&str>) -> Option<SearchSemanticUnavailableReason> {
+    let summary = summary.unwrap_or_default();
+    if summary.contains("missing-declaration") || summary.contains("not available") || summary.contains("missing") {
+        Some(SearchSemanticUnavailableReason::MissingDeclaration)
+    } else if summary.contains("heartbeat") || summary.contains("timeout") {
+        Some(SearchSemanticUnavailableReason::Timeout)
+    } else if summary.contains("supports")
+        || summary.contains("opaque")
+        || summary.contains("unavailable")
+        || summary.contains("reducible probe guard")
+        || summary.contains("definition body")
+    {
+        Some(SearchSemanticUnavailableReason::OpaqueOrUnreducible)
+    } else if summary.is_empty() {
+        None
+    } else {
+        Some(SearchSemanticUnavailableReason::InternalError)
+    }
+}
+
 fn semantic_evidence(planned: &PlannedProbe, result: &ProbeResult) -> SemanticEvidence {
     if result.status != "ok" {
         return SemanticEvidence {
             pair_id: result.pair_id.clone(),
             kind: EvidenceKind::Unavailable,
             status: EvidenceStatus::Unavailable,
+            obligation: planned.obligation.semantic_kind(),
+            unavailable_reason: unavailable_reason_from_summary(result.message.as_deref()),
             summary: result
                 .message
                 .clone()
@@ -824,7 +906,20 @@ fn verified(result: &ProbeResult, kind: EvidenceKind) -> SemanticEvidence {
         pair_id: result.pair_id.clone(),
         kind,
         status: EvidenceStatus::Verified,
+        obligation: evidence_kind_obligation(kind),
+        unavailable_reason: None,
         summary: result.message.clone(),
+    }
+}
+
+fn evidence_kind_obligation(kind: EvidenceKind) -> SearchSemanticObligationKind {
+    match kind {
+        EvidenceKind::ExactTheorem => SearchSemanticObligationKind::ExactTheorem,
+        EvidenceKind::PermutedTheorem => SearchSemanticObligationKind::PermutedTheorem,
+        EvidenceKind::Replacement => SearchSemanticObligationKind::Replacement,
+        EvidenceKind::ReducibleDefinition => SearchSemanticObligationKind::ReducibleDefinition,
+        EvidenceKind::Specialization => SearchSemanticObligationKind::Specialization,
+        EvidenceKind::LocalDuplicate | EvidenceKind::Unavailable => SearchSemanticObligationKind::LocalDuplicate,
     }
 }
 
@@ -840,6 +935,11 @@ fn obligation_evidence_kind(obligation: ProbeObligation) -> EvidenceKind {
 }
 
 fn record_planned_obligation(obligation: ProbeObligation, diagnostics: &mut ProbeDiagnostics) {
+    increment_yield(
+        &mut diagnostics.obligation_yield,
+        obligation.semantic_kind(),
+        SearchSemanticObligationStatus::Planned,
+    );
     match obligation {
         ProbeObligation::ExactTheorem => diagnostics.planned_exact_theorem += 1,
         ProbeObligation::PermutedTheorem => diagnostics.planned_permuted_theorem += 1,
@@ -852,8 +952,19 @@ fn record_planned_obligation(obligation: ProbeObligation, diagnostics: &mut Prob
 
 fn record_evidence_diagnostic(evidence: &SemanticEvidence, planned: &PlannedProbe, diagnostics: &mut ProbeDiagnostics) {
     match evidence.status {
-        EvidenceStatus::Verified => diagnostics.verified_results += 1,
-        EvidenceStatus::Rejected => {}
+        EvidenceStatus::Verified => {
+            diagnostics.verified_results += 1;
+            increment_yield(
+                &mut diagnostics.obligation_yield,
+                planned.obligation.semantic_kind(),
+                SearchSemanticObligationStatus::Verified,
+            );
+        }
+        EvidenceStatus::Rejected => increment_yield(
+            &mut diagnostics.obligation_yield,
+            planned.obligation.semantic_kind(),
+            SearchSemanticObligationStatus::Rejected,
+        ),
         EvidenceStatus::Unavailable => {
             let summary = evidence.summary.as_deref().unwrap_or_default();
             let reason = if summary.contains("missing-declaration")
@@ -880,6 +991,11 @@ fn record_evidence_diagnostic(evidence: &SemanticEvidence, planned: &PlannedProb
 
 fn record_unavailable_reason(reason: UnavailableReason, planned: &PlannedProbe, diagnostics: &mut ProbeDiagnostics) {
     diagnostics.unavailable_results += 1;
+    increment_yield(
+        &mut diagnostics.obligation_yield,
+        planned.obligation.semantic_kind(),
+        SearchSemanticObligationStatus::Unavailable,
+    );
     match reason {
         UnavailableReason::MissingDeclaration => diagnostics.unavailable_missing += 1,
         UnavailableReason::Unsupported | UnavailableReason::OpaqueOrUnreducible => {
@@ -907,6 +1023,43 @@ fn record_unavailable_reason(reason: UnavailableReason, planned: &PlannedProbe, 
 
 fn increment(map: &mut BTreeMap<String, usize>, key: &str) {
     *map.entry(key.to_owned()).or_insert(0) += 1;
+}
+
+fn increment_yield(
+    yields: &mut Vec<SearchSemanticObligationYield>,
+    kind: SearchSemanticObligationKind,
+    status: SearchSemanticObligationStatus,
+) {
+    let item = yield_for(yields, kind);
+    match status {
+        SearchSemanticObligationStatus::Planned => item.planned += 1,
+        SearchSemanticObligationStatus::Verified => item.verified += 1,
+        SearchSemanticObligationStatus::Rejected => item.rejected += 1,
+        SearchSemanticObligationStatus::Unavailable => item.unavailable += 1,
+        SearchSemanticObligationStatus::Cached => item.cached += 1,
+    }
+}
+
+fn increment_worker_pairs(
+    yields: &mut Vec<SearchSemanticObligationYield>,
+    kind: SearchSemanticObligationKind,
+    count: usize,
+) {
+    yield_for(yields, kind).worker_pairs += count;
+}
+
+fn yield_for(
+    yields: &mut Vec<SearchSemanticObligationYield>,
+    kind: SearchSemanticObligationKind,
+) -> &mut SearchSemanticObligationYield {
+    if let Some(index) = yields.iter().position(|item| item.kind == kind) {
+        return &mut yields[index];
+    }
+    yields.push(SearchSemanticObligationYield {
+        kind,
+        ..SearchSemanticObligationYield::default()
+    });
+    yields.last_mut().expect("yield was just pushed")
 }
 
 fn probe_policy_label(policy: ProbePolicy) -> &'static str {
@@ -938,14 +1091,7 @@ fn probe_cache_key(
 }
 
 fn obligation_label(obligation: ProbeObligation) -> &'static str {
-    match obligation {
-        ProbeObligation::ExactTheorem => "exact-theorem",
-        ProbeObligation::PermutedTheorem => "permuted-theorem",
-        ProbeObligation::Replacement => "replacement",
-        ProbeObligation::ReducibleDefinition => "reducible-definition",
-        ProbeObligation::Specialization => "specialization",
-        ProbeObligation::LocalDuplicate => "local-duplicate",
-    }
+    obligation.semantic_kind().label()
 }
 
 fn declaration_cache_facts(declaration: &HydratedDeclaration) -> serde_json::Value {
@@ -1205,6 +1351,74 @@ mod tests {
         assert_eq!(plan.preflight_evidence.len(), 1);
         assert_eq!(diagnostics.unavailable_unsupported, 1);
         assert_eq!(diagnostics.unavailable_by_reason.get("unsupported"), Some(&1));
+        let local_duplicate = diagnostics
+            .obligation_yield
+            .iter()
+            .find(|item| item.kind == crate::SearchSemanticObligationKind::LocalDuplicate)
+            .expect("unsupported preflight records stable obligation yield");
+        assert_eq!(local_duplicate.planned, 1);
+        assert_eq!(local_duplicate.unavailable, 1);
+    }
+
+    #[test]
+    fn obligation_yield_records_verified_rejected_and_cached_results() {
+        let planned = super::PlannedProbe {
+            pair: lean_dup_worker::ProbePair {
+                pair_id: "pair".to_owned(),
+                left_declaration_id: "left".to_owned(),
+                right_declaration_id: "right".to_owned(),
+            },
+            cache_key: "cache".to_owned(),
+            obligation: super::ProbeObligation::ExactTheorem,
+            right_module: "Tiny".to_owned(),
+            right_origin: "workspace".to_owned(),
+            left_module: "Tiny".to_owned(),
+            left_origin: "workspace".to_owned(),
+            include_private: false,
+            include_generated: false,
+        };
+        let mut diagnostics = super::ProbeDiagnostics::default();
+
+        super::record_planned_obligation(planned.obligation, &mut diagnostics);
+        super::increment_yield(
+            &mut diagnostics.obligation_yield,
+            planned.obligation.semantic_kind(),
+            crate::SearchSemanticObligationStatus::Cached,
+        );
+        super::record_evidence_diagnostic(
+            &super::SemanticEvidence {
+                pair_id: "pair".to_owned(),
+                kind: super::EvidenceKind::ExactTheorem,
+                status: super::EvidenceStatus::Verified,
+                obligation: crate::SearchSemanticObligationKind::ExactTheorem,
+                unavailable_reason: None,
+                summary: None,
+            },
+            &planned,
+            &mut diagnostics,
+        );
+        super::record_evidence_diagnostic(
+            &super::SemanticEvidence {
+                pair_id: "pair".to_owned(),
+                kind: super::EvidenceKind::ExactTheorem,
+                status: super::EvidenceStatus::Rejected,
+                obligation: crate::SearchSemanticObligationKind::ExactTheorem,
+                unavailable_reason: None,
+                summary: None,
+            },
+            &planned,
+            &mut diagnostics,
+        );
+
+        let exact = diagnostics
+            .obligation_yield
+            .iter()
+            .find(|item| item.kind == crate::SearchSemanticObligationKind::ExactTheorem)
+            .expect("exact theorem yield exists");
+        assert_eq!(exact.planned, 1);
+        assert_eq!(exact.cached, 1);
+        assert_eq!(exact.verified, 1);
+        assert_eq!(exact.rejected, 1);
     }
 
     fn empty_index() -> lean_dup_index::OpenedIndex {

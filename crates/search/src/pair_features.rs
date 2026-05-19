@@ -4,6 +4,10 @@ use lean_dup_index::HydratedDeclaration;
 use serde::Serialize;
 
 use crate::retrieval::KeyContribution;
+use crate::semantic_reranking::{
+    SearchSemanticObligationFact, SearchSemanticRerankingSummary, summary as semantic_reranking_summary,
+};
+use crate::semantic_verification::{EvidenceStatus, SemanticEvidence};
 
 /// Stable pair-feature facts for search-quality datasets.
 ///
@@ -18,7 +22,9 @@ pub struct SearchPairFeatures {
     pub structural_fingerprint_families: Vec<String>,
     pub role_overlap: Vec<SearchRoleOverlap>,
     pub module_relation: SearchModuleRelation,
+    pub semantic_reranking: SearchSemanticRerankingSummary,
     pub semantic_evidence_state: SearchSemanticEvidenceState,
+    pub semantic_obligations: Vec<SearchSemanticObligationFact>,
     pub cheap_blockers: Vec<String>,
 }
 
@@ -47,12 +53,24 @@ pub enum SearchModuleRelation {
 #[serde(rename_all = "kebab-case")]
 pub enum SearchSemanticEvidenceState {
     NotRun,
+    Verified,
+    Rejected,
+    Unavailable,
 }
 
 pub(crate) fn pair_features(
     left: &HydratedDeclaration,
     right: &HydratedDeclaration,
     contributions: &[KeyContribution],
+) -> SearchPairFeatures {
+    pair_features_with_semantic(left, right, contributions, None)
+}
+
+pub(crate) fn pair_features_with_semantic(
+    left: &HydratedDeclaration,
+    right: &HydratedDeclaration,
+    contributions: &[KeyContribution],
+    semantic: Option<&SemanticEvidence>,
 ) -> SearchPairFeatures {
     SearchPairFeatures {
         retrieval_feature_families: feature_families(contributions),
@@ -61,8 +79,21 @@ pub(crate) fn pair_features(
         structural_fingerprint_families: structural_fingerprint_families(left, right),
         role_overlap: role_overlap(left, right),
         module_relation: module_relation(left, right),
-        semantic_evidence_state: SearchSemanticEvidenceState::NotRun,
+        semantic_reranking: semantic_reranking_summary(),
+        semantic_evidence_state: semantic_evidence_state(semantic),
+        semantic_obligations: semantic
+            .map(|evidence| vec![evidence.semantic_obligation_fact()])
+            .unwrap_or_default(),
         cheap_blockers: cheap_blockers(left, right, contributions),
+    }
+}
+
+fn semantic_evidence_state(semantic: Option<&SemanticEvidence>) -> SearchSemanticEvidenceState {
+    match semantic.map(|evidence| evidence.status) {
+        None => SearchSemanticEvidenceState::NotRun,
+        Some(EvidenceStatus::Verified) => SearchSemanticEvidenceState::Verified,
+        Some(EvidenceStatus::Rejected) => SearchSemanticEvidenceState::Rejected,
+        Some(EvidenceStatus::Unavailable) => SearchSemanticEvidenceState::Unavailable,
     }
 }
 

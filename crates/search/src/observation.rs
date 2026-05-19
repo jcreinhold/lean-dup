@@ -12,6 +12,9 @@ use crate::retrieval::{
 use crate::scorer::{
     SearchPairScoring, SearchScoringSummary, SearchScoringVariant, default_summary, score_observation,
 };
+use crate::semantic_reranking::{
+    SearchSemanticObligationYield, SearchSemanticRerankingSummary, summary as semantic_reranking_summary,
+};
 
 /// Request for search-stage observations used by offline evaluation.
 ///
@@ -37,6 +40,8 @@ pub struct SearchObservation {
     pub visible_groups_found: usize,
     pub visible_groups_total: usize,
     pub scoring: SearchScoringSummary,
+    pub semantic_reranking: SearchSemanticRerankingSummary,
+    pub semantic_obligation_yield: Vec<SearchSemanticObligationYield>,
     pub retrieval: SearchRetrievalObservation,
 }
 
@@ -131,6 +136,8 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
         } else {
             SearchScoringSummary::new(request.scoring_variant)
         },
+        semantic_reranking: semantic_reranking_summary(),
+        semantic_obligation_yield: Vec::new(),
         retrieval: retrieval_observation(&output.diagnostics),
     })
 }
@@ -164,6 +171,8 @@ pub fn rescore_observation(observation: &SearchObservation, variant: SearchScori
         visible_groups_found,
         visible_groups_total: observation.visible_groups_total,
         scoring: SearchScoringSummary::new(variant),
+        semantic_reranking: observation.semantic_reranking.clone(),
+        semantic_obligation_yield: observation.semantic_obligation_yield.clone(),
         retrieval: observation.retrieval.clone(),
     }
 }

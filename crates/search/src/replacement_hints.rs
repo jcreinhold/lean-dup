@@ -210,6 +210,7 @@ end Tiny
                 target_module: Some("Mathlib".to_owned()),
                 evidence_mode: ReviewEvidenceMode::Static,
                 probe_summary: None,
+                semantic_obligations: Vec::new(),
                 local_caller_count: 1,
                 replacement_hint: None,
             }],

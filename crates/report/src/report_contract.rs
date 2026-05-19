@@ -429,6 +429,7 @@ mod tests {
             target_module: None,
             evidence_mode: evidence_mode.to_owned(),
             probe_summary: None,
+            semantic_obligations: Vec::new(),
             local_caller_count: 0,
             replacement_hint: None,
             visibility: AuditVisibility {

@@ -262,6 +262,10 @@ fn render_audit(report: &AuditReport) -> String {
             report.semantic_verification.worker_pairs,
             report.semantic_verification.unavailable_results
         ),
+        format!(
+            "semantic reranking: {}",
+            report.semantic_verification.semantic_reranking.version
+        ),
         format!("review groups: {}", report.review.groups.len()),
         format!("visible groups: {}", report.visible_group_count),
         format!("visible queue: {}", report.explanations.visible_queue.reason),

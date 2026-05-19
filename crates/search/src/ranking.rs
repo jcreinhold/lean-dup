@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 
 use crate::retrieval::{CandidateSet, KeyContribution, RetrievedCandidate};
 use crate::scorer;
+use crate::semantic_reranking::SearchSemanticObligationFact;
 use crate::semantic_verification::{EvidenceKind, EvidenceStatus, SemanticEvidence};
 use crate::source_refs::{ImportStatus, SourceFacts};
 use lean_dup_index::HydratedDeclaration;
@@ -92,6 +93,7 @@ pub struct RankedGroup {
     pub target_module: Option<String>,
     pub evidence_mode: ReviewEvidenceMode,
     pub probe_summary: Option<String>,
+    pub semantic_obligations: Vec<SearchSemanticObligationFact>,
     pub local_caller_count: usize,
     pub replacement_hint: Option<crate::replacement_hints::ReplacementHint>,
 }
@@ -358,6 +360,9 @@ fn rank_pair(anchor: &HydratedDeclaration, candidate: &RetrievedCandidate, input
         target_module: target.as_ref().map(|declaration| declaration.module.clone()),
         evidence_mode,
         probe_summary: semantic.and_then(semantic_summary),
+        semantic_obligations: semantic
+            .map(|evidence| vec![evidence.semantic_obligation_fact()])
+            .unwrap_or_default(),
         local_caller_count,
         replacement_hint: None,
     }
@@ -743,6 +748,8 @@ mod tests {
                 pair_id: "workspace:Tiny:Tiny.same::mathlib:Mathlib:Mathlib.same".to_owned(),
                 kind: EvidenceKind::ExactTheorem,
                 status: EvidenceStatus::Verified,
+                obligation: crate::SearchSemanticObligationKind::ExactTheorem,
+                unavailable_reason: None,
                 summary: None,
             },
         );
@@ -788,6 +795,8 @@ mod tests {
                 pair_id: pair_id.clone(),
                 kind: EvidenceKind::Specialization,
                 status: EvidenceStatus::Verified,
+                obligation: crate::SearchSemanticObligationKind::Specialization,
+                unavailable_reason: None,
                 summary: None,
             },
         );

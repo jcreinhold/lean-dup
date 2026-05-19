@@ -216,7 +216,7 @@ pub(crate) fn score_features(features: &SearchPairFeatures, variant: SearchScori
             add_component(&mut components, "static_evidence", weights.static_evidence);
         }
     }
-    if features.semantic_evidence_state != SearchSemanticEvidenceState::NotRun {
+    if features.semantic_evidence_state == SearchSemanticEvidenceState::Verified {
         add_component(&mut components, "semantic_evidence", weights.semantic_evidence);
     }
     let total_score = components.values().sum();
@@ -244,6 +244,9 @@ fn has_contribution(candidate: &RetrievedCandidate, kind: &str) -> bool {
 mod tests {
     use crate::pair_features::{
         SearchEvidenceMode, SearchModuleRelation, SearchPairFeatures, SearchSemanticEvidenceState,
+    };
+    use crate::semantic_reranking::{
+        SearchSemanticObligationFact, SearchSemanticObligationKind, SearchSemanticObligationStatus,
     };
 
     use super::{SearchScoringVariant, score_features, score_observation};
@@ -282,6 +285,24 @@ mod tests {
     }
 
     #[test]
+    fn semantic_only_scores_verified_semantic_evidence() {
+        let mut features = features();
+        features.semantic_evidence_state = SearchSemanticEvidenceState::Verified;
+        features.semantic_obligations = vec![SearchSemanticObligationFact {
+            kind: SearchSemanticObligationKind::ExactTheorem,
+            status: SearchSemanticObligationStatus::Verified,
+            unavailable_reason: None,
+        }];
+
+        let scored = score_observation(&features, SearchScoringVariant::SemanticEvidenceOnlyRerank, true, true);
+
+        assert!(scored.scoring.total_score > 0.0);
+        assert_eq!(scored.scoring.component_scores.get("semantic_evidence"), Some(&120.0));
+        assert!(scored.ranked);
+        assert!(scored.shown);
+    }
+
+    #[test]
     fn scorer_output_uses_stable_families_not_raw_payloads() {
         let json = serde_json::to_string(&score_features(&features(), SearchScoringVariant::AllFeatures)).unwrap();
 
@@ -313,7 +334,9 @@ mod tests {
             module_relation: SearchModuleRelation::SameModule {
                 module: "Tiny".to_owned(),
             },
+            semantic_reranking: crate::SearchSemanticRerankingSummary::default(),
             semantic_evidence_state: SearchSemanticEvidenceState::NotRun,
+            semantic_obligations: Vec::new(),
             cheap_blockers: Vec::new(),
         }
     }

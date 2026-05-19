@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use lean_dup_search::SearchScoringVariant;
+use lean_dup_search::{SearchScoringVariant, SearchSemanticObligationYield, SearchSemanticRerankingSummary};
 use serde::Serialize;
 
 use crate::eval::scoring::EvaluationMetrics;
@@ -14,6 +14,8 @@ pub struct ScorerAblationReport {
     pub schema_version: &'static str,
     pub suite: String,
     pub scorer_version: String,
+    pub semantic_reranking: SearchSemanticRerankingSummary,
+    pub semantic_obligation_yield: Vec<SearchSemanticObligationYield>,
     pub variants: Vec<ScorerAblationVariantReport>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<ScorerAblationChildReport>,
@@ -32,6 +34,8 @@ pub struct ScorerAblationChildReport {
 pub struct ScorerAblationVariantReport {
     pub variant: SearchScoringVariant,
     pub status: String,
+    pub semantic_reranking: SearchSemanticRerankingSummary,
+    pub semantic_obligation_yield: Vec<SearchSemanticObligationYield>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metrics: Option<EvaluationMetrics>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -61,6 +65,8 @@ pub fn write_default_artifact(repo_root: &Path, report: &ScorerAblationReport) -
 pub fn report(
     suite: impl Into<String>,
     scorer_version: impl Into<String>,
+    semantic_reranking: SearchSemanticRerankingSummary,
+    semantic_obligation_yield: Vec<SearchSemanticObligationYield>,
     variants: Vec<ScorerAblationVariantReport>,
     children: Vec<ScorerAblationChildReport>,
 ) -> ScorerAblationReport {
@@ -68,6 +74,8 @@ pub fn report(
         schema_version: SCORER_ABLATION_SCHEMA_VERSION,
         suite: suite.into(),
         scorer_version: scorer_version.into(),
+        semantic_reranking,
+        semantic_obligation_yield,
         variants,
         children,
     }
@@ -88,9 +96,13 @@ mod tests {
         let report = report(
             "unit",
             "lean-dup.symbolic-scorer.v1",
+            lean_dup_search::SearchSemanticRerankingSummary::default(),
+            Vec::new(),
             vec![ScorerAblationVariantReport {
                 variant: SearchScoringVariant::AllFeatures,
                 status: "ok".to_owned(),
+                semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary::default(),
+                semantic_obligation_yield: Vec::new(),
                 metrics: Some(metrics()),
                 reason: None,
             }],
@@ -102,6 +114,7 @@ mod tests {
 
         assert!(json.contains(SCORER_ABLATION_SCHEMA_VERSION));
         assert!(json.contains("all-features"));
+        assert!(json.contains("lean-dup.semantic-reranking.v1"));
         assert!(!json.contains("sqlite"));
         assert!(!json.contains("posting"));
     }

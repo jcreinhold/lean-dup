@@ -5,7 +5,8 @@ use lean_dup_eval::EvalOutput;
 use lean_dup_index::{CacheCleanupReport, CacheDiagnostics, CacheStatus, ComparisonEvidenceMode};
 use lean_dup_search::{
     AuditEvidence, AuditGroup, AuditMember, AuditOutput, AuditProbeSummary, AuditReplacementHint, AuditReview,
-    DiffOutput, ReviewProfile, SearchBaselineDiff, SearchBaselineGroup, SearchScoringSummary, ShowOutput,
+    DiffOutput, ReviewProfile, SearchBaselineDiff, SearchBaselineGroup, SearchScoringSummary,
+    SearchSemanticObligationFact, SearchSemanticObligationYield, SearchSemanticRerankingSummary, ShowOutput,
 };
 use serde::{Deserialize, Serialize};
 
@@ -118,10 +119,12 @@ pub struct EvalCountAtKDto {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct EvalSemanticVerificationStageMetricsDto {
+    pub semantic_reranking: SearchSemanticRerankingSummary,
     pub planned: usize,
     pub cached: usize,
     pub worker: usize,
     pub unavailable: usize,
+    pub obligation_yield: Vec<SearchSemanticObligationYield>,
 }
 
 #[derive(Debug, Serialize)]
@@ -298,6 +301,7 @@ pub struct ComparisonProvenanceReportDto {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SemanticVerificationReport {
+    pub semantic_reranking: SearchSemanticRerankingSummary,
     pub enabled: bool,
     pub policy: String,
     pub budget: usize,
@@ -328,6 +332,7 @@ pub struct SemanticVerificationReport {
     pub unavailable_by_module: std::collections::BTreeMap<String, usize>,
     pub unavailable_by_origin: std::collections::BTreeMap<String, usize>,
     pub verified_results: usize,
+    pub obligation_yield: Vec<SearchSemanticObligationYield>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -362,6 +367,7 @@ pub struct ReviewGroupReport {
     pub target_module: Option<String>,
     pub evidence_mode: String,
     pub probe_summary: Option<String>,
+    pub semantic_obligations: Vec<SearchSemanticObligationFact>,
     pub local_caller_count: usize,
     pub replacement_hint: Option<ReplacementHintReport>,
 }
@@ -534,10 +540,12 @@ fn eval_metrics_dto(metrics: lean_dup_eval::EvaluationMetrics) -> EvalMetricsDto
                 .generated_candidate_count_by_feature_family,
             hard_negative_generated_by_feature_family: metrics.stage_metrics.hard_negative_generated_by_feature_family,
             semantic_verification: EvalSemanticVerificationStageMetricsDto {
+                semantic_reranking: metrics.stage_metrics.semantic_verification.semantic_reranking.clone(),
                 planned: metrics.stage_metrics.semantic_verification.planned,
                 cached: metrics.stage_metrics.semantic_verification.cached,
                 worker: metrics.stage_metrics.semantic_verification.worker,
                 unavailable: metrics.stage_metrics.semantic_verification.unavailable,
+                obligation_yield: metrics.stage_metrics.semantic_verification.obligation_yield.clone(),
             },
         },
         candidate_count: metrics.candidate_count,
@@ -725,6 +733,7 @@ fn comparison_provenance_report(report: &lean_dup_index::ComparisonProvenanceRep
 
 fn semantic_verification_report(report: &AuditProbeSummary) -> SemanticVerificationReport {
     SemanticVerificationReport {
+        semantic_reranking: report.semantic_reranking.clone(),
         enabled: report.enabled,
         policy: report.policy.clone(),
         budget: report.budget,
@@ -755,6 +764,7 @@ fn semantic_verification_report(report: &AuditProbeSummary) -> SemanticVerificat
         unavailable_by_module: report.unavailable_by_module.clone(),
         unavailable_by_origin: report.unavailable_by_origin.clone(),
         verified_results: report.verified_results,
+        obligation_yield: report.obligation_yield.clone(),
     }
 }
 
@@ -788,6 +798,7 @@ fn group_report(group: &AuditGroup) -> ReviewGroupReport {
         target_module: group.target_module.clone(),
         evidence_mode: group.evidence_mode.clone(),
         probe_summary: group.probe_summary.clone(),
+        semantic_obligations: group.semantic_obligations.clone(),
         local_caller_count: group.local_caller_count,
         replacement_hint: group.replacement_hint.as_ref().map(replacement_hint_report),
     }

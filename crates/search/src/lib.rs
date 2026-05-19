@@ -15,6 +15,7 @@ mod ranking;
 mod replacement_hints;
 mod retrieval;
 mod scorer;
+mod semantic_reranking;
 mod semantic_verification;
 mod source_refs;
 
@@ -33,6 +34,10 @@ pub use pair_features::{
     SearchEvidenceMode, SearchModuleRelation, SearchPairFeatures, SearchRoleOverlap, SearchSemanticEvidenceState,
 };
 pub use scorer::{SearchPairScoring, SearchScoringSummary, SearchScoringVariant};
+pub use semantic_reranking::{
+    SearchSemanticObligationFact, SearchSemanticObligationKind, SearchSemanticObligationStatus,
+    SearchSemanticObligationYield, SearchSemanticRerankingSummary, SearchSemanticUnavailableReason,
+};
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]

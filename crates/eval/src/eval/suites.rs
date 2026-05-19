@@ -177,7 +177,11 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
             total: output.visible_groups_total,
         },
         probe_unavailable: CountMetric { found: 0, total: 0 },
-        semantic_verification: SemanticVerificationStageMetrics::default(),
+        semantic_verification: SemanticVerificationStageMetrics {
+            semantic_reranking: output.semantic_reranking.clone(),
+            obligation_yield: output.semantic_obligation_yield.clone(),
+            ..SemanticVerificationStageMetrics::default()
+        },
         timings: TimingMetrics {
             index_load_ms,
             retrieval_ms,
@@ -200,7 +204,14 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
         Vec::new()
     };
     let scorer_ablation_artifact = if write_scorer_ablations {
-        let report = scorer_ablations::report(&labels.suite, &scorer_version, scorer_ablations.clone(), Vec::new());
+        let report = scorer_ablations::report(
+            &labels.suite,
+            &scorer_version,
+            output.semantic_reranking.clone(),
+            output.semantic_obligation_yield.clone(),
+            scorer_ablations.clone(),
+            Vec::new(),
+        );
         Some(scorer_ablations::write_default_artifact(&repo_root(), &report)?)
     } else {
         None
@@ -263,7 +274,11 @@ fn scorer_ablation_variants(
                 total: observation.visible_groups_total,
             },
             probe_unavailable: CountMetric { found: 0, total: 0 },
-            semantic_verification: SemanticVerificationStageMetrics::default(),
+            semantic_verification: SemanticVerificationStageMetrics {
+                semantic_reranking: observation.semantic_reranking.clone(),
+                obligation_yield: observation.semantic_obligation_yield.clone(),
+                ..SemanticVerificationStageMetrics::default()
+            },
             timings: TimingMetrics {
                 index_load_ms,
                 retrieval_ms,
@@ -275,6 +290,8 @@ fn scorer_ablation_variants(
         variants.push(ScorerAblationVariantReport {
             variant,
             status: "ok".to_owned(),
+            semantic_reranking: observation.semantic_reranking.clone(),
+            semantic_obligation_yield: observation.semantic_obligation_yield.clone(),
             metrics: Some(score_run(labels, &observed, k_values)),
             reason: None,
         });
@@ -348,7 +365,19 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
                 variants: run.scorer_ablations.clone(),
             })
             .collect();
-        let report = scorer_ablations::report("production-gate", &scorer_version, scorer_ablations.clone(), children);
+        let semantic_reranking = completed_metrics
+            .first()
+            .map(|metrics| metrics.stage_metrics.semantic_verification.semantic_reranking.clone())
+            .unwrap_or_default();
+        let semantic_obligation_yield = metrics.stage_metrics.semantic_verification.obligation_yield.clone();
+        let report = scorer_ablations::report(
+            "production-gate",
+            &scorer_version,
+            semantic_reranking,
+            semantic_obligation_yield,
+            scorer_ablations.clone(),
+            children,
+        );
         Some(scorer_ablations::write_default_artifact(&repo_root(), &report)?)
     } else {
         None
@@ -424,14 +453,19 @@ fn aggregate_scorer_ablations(runs: &[EvaluationRunReport]) -> Vec<ScorerAblatio
                 ScorerAblationVariantReport {
                     variant,
                     status: "skipped".to_owned(),
+                    semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary::default(),
+                    semantic_obligation_yield: Vec::new(),
                     metrics: None,
                     reason: Some("no completed child metrics".to_owned()),
                 }
             } else {
+                let aggregate = aggregate_metrics("production-gate", &metrics);
                 ScorerAblationVariantReport {
                     variant,
                     status: "ok".to_owned(),
-                    metrics: Some(aggregate_metrics("production-gate", &metrics)),
+                    semantic_reranking: aggregate.stage_metrics.semantic_verification.semantic_reranking.clone(),
+                    semantic_obligation_yield: aggregate.stage_metrics.semantic_verification.obligation_yield.clone(),
+                    metrics: Some(aggregate),
                     reason: None,
                 }
             }
@@ -923,10 +957,12 @@ mod tests {
                 generated_candidate_count_by_feature_family: Default::default(),
                 hard_negative_generated_by_feature_family: Default::default(),
                 semantic_verification: SemanticVerificationStageMetrics {
+                    semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary::default(),
                     planned: found,
                     cached: total,
                     worker: 0,
                     unavailable: found,
+                    obligation_yield: Vec::new(),
                 },
             },
             candidate_count: total,

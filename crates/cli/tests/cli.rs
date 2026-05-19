@@ -359,6 +359,11 @@ fn eval_hidden_search_dataset_mode_writes_feature_artifact() {
     assert_eq!(dataset["suite"], "default");
     assert_eq!(dataset["scoring"]["version"], "lean-dup.symbolic-scorer.v1");
     assert_eq!(dataset["scoring"]["variant"], "all-features");
+    assert_eq!(
+        dataset["semantic_reranking"]["version"],
+        "lean-dup.semantic-reranking.v1"
+    );
+    assert!(dataset["semantic_obligation_yield"].is_array());
     let pairs = dataset["pairs"].as_array().unwrap();
     assert!(!pairs.is_empty());
     assert!(pairs.iter().any(|pair| pair["label"].is_object()));
@@ -369,7 +374,12 @@ fn eval_hidden_search_dataset_mode_writes_feature_artifact() {
     assert!(first["stage_position"]["ranked"].is_boolean());
     assert!(first["final_visibility"].is_object());
     assert!(first["features"]["retrieval_feature_families"].is_array());
+    assert_eq!(
+        first["features"]["semantic_reranking"]["version"],
+        "lean-dup.semantic-reranking.v1"
+    );
     assert!(first["features"]["semantic_evidence_state"].is_string());
+    assert!(first["features"]["semantic_obligations"].is_array());
 
     let raw = fs::read_to_string(artifact).unwrap();
     for forbidden in ["/Users/", "statement_text", "IndexQuery", "FeatureMatch", "sqlite"] {
@@ -408,6 +418,11 @@ fn eval_hidden_scorer_ablation_mode_writes_variant_artifact() {
     let ablations: Value = serde_json::from_str(&fs::read_to_string(&artifact).unwrap()).unwrap();
     assert_eq!(ablations["schema_version"], "lean-dup.scorer-ablation.v1");
     assert_eq!(ablations["scorer_version"], "lean-dup.symbolic-scorer.v1");
+    assert_eq!(
+        ablations["semantic_reranking"]["version"],
+        "lean-dup.semantic-reranking.v1"
+    );
+    assert!(ablations["semantic_obligation_yield"].is_array());
     let variants = ablations["variants"].as_array().unwrap();
     assert_eq!(variants.len(), 6);
     for expected in [
@@ -422,6 +437,13 @@ fn eval_hidden_scorer_ablation_mode_writes_variant_artifact() {
             variants.iter().any(|variant| variant["variant"] == expected),
             "missing {expected} in {variants:?}"
         );
+    }
+    for variant in variants {
+        assert_eq!(
+            variant["semantic_reranking"]["version"],
+            "lean-dup.semantic-reranking.v1"
+        );
+        assert!(variant["semantic_obligation_yield"].is_array());
     }
 }
 
