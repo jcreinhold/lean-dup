@@ -1465,6 +1465,7 @@ name = "lean-dup-eval"
 version = "0.1.0"
 dependencies = [
  "lean-dup-diagnostics",
+ "lean-dup-embedding",
  "lean-dup-index",
  "lean-dup-project",
  "lean-dup-search",

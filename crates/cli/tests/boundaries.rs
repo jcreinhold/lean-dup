@@ -311,10 +311,13 @@ fn old_file_shaped_modules_are_not_public_api() {
                 assert!(!contents.contains(forbidden), "{display} imports {forbidden}");
             }
         }
-        if !path.starts_with(root.join("crates/embedding")) && !path.starts_with(root.join("crates/cli")) {
+        if !path.starts_with(root.join("crates/embedding"))
+            && !path.starts_with(root.join("crates/cli"))
+            && !path.starts_with(root.join("crates/eval"))
+        {
             assert!(
                 !contents.contains("lean_dup_embedding::"),
-                "{display} imports lean_dup_embedding outside the hidden CLI prepare boundary"
+                "{display} imports lean_dup_embedding outside hidden CLI prepare or eval rerank experiment boundaries"
             );
         }
     }

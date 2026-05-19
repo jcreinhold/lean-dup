@@ -185,6 +185,28 @@ pub struct EvalArgs {
 
     #[arg(long, hide = true)]
     pub write_scorer_ablations: bool,
+
+    #[arg(long, hide = true)]
+    pub write_embedding_rerank: bool,
+
+    #[arg(long = "embedding-acquisition", hide = true, value_enum, default_value_t = CliEmbeddingAcquisitionPolicy::CacheOnly)]
+    pub embedding_acquisition: CliEmbeddingAcquisitionPolicy,
+
+    #[arg(
+        long = "embedding-model-id",
+        hide = true,
+        default_value = "sentence-transformers/all-MiniLM-L6-v2"
+    )]
+    pub embedding_model_id: String,
+
+    #[arg(long = "embedding-revision", hide = true)]
+    pub embedding_revision: Option<String>,
+
+    #[arg(long = "embedding-cache-root", hide = true)]
+    pub embedding_cache_root: Option<PathBuf>,
+
+    #[arg(long = "embedding-vector-cache-root", hide = true)]
+    pub embedding_vector_cache_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, clap::Args)]

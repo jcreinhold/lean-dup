@@ -20,7 +20,7 @@ pub enum Report {
     Index(IndexReport),
     IndexMathlib(IndexReport),
     Audit(Box<AuditReport>),
-    Eval(EvalReportDto),
+    Eval(Box<EvalReportDto>),
     EmbeddingPrepare(EmbeddingPrepareReportDto),
     Perf(PerfReport),
     Show(Box<ShowReport>),
@@ -59,6 +59,10 @@ pub struct EvalReportDto {
     pub search_dataset_artifact: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scorer_ablation_artifact: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_rerank_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_rerank_artifact: Option<PathBuf>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub runs: Vec<EvalRunReportDto>,
 }
@@ -73,6 +77,10 @@ pub struct EvalRunReportDto {
     pub metrics: Option<EvalMetricsDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_rerank_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_rerank_artifact: Option<PathBuf>,
     pub manual: bool,
 }
 
@@ -484,6 +492,8 @@ pub fn eval_report(report: EvalOutput) -> EvalReportDto {
         metrics: eval_metrics_dto(report.metrics),
         search_dataset_artifact: report.search_dataset_artifact,
         scorer_ablation_artifact: report.scorer_ablation_artifact,
+        embedding_rerank_status: report.embedding_rerank_status,
+        embedding_rerank_artifact: report.embedding_rerank_artifact,
         runs: report
             .runs
             .into_iter()
@@ -493,6 +503,8 @@ pub fn eval_report(report: EvalOutput) -> EvalReportDto {
                 scorer_version: run.scorer_version,
                 metrics: run.metrics.map(eval_metrics_dto),
                 reason: run.reason,
+                embedding_rerank_status: run.embedding_rerank_status,
+                embedding_rerank_artifact: run.embedding_rerank_artifact,
                 manual: run.manual,
             })
             .collect(),

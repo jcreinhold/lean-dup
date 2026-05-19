@@ -365,6 +365,8 @@ fn eval_hidden_search_dataset_mode_writes_feature_artifact() {
     let help_stdout = String::from_utf8(help.get_output().stdout.clone()).unwrap();
     assert!(!help_stdout.contains("--write-search-dataset"));
     assert!(!help_stdout.contains("--write-scorer-ablations"));
+    assert!(!help_stdout.contains("--write-embedding-rerank"));
+    assert!(!help_stdout.contains("--embedding-acquisition"));
 
     let assert = Command::cargo_bin("lean-dup")
         .unwrap()
@@ -417,6 +419,67 @@ fn eval_hidden_search_dataset_mode_writes_feature_artifact() {
     let raw = fs::read_to_string(artifact).unwrap();
     for forbidden in ["/Users/", "statement_text", "IndexQuery", "FeatureMatch", "sqlite"] {
         assert!(!raw.contains(forbidden), "dataset leaked {forbidden}");
+    }
+}
+
+#[test]
+fn eval_hidden_embedding_rerank_mode_writes_skipped_artifact_without_model() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let embedding_cache = tempfile::TempDir::new().unwrap();
+    let artifact = repo_root().join("target/search-quality/default-embedding-rerank.json");
+    let _ = fs::remove_file(&artifact);
+
+    let assert = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args([
+            "eval",
+            "--suite",
+            "default",
+            "--format",
+            "json",
+            "--write-embedding-rerank",
+            "--embedding-acquisition",
+            "cache-only",
+            "--embedding-cache-root",
+        ])
+        .arg(embedding_cache.path())
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["embedding_rerank_status"], "skipped");
+    assert_eq!(
+        payload["embedding_rerank_artifact"],
+        "target/search-quality/default-embedding-rerank.json"
+    );
+
+    let rerank: Value = serde_json::from_str(&fs::read_to_string(&artifact).unwrap()).unwrap();
+    assert_eq!(rerank["schema_version"], "lean-dup.embedding-rerank.v1");
+    assert_eq!(rerank["suite"], "default");
+    assert_eq!(rerank["status"], "skipped");
+    assert_eq!(rerank["reason"], "skipped_no_prepared_embedding_model");
+    assert_eq!(rerank["acquisition_policy"], "cache-only");
+    assert_eq!(
+        rerank["symbolic_baseline"]["scorer_version"],
+        "lean-dup.symbolic-scorer.v1"
+    );
+    assert!(rerank["pairs"].as_array().unwrap().is_empty());
+
+    let raw = fs::read_to_string(artifact).unwrap();
+    for forbidden in [
+        "/Users/",
+        "statement_text",
+        "model.safetensors",
+        "snapshot",
+        "sqlite",
+        "posting",
+        "worker JSONL",
+        "tensor",
+    ] {
+        assert!(!raw.contains(forbidden), "embedding rerank artifact leaked {forbidden}");
     }
 }
 

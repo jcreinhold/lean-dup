@@ -43,6 +43,8 @@ pub struct SearchObservation {
     pub semantic_reranking: SearchSemanticRerankingSummary,
     pub semantic_obligation_yield: Vec<SearchSemanticObligationYield>,
     pub retrieval: SearchRetrievalObservation,
+    #[serde(skip)]
+    pub embedding_inputs: SearchEmbeddingInputs,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -55,6 +57,23 @@ pub struct SearchRetrievalObservation {
     pub heap_truncations: usize,
     pub candidate_count_by_generation_policy: BTreeMap<String, usize>,
     pub pruned_feature_fanouts: Vec<SearchPrunedFeatureFanout>,
+}
+
+/// Search-owned declaration summaries for hidden embedding experiments.
+///
+/// These inputs are intentionally skipped during normal JSON serialization:
+/// eval may pass them to `lean-dup-embedding`, but audit/report JSON must not
+/// expose normalized statement text or model-input strings.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SearchEmbeddingInputs {
+    pub input_policy_version: String,
+    pub inputs: Vec<SearchEmbeddingInput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchEmbeddingInput {
+    pub declaration_name: String,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -139,6 +158,7 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
         semantic_reranking: semantic_reranking_summary(),
         semantic_obligation_yield: Vec::new(),
         retrieval: retrieval_observation(&output.diagnostics),
+        embedding_inputs: embedding_inputs(&output.candidate_sets),
     })
 }
 
@@ -174,6 +194,75 @@ pub fn rescore_observation(observation: &SearchObservation, variant: SearchScori
         semantic_reranking: observation.semantic_reranking.clone(),
         semantic_obligation_yield: observation.semantic_obligation_yield.clone(),
         retrieval: observation.retrieval.clone(),
+        embedding_inputs: observation.embedding_inputs.clone(),
+    }
+}
+
+const SEARCH_EMBEDDING_INPUT_POLICY_VERSION: &str = "lean-dup.embedding-input.v1";
+
+fn embedding_inputs(candidate_sets: &[crate::retrieval::CandidateSet]) -> SearchEmbeddingInputs {
+    let mut by_name = BTreeMap::<String, SearchEmbeddingInput>::new();
+    for set in candidate_sets {
+        by_name
+            .entry(set.anchor.qualified_name.clone())
+            .or_insert_with(|| embedding_input_for(&set.anchor));
+        for candidate in &set.candidates {
+            by_name
+                .entry(candidate.declaration.qualified_name.clone())
+                .or_insert_with(|| embedding_input_for(&candidate.declaration));
+        }
+    }
+    SearchEmbeddingInputs {
+        input_policy_version: SEARCH_EMBEDDING_INPUT_POLICY_VERSION.to_owned(),
+        inputs: by_name.into_values().collect(),
+    }
+}
+
+fn embedding_input_for(declaration: &HydratedDeclaration) -> SearchEmbeddingInput {
+    let families = stable_declaration_feature_families(declaration);
+    SearchEmbeddingInput {
+        declaration_name: declaration.qualified_name.clone(),
+        text: format!(
+            "name: {}\nmodule: {}\nkind: {}\nstatement: {}\nfeatures: {}",
+            declaration.qualified_name,
+            declaration.module,
+            declaration.kind,
+            normalize_statement(&declaration.statement_text),
+            families.join(",")
+        ),
+    }
+}
+
+fn normalize_statement(statement: &str) -> String {
+    statement.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn stable_declaration_feature_families(declaration: &HydratedDeclaration) -> Vec<String> {
+    let mut families = BTreeSet::new();
+    if !declaration.fingerprints.statement.is_empty() {
+        families.insert("statement_fingerprint".to_owned());
+    }
+    if !declaration.fingerprints.safe_binder_permutation.is_empty() {
+        families.insert("safe_permutation_fingerprint".to_owned());
+    }
+    if !declaration.fingerprints.connective_shape.is_empty() {
+        families.insert("connective_fingerprint".to_owned());
+    }
+    if !declaration.fingerprints.conclusion_shape.is_empty() {
+        families.insert("conclusion_fingerprint".to_owned());
+    }
+    for feature in &declaration.role_features {
+        families.insert(role_family_name(&feature.role));
+    }
+    families.into_iter().collect()
+}
+
+fn role_family_name(role: &str) -> String {
+    match role {
+        "conclusion_const" => "role_conclusion_const".to_owned(),
+        "hypothesis_const" => "role_hypothesis_const".to_owned(),
+        "conclusion_head" | "hypothesis_head" | "binder_domain_head" => "role_head".to_owned(),
+        _ => "role_other".to_owned(),
     }
 }
 
@@ -457,6 +546,42 @@ mod tests {
             SearchScoringVariant::SemanticEvidenceOnlyRerank
         );
         assert!(semantic_only.pairs.iter().all(|pair| !pair.shown));
+    }
+
+    #[test]
+    fn embedding_inputs_are_deterministic_and_not_serialized() {
+        let rows = generated_rows(3);
+        let observation = observe_search(SearchObservationRequest {
+            workspace: &rows,
+            comparison_indexes: &[],
+            tracked_pairs: &[],
+            scoring_variant: SearchScoringVariant::AllFeatures,
+        })
+        .unwrap();
+
+        assert_eq!(
+            observation.embedding_inputs.input_policy_version,
+            "lean-dup.embedding-input.v1"
+        );
+        assert!(
+            observation
+                .embedding_inputs
+                .inputs
+                .windows(2)
+                .all(|window| window[0].declaration_name <= window[1].declaration_name)
+        );
+        assert!(
+            observation
+                .embedding_inputs
+                .inputs
+                .iter()
+                .any(|input| input.text.contains("statement: raw statement text must not serialize"))
+        );
+
+        let json = serde_json::to_string(&observation).unwrap();
+        assert!(!json.contains("embedding_inputs"));
+        assert!(!json.contains("raw statement text must not serialize"));
+        assert!(!json.contains("same-role"));
     }
 
     fn generated_rows(count: usize) -> Vec<HydratedDeclaration> {

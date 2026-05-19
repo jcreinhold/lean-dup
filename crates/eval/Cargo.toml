@@ -6,6 +6,7 @@ version.workspace = true
 
 [dependencies]
 lean-dup-diagnostics = { path = "../diagnostics" }
+lean-dup-embedding = { path = "../embedding" }
 lean-dup-index = { path = "../index" }
 lean-dup-project = { path = "../project" }
 lean-dup-search = { path = "../search" }

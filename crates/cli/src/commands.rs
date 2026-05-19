@@ -10,7 +10,7 @@ use lean_dup_embedding::{
     EmbeddingAcquisitionPolicy, EmbeddingCacheStatus, EmbeddingModelFileRole, EmbeddingModelFileState,
     EmbeddingModelSpec, EmbeddingPrepareRequest, EmbeddingPrepareResult, prepare_embedding_model,
 };
-use lean_dup_eval::EvalRequest;
+use lean_dup_eval::{EmbeddingRerankRequest, EvalRequest};
 use lean_dup_index::CleanupPolicy;
 use lean_dup_index::{self, CacheFacts};
 use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexStore, IndexSummary};
@@ -65,7 +65,7 @@ pub fn run(cli: Cli) -> Result<Outcome> {
                 OutputFormat::Text
             };
             let output_path = args.output.clone();
-            (Report::Eval(eval(args, &mut reporter)?), format, output_path)
+            (Report::Eval(Box::new(eval(args, &mut reporter)?)), format, output_path)
         }
         Command::Perf(args) => {
             let _format = args.format;
@@ -282,6 +282,7 @@ fn audit_request(args: AuditArgs) -> AuditRequest {
 }
 
 fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<lean_dup_report::EvalReportDto> {
+    let embedding_rerank = embedding_rerank_request(&args);
     Ok(lean_dup_report::eval_report(lean_dup_eval::run(
         EvalRequest {
             suite: args.suite.into(),
@@ -291,9 +292,22 @@ fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<lean_dup_report::Eval
             k_values: args.k_values,
             write_search_dataset: args.write_search_dataset,
             write_scorer_ablations: args.write_scorer_ablations,
+            embedding_rerank,
         },
         reporter,
     )?))
+}
+
+fn embedding_rerank_request(args: &EvalArgs) -> Option<EmbeddingRerankRequest> {
+    args.write_embedding_rerank.then(|| EmbeddingRerankRequest {
+        model: EmbeddingModelSpec {
+            id: args.embedding_model_id.clone(),
+            revision: args.embedding_revision.clone(),
+        },
+        acquisition_policy: args.embedding_acquisition.into(),
+        model_cache_root: args.embedding_cache_root.clone(),
+        vector_cache_root: args.embedding_vector_cache_root.clone(),
+    })
 }
 
 fn embedding_prepare(args: EmbeddingPrepareArgs, reporter: &mut Reporter) -> Result<EmbeddingPrepareReportDto> {

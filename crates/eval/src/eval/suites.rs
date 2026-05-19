@@ -5,6 +5,7 @@ use std::time::Instant;
 use serde::Serialize;
 
 use crate::EvalSuite;
+use crate::eval::embedding_rerank::{self, EmbeddingRerankRequest};
 use crate::eval::labels::{GoldLabels, load_builtin};
 use crate::eval::scorer_ablations::{self, ScorerAblationVariantReport};
 use crate::eval::scoring::{
@@ -33,6 +34,7 @@ pub struct EvalRequest {
     pub k_values: Vec<usize>,
     pub write_search_dataset: bool,
     pub write_scorer_ablations: bool,
+    pub embedding_rerank: Option<EmbeddingRerankRequest>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -45,8 +47,14 @@ pub struct EvalOutput {
     pub search_dataset_artifact: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scorer_ablation_artifact: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_rerank_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_rerank_artifact: Option<PathBuf>,
     #[serde(skip)]
     pub scorer_ablations: Vec<ScorerAblationVariantReport>,
+    #[serde(skip)]
+    pub embedding_rerank_metrics: Option<EvaluationMetrics>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub runs: Vec<EvaluationRunReport>,
 }
@@ -61,9 +69,15 @@ pub struct EvaluationRunReport {
     pub metrics: Option<EvaluationMetrics>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_rerank_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_rerank_artifact: Option<PathBuf>,
     pub manual: bool,
     #[serde(skip)]
     pub scorer_ablations: Vec<ScorerAblationVariantReport>,
+    #[serde(skip)]
+    pub embedding_rerank_metrics: Option<EvaluationMetrics>,
 }
 
 struct SuiteDefinition {
@@ -216,6 +230,21 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
     } else {
         None
     };
+    let embedding_rerank = if let Some(request) = &request.embedding_rerank {
+        let root = repo_root();
+        Some(embedding_rerank::run(embedding_rerank::EmbeddingRerankRun {
+            repo_root: &root,
+            suite: &labels.suite,
+            request,
+            labels: &labels,
+            observation: &output,
+            baseline_metrics: &metrics,
+            scorer_version: &scorer_version,
+            k_values: &k_values,
+        })?)
+    } else {
+        None
+    };
 
     Ok(EvalOutput {
         status: "ok".to_owned(),
@@ -224,7 +253,10 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
         metrics,
         search_dataset_artifact,
         scorer_ablation_artifact,
+        embedding_rerank_status: embedding_rerank.as_ref().map(|outcome| outcome.status.clone()),
+        embedding_rerank_artifact: embedding_rerank.as_ref().map(|outcome| outcome.artifact.clone()),
         scorer_ablations,
+        embedding_rerank_metrics: embedding_rerank.and_then(|outcome| outcome.metrics),
         runs: Vec::new(),
     })
 }
@@ -311,6 +343,7 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
                 k_values: request.k_values.clone(),
                 write_search_dataset: false,
                 write_scorer_ablations: request.write_scorer_ablations,
+                embedding_rerank: request.embedding_rerank.clone(),
             },
             false,
             reporter,
@@ -327,6 +360,7 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
                 k_values: request.k_values.clone(),
                 write_search_dataset: false,
                 write_scorer_ablations: request.write_scorer_ablations,
+                embedding_rerank: request.embedding_rerank.clone(),
             },
             true,
             reporter,
@@ -382,6 +416,30 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
     } else {
         None
     };
+    let embedding_rerank = if let Some(request) = &request.embedding_rerank {
+        let children = runs
+            .iter()
+            .map(|run| {
+                embedding_rerank::child_report(
+                    run.suite.clone(),
+                    run.embedding_rerank_status.clone(),
+                    run.embedding_rerank_artifact.clone(),
+                    run.embedding_rerank_metrics.clone(),
+                    run.reason.clone(),
+                )
+            })
+            .collect();
+        Some(embedding_rerank::aggregate(
+            &repo_root(),
+            request,
+            "production-gate",
+            &metrics,
+            &scorer_version,
+            children,
+        )?)
+    } else {
+        None
+    };
 
     Ok(EvalOutput {
         status: status.to_owned(),
@@ -390,7 +448,10 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
         metrics,
         search_dataset_artifact: None,
         scorer_ablation_artifact,
+        embedding_rerank_status: embedding_rerank.as_ref().map(|outcome| outcome.status.clone()),
+        embedding_rerank_artifact: embedding_rerank.as_ref().map(|outcome| outcome.artifact.clone()),
         scorer_ablations,
+        embedding_rerank_metrics: embedding_rerank.and_then(|outcome| outcome.metrics),
         runs,
     })
 }
@@ -403,8 +464,11 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
             scorer_version: None,
             metrics: None,
             reason: Some("manual suite workspace is unavailable".to_owned()),
+            embedding_rerank_status: None,
+            embedding_rerank_artifact: None,
             manual,
             scorer_ablations: Vec::new(),
+            embedding_rerank_metrics: None,
         };
     }
 
@@ -416,8 +480,11 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
             scorer_version: Some(report.scorer_version),
             metrics: Some(report.metrics),
             reason: None,
+            embedding_rerank_status: report.embedding_rerank_status,
+            embedding_rerank_artifact: report.embedding_rerank_artifact,
             manual,
             scorer_ablations: report.scorer_ablations,
+            embedding_rerank_metrics: report.embedding_rerank_metrics,
         },
         Err(error) => {
             let reason = error.to_string();
@@ -432,8 +499,11 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
                 scorer_version: None,
                 metrics: None,
                 reason: Some(reason),
+                embedding_rerank_status: None,
+                embedding_rerank_artifact: None,
                 manual,
                 scorer_ablations: Vec::new(),
+                embedding_rerank_metrics: None,
             }
         }
     }
@@ -811,6 +881,7 @@ mod tests {
                 k_values: vec![1, 5, 10],
                 write_search_dataset: false,
                 write_scorer_ablations: false,
+                embedding_rerank: None,
             },
             &mut Reporter::new(false, false),
         );
@@ -867,6 +938,7 @@ mod tests {
                 k_values: vec![1, 5, 10],
                 write_search_dataset: false,
                 write_scorer_ablations: false,
+                embedding_rerank: None,
             },
             true,
             &mut Reporter::new(false, false),
@@ -902,6 +974,7 @@ mod tests {
                 k_values: vec![1, 5, 10],
                 write_search_dataset: false,
                 write_scorer_ablations: false,
+                embedding_rerank: None,
             },
             &mut Reporter::new(false, true),
         )
@@ -921,6 +994,7 @@ mod tests {
                 k_values: vec![1, 5, 10],
                 write_search_dataset: false,
                 write_scorer_ablations: false,
+                embedding_rerank: None,
             },
             &mut Reporter::new(false, true),
         )

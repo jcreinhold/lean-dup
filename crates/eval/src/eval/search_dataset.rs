@@ -176,6 +176,7 @@ mod tests {
             semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary::default(),
             semantic_obligation_yield: Vec::new(),
             retrieval: SearchRetrievalObservation::default(),
+            embedding_inputs: lean_dup_search::SearchEmbeddingInputs::default(),
         };
 
         let dataset = build("unit", &labels, &observation);
@@ -208,6 +209,7 @@ mod tests {
                 semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary::default(),
                 semantic_obligation_yield: Vec::new(),
                 retrieval: SearchRetrievalObservation::default(),
+                embedding_inputs: lean_dup_search::SearchEmbeddingInputs::default(),
             },
         );
 
