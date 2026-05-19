@@ -12,17 +12,19 @@ For crate boundaries, see [../crate-factoring.md](../crate-factoring.md).
 
 Hidden knowledge: eval owns the embedding experiment lifecycle, label joining, skipped
 status, artifact schema, and comparison against symbolic metrics. Search owns the
-declaration-summary input policy. Embedding owns model acquisition, CPU inference, vector
-cache, and runtime counters. Report owns projection of optional status and artifact paths.
+declaration-document policy. Embedding owns model acquisition, CPU inference,
+model-specific role wrapping, vector cache, and runtime counters. Report owns projection
+of optional status and artifact paths.
 
-Smallest public interface: search exposes stable declaration-summary input facts on
+Smallest public interface: search exposes stable declaration-document facts on
 `SearchObservation`; eval accepts an optional hidden embedding-rerank request and writes
 one artifact; report copies optional status/path fields. No caller receives tokenizer
 state, tensor shapes, model filenames, vector-cache paths, or Hugging Face layout.
 
-Decisions that must not leak upward or sideways: tokenizer and Candle details, embedding
-batching, vector-cache key format, model-file names, cache layout, source snippets, raw
-Lean expressions, retrieval keys, SQLite storage, and worker rows.
+Decisions that must not leak upward or sideways: tokenizer/runtime details, model-specific
+input prefixes, embedding batching, vector-cache key format, model-file names, cache
+layout, source snippets, raw Lean expressions, retrieval keys, SQLite storage, and worker
+rows.
 
 Preserved capability: default read-only symbolic duplicate auditing remains authoritative.
 Normal `audit`, `doctor`, `show`, `diff`, and ordinary `eval` do not download, load, or
@@ -39,11 +41,11 @@ complect search policy with model-runtime mechanics and label evaluation. Search
 to know download policy, model readiness, vector-cache behavior, suite labels, and artifact
 schema, which are independent decisions.
 
-Chosen: eval owns experiment lifecycle and artifacts, search owns declaration-summary input
-policy, and embedding owns runtime/cache mechanics. This is deeper because each crate hides
-one volatile decision: search can change summary text without touching model loading, the
-embedding crate can change runtime internals without touching labels, and eval can change
-artifact comparison without touching ranking.
+Chosen: eval owns experiment lifecycle and artifacts, search owns declaration-document
+policy, and embedding owns runtime/cache mechanics. This is deeper because each crate
+hides one volatile decision: search can change document policy without touching model
+loading, the embedding crate can change role wrapping or runtime internals without
+touching labels, and eval can change artifact comparison without touching ranking.
 
 ## Artifact Contract
 
@@ -68,7 +70,8 @@ Top-level fields:
 | `model` | model id/revision/fingerprint facts |
 | `cache` | prepared/unprepared cache status |
 | `acquisition_policy` | `cache-only` or `download-if-missing` |
-| `input_policy_version` | search-owned summary input contract |
+| `input_policy_id` | search-owned declaration-document policy |
+| `input_policy_version` | search-owned declaration-document contract |
 | `runtime` | embedding runtime counters |
 | `symbolic_baseline` | current metrics and scorer version |
 | `embedding_rerank` | rerank metrics over the same observed pool |
@@ -87,11 +90,13 @@ positive missing from the observed candidate pool is still missing for this expe
 ## Privacy Rules
 
 Artifacts may contain declaration names, label metadata, stable model/cache summaries,
-runtime counters, ranks, visibility facts, and cosine similarities.
+document policy ids, privacy-safe content hashes, runtime counters, ranks, visibility
+facts, and cosine similarities.
 
 Artifacts must not contain tokenizer internals, tensor shapes, model filenames, cache file
-paths, vector-cache filenames, source snippets, raw Lean expressions, worker rows, SQLite
-table names, posting vocabulary, retrieval keys, or absolute private paths.
+paths, vector-cache filenames, final model input text, raw formal statements, source
+snippets, raw Lean expressions, worker rows, SQLite table names, posting vocabulary,
+retrieval keys, or absolute private paths.
 
 ## Evidence Commands
 
@@ -120,6 +125,7 @@ storage detail.
 - Conjoined methods: mitigated. Embedding rerank does not alter symbolic ranking or
   candidate generation.
 - Hard-to-describe public API: mitigated. Public additions are optional eval request/output
-  facts and search-owned embedding input summaries.
+  facts and search-owned declaration-document facts.
 - Implementation details contaminating interface comments: mitigated. Interface comments
-  name caller-visible behavior and hidden decisions, not tokenizer files or tensor layout.
+  name caller-visible behavior and hidden decisions, not tokenizer files, tensor layout, or
+  model-prefix strings.

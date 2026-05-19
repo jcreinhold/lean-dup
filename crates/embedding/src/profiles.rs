@@ -1,6 +1,6 @@
 use fastembed::EmbeddingModel;
 
-use crate::{EmbeddingModelSpec, EmbeddingModelSummary, Error, Result};
+use crate::{EmbeddingInputRole, EmbeddingModelSpec, EmbeddingModelSummary, Error, Result};
 
 pub(crate) const BGE_SMALL_PROFILE_ID: &str = "bge-small-en-v1.5";
 pub(crate) const BGE_SMALL_MODEL_ID: &str = "BAAI/bge-small-en-v1.5";
@@ -72,9 +72,12 @@ impl ModelProfile {
         }
     }
 
-    pub(crate) fn wrap_document(self, text: &str) -> String {
+    pub(crate) fn wrap_text(self, role: EmbeddingInputRole, text: &str) -> String {
         match self.profile_id {
-            BGE_SMALL_PROFILE_ID => format!("passage: {text}"),
+            BGE_SMALL_PROFILE_ID => match role {
+                EmbeddingInputRole::Document => format!("passage: {text}"),
+                EmbeddingInputRole::Query => format!("query: {text}"),
+            },
             _ => text.to_owned(),
         }
     }

@@ -3,11 +3,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use lean_dup_embedding::{
-    EmbeddingAcquisitionPolicy, EmbeddingCacheStatus, EmbeddingInputPolicy, EmbeddingModelSpec, EmbeddingModelSummary,
-    EmbeddingPrepareRequest, EmbeddingRuntimeCounters, TextEmbeddingBatchRequest, TextEmbeddingInput, embed_text_batch,
-    prepare_embedding_model,
+    EmbeddingAcquisitionPolicy, EmbeddingCacheStatus, EmbeddingInputPolicy, EmbeddingInputRole, EmbeddingModelSpec,
+    EmbeddingModelSummary, EmbeddingPrepareRequest, EmbeddingRuntimeCounters, TextEmbeddingBatchRequest,
+    TextEmbeddingInput, embed_text_batch, prepare_embedding_model,
 };
-use lean_dup_search::{SearchEmbeddingInputs, SearchObservation, SearchObservedPair};
+use lean_dup_search::{SearchEmbeddingDocuments, SearchObservation, SearchObservedPair};
 use serde::Serialize;
 
 use crate::eval::labels::{GoldLabels, TypedGoldLabel};
@@ -56,7 +56,7 @@ pub(crate) struct EmbeddingRerankRun<'a> {
 struct ReportBase<'a> {
     suite: &'a str,
     request: &'a EmbeddingRerankRequest,
-    inputs: &'a SearchEmbeddingInputs,
+    documents: &'a SearchEmbeddingDocuments,
     baseline_metrics: &'a EvaluationMetrics,
     scorer_version: &'a str,
 }
@@ -71,6 +71,7 @@ pub(crate) struct EmbeddingRerankReport {
     pub model: EmbeddingRerankModelReport,
     pub cache: EmbeddingRerankCacheReport,
     pub acquisition_policy: EmbeddingAcquisitionPolicy,
+    pub input_policy_id: String,
     pub input_policy_version: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime: Option<EmbeddingRuntimeCounters>,
@@ -137,6 +138,8 @@ pub(crate) struct EmbeddingRerankPairReport {
     pub label: Option<EmbeddingRerankLabelReport>,
     pub baseline_rank: Option<usize>,
     pub baseline_visible: bool,
+    pub left_content_hash: String,
+    pub right_content_hash: String,
     pub embedding_similarity: Option<f64>,
     pub embedding_rank: Option<usize>,
     pub embedding_top_budget_visible: bool,
@@ -157,7 +160,7 @@ pub(crate) fn run(run: EmbeddingRerankRun<'_>) -> Result<EmbeddingRerankArtifact
     let base = ReportBase {
         suite: run.suite,
         request: run.request,
-        inputs: &run.observation.embedding_inputs,
+        documents: &run.observation.embedding_documents,
         baseline_metrics: run.baseline_metrics,
         scorer_version: run.scorer_version,
     };
@@ -205,11 +208,12 @@ pub(crate) fn run(run: EmbeddingRerankRun<'_>) -> Result<EmbeddingRerankArtifact
 
     let embedding_result = match embed_text_batch(TextEmbeddingBatchRequest {
         model: run.request.model.clone(),
-        input_policy: embedding_input_policy(&run.observation.embedding_inputs),
+        role: EmbeddingInputRole::Document,
+        input_policy: embedding_input_policy(&run.observation.embedding_documents),
         inputs: run
             .observation
-            .embedding_inputs
-            .inputs
+            .embedding_documents
+            .text_inputs()
             .iter()
             .map(|input| TextEmbeddingInput {
                 id: input.declaration_name.clone(),
@@ -261,7 +265,8 @@ pub(crate) fn run(run: EmbeddingRerankRun<'_>) -> Result<EmbeddingRerankArtifact
             status: embedding_result.cache.status,
         },
         acquisition_policy: run.request.acquisition_policy,
-        input_policy_version: run.observation.embedding_inputs.input_policy_version.clone(),
+        input_policy_id: run.observation.embedding_documents.policy_id.clone(),
+        input_policy_version: run.observation.embedding_documents.policy_version.clone(),
         runtime: Some(embedding_result.runtime),
         symbolic_baseline: baseline_report(run.scorer_version, run.baseline_metrics),
         embedding_rerank: Some(EmbeddingRerankMetricsReport {
@@ -317,6 +322,7 @@ pub(crate) fn aggregate(
             status: EmbeddingCacheStatus::Skipped,
         },
         acquisition_policy: request.acquisition_policy,
+        input_policy_id: "aggregate".to_owned(),
         input_policy_version: lean_dup_embedding::EMBEDDING_INPUT_POLICY_VERSION.to_owned(),
         runtime: None,
         symbolic_baseline: baseline_report(scorer_version, baseline_metrics),
@@ -372,7 +378,8 @@ fn skipped_or_failed_report(
         }),
         cache: EmbeddingRerankCacheReport { status: cache_status },
         acquisition_policy: base.request.acquisition_policy,
-        input_policy_version: base.inputs.input_policy_version.clone(),
+        input_policy_id: base.documents.policy_id.clone(),
+        input_policy_version: base.documents.policy_version.clone(),
         runtime: None,
         symbolic_baseline: baseline_report(base.scorer_version, base.baseline_metrics),
         embedding_rerank: None,
@@ -405,6 +412,12 @@ fn build_pairs_and_metrics(
         .typed_pairs
         .iter()
         .map(|label| (label.pair.clone(), label))
+        .collect::<BTreeMap<_, _>>();
+    let content_hash_by_name = observation
+        .embedding_documents
+        .documents
+        .iter()
+        .map(|document| (document.declaration_name.clone(), document.content_hash.clone()))
         .collect::<BTreeMap<_, _>>();
     let mut scored = observation
         .pairs
@@ -452,6 +465,8 @@ fn build_pairs_and_metrics(
                 label,
                 baseline_rank: observed.rank,
                 baseline_visible: observed.shown,
+                left_content_hash: content_hash_by_name.get(&observed.left).cloned().unwrap_or_default(),
+                right_content_hash: content_hash_by_name.get(&observed.right).cloned().unwrap_or_default(),
                 embedding_similarity: pair_similarity(observed, vectors),
                 embedding_rank,
                 embedding_top_budget_visible: embedding_rank.is_some_and(|rank| rank <= visible_budget),
@@ -538,14 +553,13 @@ fn cosine_similarity(left: &[f32], right: &[f32]) -> Option<f64> {
     Some(dot / (left_norm.sqrt() * right_norm.sqrt()))
 }
 
-fn embedding_input_policy(inputs: &SearchEmbeddingInputs) -> EmbeddingInputPolicy {
+fn embedding_input_policy(documents: &SearchEmbeddingDocuments) -> EmbeddingInputPolicy {
     EmbeddingInputPolicy {
-        version: inputs.input_policy_version.clone(),
-        includes_declaration_name: true,
-        includes_module_name: true,
-        includes_declaration_kind: true,
-        includes_normalized_statement: true,
-        includes_feature_summaries: true,
+        policy_id: documents.policy_id.clone(),
+        version: documents.policy_version.clone(),
+        includes_declaration_name: documents.policy_id == "name-and-formal-statement",
+        includes_normalized_statement: documents.policy_id != "informal-or-formal",
+        uses_informal_text_when_available: documents.policy_id == "informal-or-formal",
     }
 }
 
@@ -637,7 +651,7 @@ mod tests {
     use crate::eval::stage_metrics::SearchStageMetrics;
     use lean_dup_embedding::EmbeddingCacheStatus;
     use lean_dup_search::{
-        SearchEmbeddingInput, SearchEmbeddingInputs, SearchEvidenceMode, SearchModuleRelation, SearchObservation,
+        SearchEmbeddingDocument, SearchEmbeddingDocuments, SearchEvidenceMode, SearchModuleRelation, SearchObservation,
         SearchObservedPair, SearchPairFeatures, SearchRetrievalObservation, SearchScoringSummary, SearchScoringVariant,
         SearchSemanticEvidenceState,
     };
@@ -657,6 +671,8 @@ mod tests {
 
         assert_eq!(pairs[0].left, "Tiny.noise_left");
         assert_eq!(pairs[0].label_status, "hard-negative");
+        assert_eq!(pairs[0].left_content_hash, "hash-Tiny.noise_left");
+        assert_eq!(pairs[0].right_content_hash, "hash-Tiny.noise_right");
         assert_eq!(pairs[1].left, "Tiny.same_left");
         assert_eq!(pairs[1].label_status, "positive");
         assert!(pairs.iter().filter(|pair| pair.embedding_top_budget_visible).count() == 1);
@@ -672,7 +688,7 @@ mod tests {
         let base = ReportBase {
             suite: "unit",
             request: &request,
-            inputs: &observation.embedding_inputs,
+            documents: &observation.embedding_documents,
             baseline_metrics: &baseline,
             scorer_version: "lean-dup.symbolic-scorer.v1",
         };
@@ -695,6 +711,7 @@ mod tests {
         assert!(!json.contains("sqlite"));
         assert!(!json.contains("posting"));
         assert!(!json.contains("statement_text"));
+        assert!(!json.contains("Tiny theorem text"));
     }
 
     fn labels() -> GoldLabels {
@@ -741,22 +758,27 @@ mod tests {
             semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary::default(),
             semantic_obligation_yield: Vec::new(),
             retrieval: SearchRetrievalObservation::default(),
-            embedding_inputs: SearchEmbeddingInputs {
-                input_policy_version: lean_dup_embedding::EMBEDDING_INPUT_POLICY_VERSION.to_owned(),
-                inputs: vec![
-                    embedding_input("Tiny.same_left"),
-                    embedding_input("Tiny.same_right"),
-                    embedding_input("Tiny.noise_left"),
-                    embedding_input("Tiny.noise_right"),
+            embedding_documents: SearchEmbeddingDocuments {
+                policy_id: "name-and-formal-statement".to_owned(),
+                policy_version: lean_dup_embedding::EMBEDDING_INPUT_POLICY_VERSION.to_owned(),
+                documents: vec![
+                    embedding_document("Tiny.same_left"),
+                    embedding_document("Tiny.same_right"),
+                    embedding_document("Tiny.noise_left"),
+                    embedding_document("Tiny.noise_right"),
                 ],
             },
         }
     }
 
-    fn embedding_input(name: &str) -> SearchEmbeddingInput {
-        SearchEmbeddingInput {
+    fn embedding_document(name: &str) -> SearchEmbeddingDocument {
+        SearchEmbeddingDocument {
             declaration_name: name.to_owned(),
-            text: format!("name: {name}"),
+            module_name: "Tiny".to_owned(),
+            declaration_kind: "theorem".to_owned(),
+            normalized_formal_statement: "Tiny theorem text".to_owned(),
+            informal_text: None,
+            content_hash: format!("hash-{name}"),
         }
     }
 

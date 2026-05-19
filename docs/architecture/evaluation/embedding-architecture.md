@@ -21,7 +21,7 @@ download, tokenizer compatibility, runtime selection, normalization, batching,
 query/document wrapping, backend selection, and vector cache decisions live.
 
 Smallest public interface: the `lean-dup-embedding` crate root accepts explicit model
-preparation requests and declaration-summary strings. It returns stable model, profile,
+preparation requests and declaration-document text with a stable input role. It returns stable model, profile,
 cache, acquisition-policy, input-role, vector-dimension, runtime-counter, and typed-error
 facts.
 
@@ -65,7 +65,7 @@ manager, not an environment variable that every caller must understand.
 Chosen: keep `lean-dup-embedding` inside the `lean-dup` workspace. The crate is consumed
 through crate-root APIs only. It owns model acquisition, local CPU embedding, and vector
 cache policy, while `lean-dup-search` supplies stable
-declaration-summary inputs and `lean-dup-eval` owns labels, experiment lifecycle, and
+declaration documents and `lean-dup-eval` owns labels, experiment lifecycle, and
 artifact comparison. This design is deeper because callers learn a small text-embedding
 capability instead of Hugging Face, FastEmbed, ONNX, tokenizer, or cache internals.
 
@@ -87,13 +87,21 @@ runtime; unsupported ids fail early with the stable reason `unsupported-model-pr
 Adding a model normally touches one profile definition. Adding a new architecture family
 may also touch one backend adapter file, still inside `lean-dup-embedding`.
 
+For the declaration-document boundary, three designs were considered. Letting search emit
+final model input strings would leak BGE/FastEmbed prefix policy into search. Letting
+embedding construct all text would make the model crate understand Lean declaration
+semantics, retrieval keys, and ranking facts. The chosen design is structured declaration
+documents owned by search, plus embedding-owned role wrapping. Search provides names,
+formal statements, optional informal text, stable policy ids, and content hashes;
+embedding applies model-profile-specific query/document formatting privately.
+
 ## Crate Contract
 
 The crate is `lean-dup-embedding` at `crates/embedding`.
 
 Public capability:
 
-- embed batches of declaration-summary strings locally on CPU;
+- embed batches of declaration-document strings locally on CPU;
 - return deterministic vectors and stable runtime facts for evaluation artifacts;
 - report model/cache readiness without forcing normal audit to download or load models.
 
@@ -115,15 +123,16 @@ Public facts:
 - model/cache status, including prepared, missing, unusable, or skipped states;
 - acquisition policy used for explicit preparation;
 - required model-file roles and their present/missing/downloaded/unavailable state;
-- input-policy version for declaration-summary text;
+- input-policy id and version for declaration-document text;
 - batch embedding result with vector dimension and per-input outcome;
 - runtime counters for model load, inference, cache hits/misses, and batch count;
 - typed errors that callers can report without knowing model-file or runtime details.
 
 Runtime public interface:
 
-- `TextEmbeddingBatchRequest` names the model, the input-policy facts, declaration-summary
-  texts, and optional model/vector cache roots for tests or hidden experiments;
+- `TextEmbeddingBatchRequest` names the model, the input role, the input-policy facts,
+  declaration-document texts, and optional model/vector cache roots for tests or hidden
+  experiments;
 - `embed_text_batch` validates that the model is already prepared and never downloads;
 - `TextEmbeddingBatchResult` returns model/cache summaries, vector dimension, runtime
   counters, and normalized vectors in input order.
@@ -171,8 +180,8 @@ Current runtime policy:
 - model loading is CPU-only through FastEmbed;
 - supported model ids resolve through private profiles before acquisition or embedding;
 - vectors are L2-normalized before they cross the crate boundary;
-- vector cache keys combine model fingerprint, embedding input-policy version, and a hash
-  of the declaration-summary string;
+- vector cache keys combine model fingerprint, embedding input-policy version, input role,
+  and a hash of the model-wrapped declaration-document string;
 - cache filenames, token ids, raw runtime errors, ONNX details, and model-file paths stay
   private.
 
@@ -199,11 +208,31 @@ or individual model filenames.
 
 ## Boundary With Search, Eval, Report, And CLI
 
-`lean-dup-search` may construct stable declaration-summary input strings from search-owned
-facts, but it must not download models, read model environment variables, know tokenizer
-metadata, or write embedding artifacts. Search should receive embedding scores or
-embedding experiment facts through crate-root DTOs only when a hidden experiment asks for
-them.
+`lean-dup-search` constructs structured declaration documents from search-owned facts, but
+it must not download models, read model environment variables, know tokenizer metadata,
+know model prefixes, or write embedding artifacts. The default vector-search policy is
+`name-and-formal-statement`: declaration name plus normalized formal statement. Other
+stable policies are `formal-statement`, `informal-or-formal`, and `legacy-rerank-v1`.
+The default policy deliberately excludes retrieval feature families, ranking facts,
+semantic obligations, SQLite details, and worker protocol fields.
+
+Search-owned declaration documents contain:
+
+- declaration name;
+- module name;
+- declaration kind;
+- normalized formal statement text;
+- optional informal/docstring text when a future worker/index surface provides it;
+- stable document policy id and version;
+- a privacy-safe content hash for artifacts.
+
+Search keeps these documents out of normal JSON. Hidden eval may ask search for plain
+document text, but artifacts record policy ids and content hashes rather than raw formal
+statements or final model-formatted input.
+
+`lean-dup-embedding` owns role wrapping. Its public request names `document` or `query`;
+the profile code decides whether that role requires a prefix, instruction, or no wrapping.
+Search, eval, report, and CLI must not contain strings such as BGE query/document prefixes.
 
 `lean-dup-eval` owns labels, suite selection, hidden experiment lifecycle, and artifact
 writing. It chooses acquisition policy for hidden experiments: cache-only or explicitly
@@ -255,7 +284,8 @@ that model helps candidate generation.
   and one batch-embedding capability for runtime; they do not sequence tokenizer loading,
   model loading, inference, normalization, or cache writes themselves.
 - Information leakage: mitigated by contract. Tokenizer files, runtime internals, model
-  cache layout, and vector cache format are private decisions.
+  cache layout, model prefixes, raw document text in artifacts, and vector cache format
+  are private decisions.
 - Special-general mixture: mitigated. `lean-dup-embedding` lives in the `lean-dup`
   workspace because `lean-dup` is the only current caller; extraction waits for a real
   second product caller.

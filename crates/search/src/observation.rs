@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use lean_dup_index::{HydratedDeclaration, OpenedIndex};
 
@@ -44,7 +45,7 @@ pub struct SearchObservation {
     pub semantic_obligation_yield: Vec<SearchSemanticObligationYield>,
     pub retrieval: SearchRetrievalObservation,
     #[serde(skip)]
-    pub embedding_inputs: SearchEmbeddingInputs,
+    pub embedding_documents: SearchEmbeddingDocuments,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -59,21 +60,79 @@ pub struct SearchRetrievalObservation {
     pub pruned_feature_fanouts: Vec<SearchPrunedFeatureFanout>,
 }
 
-/// Search-owned declaration summaries for hidden embedding experiments.
+/// Search-owned declaration documents for hidden embedding experiments.
 ///
-/// These inputs are intentionally skipped during normal JSON serialization:
-/// eval may pass them to `lean-dup-embedding`, but audit/report JSON must not
-/// expose normalized statement text or model-input strings.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SearchEmbeddingInputs {
-    pub input_policy_version: String,
-    pub inputs: Vec<SearchEmbeddingInput>,
+/// These documents are intentionally skipped during normal JSON serialization:
+/// eval may ask search for document text, but audit/report JSON must not expose
+/// normalized statement text or model-input strings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchEmbeddingDocuments {
+    pub policy_id: String,
+    pub policy_version: String,
+    pub documents: Vec<SearchEmbeddingDocument>,
+}
+
+impl Default for SearchEmbeddingDocuments {
+    fn default() -> Self {
+        let policy = SearchEmbeddingDocumentPolicy::default();
+        Self {
+            policy_id: policy.id().to_owned(),
+            policy_version: SEARCH_EMBEDDING_DOCUMENT_POLICY_VERSION.to_owned(),
+            documents: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SearchEmbeddingInput {
+pub struct SearchEmbeddingDocument {
+    pub declaration_name: String,
+    pub module_name: String,
+    pub declaration_kind: String,
+    pub normalized_formal_statement: String,
+    pub informal_text: Option<String>,
+    pub content_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchEmbeddingDocumentInput {
     pub declaration_name: String,
     pub text: String,
+    pub content_hash: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SearchEmbeddingDocumentPolicy {
+    FormalStatement,
+    #[default]
+    NameAndFormalStatement,
+    InformalOrFormal,
+    LegacyRerankV1,
+}
+
+impl SearchEmbeddingDocumentPolicy {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::FormalStatement => "formal-statement",
+            Self::NameAndFormalStatement => "name-and-formal-statement",
+            Self::InformalOrFormal => "informal-or-formal",
+            Self::LegacyRerankV1 => "legacy-rerank-v1",
+        }
+    }
+}
+
+impl SearchEmbeddingDocuments {
+    pub fn text_inputs(&self) -> Vec<SearchEmbeddingDocumentInput> {
+        let policy = SearchEmbeddingDocumentPolicy::from_id(&self.policy_id)
+            .unwrap_or(SearchEmbeddingDocumentPolicy::NameAndFormalStatement);
+        self.documents
+            .iter()
+            .map(|document| SearchEmbeddingDocumentInput {
+                declaration_name: document.declaration_name.clone(),
+                text: document_text(document, policy),
+                content_hash: document.content_hash.clone(),
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -158,7 +217,7 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
         semantic_reranking: semantic_reranking_summary(),
         semantic_obligation_yield: Vec::new(),
         retrieval: retrieval_observation(&output.diagnostics),
-        embedding_inputs: embedding_inputs(&output.candidate_sets),
+        embedding_documents: embedding_documents(&output.candidate_sets),
     })
 }
 
@@ -194,75 +253,107 @@ pub fn rescore_observation(observation: &SearchObservation, variant: SearchScori
         semantic_reranking: observation.semantic_reranking.clone(),
         semantic_obligation_yield: observation.semantic_obligation_yield.clone(),
         retrieval: observation.retrieval.clone(),
-        embedding_inputs: observation.embedding_inputs.clone(),
+        embedding_documents: observation.embedding_documents.clone(),
     }
 }
 
-const SEARCH_EMBEDDING_INPUT_POLICY_VERSION: &str = "lean-dup.embedding-input.v1";
+const SEARCH_EMBEDDING_DOCUMENT_POLICY_VERSION: &str = "lean-dup.embedding-document.v1";
 
-fn embedding_inputs(candidate_sets: &[crate::retrieval::CandidateSet]) -> SearchEmbeddingInputs {
-    let mut by_name = BTreeMap::<String, SearchEmbeddingInput>::new();
+fn embedding_documents(candidate_sets: &[crate::retrieval::CandidateSet]) -> SearchEmbeddingDocuments {
+    let policy = SearchEmbeddingDocumentPolicy::default();
+    let mut by_name = BTreeMap::<String, SearchEmbeddingDocument>::new();
     for set in candidate_sets {
         by_name
             .entry(set.anchor.qualified_name.clone())
-            .or_insert_with(|| embedding_input_for(&set.anchor));
+            .or_insert_with(|| embedding_document_for(&set.anchor, policy));
         for candidate in &set.candidates {
             by_name
                 .entry(candidate.declaration.qualified_name.clone())
-                .or_insert_with(|| embedding_input_for(&candidate.declaration));
+                .or_insert_with(|| embedding_document_for(&candidate.declaration, policy));
         }
     }
-    SearchEmbeddingInputs {
-        input_policy_version: SEARCH_EMBEDDING_INPUT_POLICY_VERSION.to_owned(),
-        inputs: by_name.into_values().collect(),
+    SearchEmbeddingDocuments {
+        policy_id: policy.id().to_owned(),
+        policy_version: SEARCH_EMBEDDING_DOCUMENT_POLICY_VERSION.to_owned(),
+        documents: by_name.into_values().collect(),
     }
 }
 
-fn embedding_input_for(declaration: &HydratedDeclaration) -> SearchEmbeddingInput {
-    let families = stable_declaration_feature_families(declaration);
-    SearchEmbeddingInput {
+fn embedding_document_for(
+    declaration: &HydratedDeclaration,
+    policy: SearchEmbeddingDocumentPolicy,
+) -> SearchEmbeddingDocument {
+    let normalized_formal_statement = normalize_statement(&declaration.statement_text);
+    let mut document = SearchEmbeddingDocument {
         declaration_name: declaration.qualified_name.clone(),
-        text: format!(
-            "name: {}\nmodule: {}\nkind: {}\nstatement: {}\nfeatures: {}",
-            declaration.qualified_name,
-            declaration.module,
-            declaration.kind,
-            normalize_statement(&declaration.statement_text),
-            families.join(",")
-        ),
-    }
+        module_name: declaration.module.clone(),
+        declaration_kind: declaration.kind.clone(),
+        normalized_formal_statement,
+        informal_text: None,
+        content_hash: String::new(),
+    };
+    document.content_hash = content_hash_for(&document, policy);
+    document
 }
 
 fn normalize_statement(statement: &str) -> String {
     statement.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn stable_declaration_feature_families(declaration: &HydratedDeclaration) -> Vec<String> {
-    let mut families = BTreeSet::new();
-    if !declaration.fingerprints.statement.is_empty() {
-        families.insert("statement_fingerprint".to_owned());
+fn document_text(document: &SearchEmbeddingDocument, policy: SearchEmbeddingDocumentPolicy) -> String {
+    match policy {
+        SearchEmbeddingDocumentPolicy::FormalStatement => document.normalized_formal_statement.clone(),
+        SearchEmbeddingDocumentPolicy::NameAndFormalStatement => {
+            format!(
+                "{}\n{}",
+                document.declaration_name, document.normalized_formal_statement
+            )
+        }
+        SearchEmbeddingDocumentPolicy::InformalOrFormal => document
+            .informal_text
+            .as_deref()
+            .filter(|text| !text.trim().is_empty())
+            .unwrap_or(&document.normalized_formal_statement)
+            .to_owned(),
+        SearchEmbeddingDocumentPolicy::LegacyRerankV1 => format!(
+            "name: {}\nmodule: {}\nkind: {}\nstatement: {}",
+            document.declaration_name,
+            document.module_name,
+            document.declaration_kind,
+            document.normalized_formal_statement
+        ),
     }
-    if !declaration.fingerprints.safe_binder_permutation.is_empty() {
-        families.insert("safe_permutation_fingerprint".to_owned());
-    }
-    if !declaration.fingerprints.connective_shape.is_empty() {
-        families.insert("connective_fingerprint".to_owned());
-    }
-    if !declaration.fingerprints.conclusion_shape.is_empty() {
-        families.insert("conclusion_fingerprint".to_owned());
-    }
-    for feature in &declaration.role_features {
-        families.insert(role_family_name(&feature.role));
-    }
-    families.into_iter().collect()
 }
 
-fn role_family_name(role: &str) -> String {
-    match role {
-        "conclusion_const" => "role_conclusion_const".to_owned(),
-        "hypothesis_const" => "role_hypothesis_const".to_owned(),
-        "conclusion_head" | "hypothesis_head" | "binder_domain_head" => "role_head".to_owned(),
-        _ => "role_other".to_owned(),
+fn content_hash_for(document: &SearchEmbeddingDocument, policy: SearchEmbeddingDocumentPolicy) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(policy.id().as_bytes());
+    hasher.update([0]);
+    hasher.update(SEARCH_EMBEDDING_DOCUMENT_POLICY_VERSION.as_bytes());
+    hasher.update([0]);
+    hasher.update(document_text(document, policy).as_bytes());
+    hex_bytes(&hasher.finalize())
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(bytes.len().saturating_mul(2));
+    for byte in bytes {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    encoded
+}
+
+impl SearchEmbeddingDocumentPolicy {
+    fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "formal-statement" => Some(Self::FormalStatement),
+            "name-and-formal-statement" => Some(Self::NameAndFormalStatement),
+            "informal-or-formal" => Some(Self::InformalOrFormal),
+            "legacy-rerank-v1" => Some(Self::LegacyRerankV1),
+            _ => None,
+        }
     }
 }
 
@@ -489,7 +580,8 @@ mod tests {
     use lean_dup_worker::{Fingerprints, RoleFeature};
 
     use super::{
-        SearchObservationRequest, SearchScoringVariant, SearchTrackedPair, observe_search, rescore_observation,
+        SearchEmbeddingDocumentPolicy, SearchObservationRequest, SearchScoringVariant, SearchTrackedPair,
+        content_hash_for, observe_search, rescore_observation,
     };
 
     #[test]
@@ -549,7 +641,7 @@ mod tests {
     }
 
     #[test]
-    fn embedding_inputs_are_deterministic_and_not_serialized() {
+    fn embedding_documents_are_deterministic_and_not_serialized() {
         let rows = generated_rows(3);
         let observation = observe_search(SearchObservationRequest {
             workspace: &rows,
@@ -559,28 +651,46 @@ mod tests {
         })
         .unwrap();
 
+        assert_eq!(observation.embedding_documents.policy_id, "name-and-formal-statement");
         assert_eq!(
-            observation.embedding_inputs.input_policy_version,
-            "lean-dup.embedding-input.v1"
+            observation.embedding_documents.policy_version,
+            "lean-dup.embedding-document.v1"
         );
         assert!(
             observation
-                .embedding_inputs
-                .inputs
+                .embedding_documents
+                .documents
                 .windows(2)
                 .all(|window| window[0].declaration_name <= window[1].declaration_name)
         );
+        let text_inputs = observation.embedding_documents.text_inputs();
         assert!(
-            observation
-                .embedding_inputs
-                .inputs
+            text_inputs
                 .iter()
-                .any(|input| input.text.contains("statement: raw statement text must not serialize"))
+                .any(|input| input.text == "Synthetic.generated_0\nraw statement text must not serialize")
+        );
+        assert!(text_inputs.iter().all(|input| !input.text.contains("features:")));
+        assert!(text_inputs.iter().all(|input| !input.text.contains("same-role")));
+        let first_hash = &observation.embedding_documents.documents[0].content_hash;
+        assert_eq!(first_hash.len(), 64);
+        assert_ne!(
+            first_hash,
+            &content_hash_for(
+                &observation.embedding_documents.documents[0],
+                SearchEmbeddingDocumentPolicy::FormalStatement,
+            )
+        );
+        let mut changed = observation.embedding_documents.documents[0].clone();
+        changed.normalized_formal_statement.push_str(" changed");
+        assert_ne!(
+            first_hash,
+            &content_hash_for(&changed, SearchEmbeddingDocumentPolicy::NameAndFormalStatement)
         );
 
         let json = serde_json::to_string(&observation).unwrap();
-        assert!(!json.contains("embedding_inputs"));
+        assert!(!json.contains("embedding_documents"));
         assert!(!json.contains("raw statement text must not serialize"));
+        assert!(!json.contains(first_hash));
         assert!(!json.contains("same-role"));
     }
 

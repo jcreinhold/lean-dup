@@ -100,7 +100,7 @@ pub(crate) fn embed_text_batch(
     let wrapped_inputs = request
         .inputs
         .iter()
-        .map(|input| profile.wrap_document(&input.text))
+        .map(|input| profile.wrap_text(request.role, &input.text))
         .collect::<Vec<_>>();
 
     for (index, wrapped_text) in wrapped_inputs.iter().enumerate() {

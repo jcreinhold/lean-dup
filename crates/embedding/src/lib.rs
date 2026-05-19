@@ -2,7 +2,7 @@
 //!
 //! This crate owns model profiles, explicit model acquisition, CPU embedding,
 //! normalization, batching, vector caching, and embedding runtime counters.
-//! Callers provide declaration-summary strings and receive stable
+//! Callers provide declaration-document strings and receive stable
 //! model/cache/runtime facts; they do not learn Hugging Face cache layout,
 //! model filenames, FastEmbed/ONNX internals, or vector-cache storage.
 
@@ -18,8 +18,8 @@ use hf_hub::Cache;
 use profiles::{BGE_SMALL_MODEL_ID, resolve_profile};
 use serde::{Deserialize, Serialize};
 
-/// Version of the declaration-summary input contract consumed by embeddings.
-pub const EMBEDDING_INPUT_POLICY_VERSION: &str = "lean-dup.embedding-input.v1";
+/// Version of the declaration-document input contract consumed by embeddings.
+pub const EMBEDDING_INPUT_POLICY_VERSION: &str = "lean-dup.embedding-document.v1";
 
 /// A model the embedding crate can prepare and run.
 ///
@@ -150,28 +150,34 @@ pub struct EmbeddingPrepareResult {
     pub reasons: Vec<String>,
 }
 
-/// Public contract for how declaration summaries are converted to model input.
+/// Public contract for how declaration documents are converted to model input.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EmbeddingInputPolicy {
+    pub policy_id: String,
     pub version: String,
     pub includes_declaration_name: bool,
-    pub includes_module_name: bool,
-    pub includes_declaration_kind: bool,
     pub includes_normalized_statement: bool,
-    pub includes_feature_summaries: bool,
+    pub uses_informal_text_when_available: bool,
 }
 
 impl Default for EmbeddingInputPolicy {
     fn default() -> Self {
         Self {
+            policy_id: "name-and-formal-statement".to_owned(),
             version: EMBEDDING_INPUT_POLICY_VERSION.to_owned(),
             includes_declaration_name: true,
-            includes_module_name: true,
-            includes_declaration_kind: true,
             includes_normalized_statement: true,
-            includes_feature_summaries: true,
+            uses_informal_text_when_available: false,
         }
     }
+}
+
+/// The semantic role of a text input for profile-specific model wrapping.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum EmbeddingInputRole {
+    Document,
+    Query,
 }
 
 /// One text input for local embedding.
@@ -185,6 +191,7 @@ pub struct TextEmbeddingInput {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TextEmbeddingBatchRequest {
     pub model: EmbeddingModelSpec,
+    pub role: EmbeddingInputRole,
     pub input_policy: EmbeddingInputPolicy,
     pub inputs: Vec<TextEmbeddingInput>,
     pub model_cache_root: Option<PathBuf>,
@@ -221,7 +228,7 @@ pub struct TextEmbeddingBatchResult {
     pub vectors: Vec<EmbeddingVector>,
 }
 
-/// Embed declaration-summary strings locally using a prepared CPU model.
+/// Embed declaration-document strings locally using a prepared CPU model.
 ///
 /// This operation is cache-only: it validates model files prepared by
 /// `prepare_embedding_model` and never downloads. Callers receive normalized
@@ -347,12 +354,23 @@ mod tests {
     #[test]
     fn input_policy_names_stable_contract() {
         let policy = EmbeddingInputPolicy::default();
-        assert_eq!(policy.version, "lean-dup.embedding-input.v1");
+        assert_eq!(policy.policy_id, "name-and-formal-statement");
+        assert_eq!(policy.version, "lean-dup.embedding-document.v1");
         assert!(policy.includes_declaration_name);
-        assert!(policy.includes_module_name);
-        assert!(policy.includes_declaration_kind);
         assert!(policy.includes_normalized_statement);
-        assert!(policy.includes_feature_summaries);
+        assert!(!policy.uses_informal_text_when_available);
+    }
+
+    #[test]
+    fn profile_wrapping_is_role_aware_and_private() -> Result<()> {
+        let model = EmbeddingModelSpec::default_experiment_model();
+        let profile = resolve_profile(&model)?;
+        let document = profile.wrap_text(EmbeddingInputRole::Document, "P = Q");
+        let query = profile.wrap_text(EmbeddingInputRole::Query, "P = Q");
+        assert_ne!(document, query);
+        assert!(!document.is_empty());
+        assert!(!query.is_empty());
+        Ok(())
     }
 
     #[test]
@@ -360,6 +378,7 @@ mod tests {
         let temp = tempfile::TempDir::new()?;
         let request = TextEmbeddingBatchRequest {
             model: EmbeddingModelSpec::default_experiment_model(),
+            role: EmbeddingInputRole::Document,
             input_policy: EmbeddingInputPolicy::default(),
             inputs: vec![TextEmbeddingInput {
                 id: "Tiny.same_left".to_owned(),

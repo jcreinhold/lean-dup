@@ -333,6 +333,8 @@ fn old_file_shaped_modules_are_not_public_api() {
                 "candle_transformers::",
                 "tokenizers::",
                 "safetensors::",
+                "\"query:",
+                "\"passage:",
             ] {
                 assert!(
                     !contents.contains(forbidden),
