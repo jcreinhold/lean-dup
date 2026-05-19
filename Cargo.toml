@@ -6,6 +6,7 @@ members = [
     "crates/project",
     "crates/index",
     "crates/search",
+    "crates/embedding",
     "crates/report",
     "crates/eval",
     "crates/cli",

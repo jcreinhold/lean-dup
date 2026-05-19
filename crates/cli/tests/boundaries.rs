@@ -102,6 +102,45 @@ fn dependency_direction_keeps_lower_crates_out_of_report_and_cli() {
                 );
             }
         }
+        if name == "lean-dup-embedding" {
+            for forbidden in dependencies
+                .iter()
+                .filter(|dependency| dependency.starts_with("lean-dup-"))
+            {
+                assert!(
+                    forbidden == "lean-dup-embedding",
+                    "embedding must not depend on {forbidden}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn embedding_crate_is_isolated_until_runtime_prompts() {
+    let manifests = crate_manifests();
+    assert!(
+        manifests.contains_key("lean-dup-embedding"),
+        "lean-dup-embedding crate must be present"
+    );
+
+    for (name, manifest) in manifests {
+        let dependencies = dependency_names(&manifest);
+        for forbidden in [
+            "hf-hub",
+            "tokenizers",
+            "candle-core",
+            "candle-nn",
+            "candle-transformers",
+            "safetensors",
+            "fastembed",
+            "ort",
+        ] {
+            assert!(
+                !dependencies.iter().any(|dependency| dependency == forbidden),
+                "{name} must not depend on embedding runtime dependency {forbidden} in Prompt 35A"
+            );
+        }
     }
 }
 
@@ -262,6 +301,12 @@ fn old_file_shaped_modules_are_not_public_api() {
             for forbidden in ["lean_dup_search::audit::", "lean_dup_search::observation::"] {
                 assert!(!contents.contains(forbidden), "{display} imports {forbidden}");
             }
+        }
+        if !path.starts_with(root.join("crates/embedding")) {
+            assert!(
+                !contents.contains("lean_dup_embedding::"),
+                "{display} imports lean_dup_embedding before integration prompt"
+            );
         }
     }
 }
