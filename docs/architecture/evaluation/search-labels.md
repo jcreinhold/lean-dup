@@ -41,8 +41,8 @@ Typed labels use `typed_pairs`:
 
 - Typed labels must include every typed field above; partial typed labels are rejected.
 - Typed labels for the same unordered pair must agree on polarity and match class.
-- Legacy positive/hard-negative contradictions keep the pre-Prompt-29 behavior: the hard-negative entry is dropped
-  after pair normalization. Typed labels do not get that escape hatch.
+- Legacy positive/hard-negative contradictions drop the hard-negative entry after pair
+  normalization. Typed labels do not get that escape hatch.
 - Label identity is direction-insensitive: `A/B` and `B/A` are the same pair.
 
 ## Fixture coverage
@@ -63,16 +63,9 @@ Every current core match class is represented; `skipped_classes` is `[]`.
 
 ## KanProofs labels
 
-KanProofs suites stay manual and private-path aware. Their typed labels are adjudication targets, not a claim that
-the current search stack finds them. Files: `kanproofs-internal.json`, `kanproofs-mathlib.json`.
-
-Current evidence (full table in [production-gates.md](production-gates.md)):
-
-| Suite | Recall@10 | Hard-negative leakage |
-| --- | ---: | ---: |
-| KanProofs/mathlib | 0/11 | 3/4 |
-| KanProofs internal | 0/6 | — |
-| production-gate aggregate | 15/32 | 3/16 |
+KanProofs suites stay manual and private-path aware. Their typed labels are adjudication
+targets, not a claim that the current search stack finds them. Files:
+`kanproofs-internal.json`, `kanproofs-mathlib.json`.
 
 ## Why a typed layer instead of a new format
 

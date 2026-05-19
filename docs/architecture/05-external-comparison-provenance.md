@@ -4,7 +4,7 @@ Every external comparison index has one of three evidence modes. Ranking, semant
 consume this mode; nothing else gates how strongly a non-workspace match can be claimed.
 
 For the audit flow that uses this boundary, see
-[06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md).
+[06-end-to-end-architecture.md](06-end-to-end-architecture.md).
 
 ## Evidence modes
 
@@ -30,7 +30,7 @@ Audit JSON includes a comparison provenance record per index with `label`, `orig
 provenance summary. Ranked groups carry the same evidence mode.
 
 The JSON shape is diagnostic; the stable JSON contract lives in
-[report-contract.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/report-contract.md).
+[report-contract.md](report-contract.md).
 
 ## Why a typed mode, not a label
 

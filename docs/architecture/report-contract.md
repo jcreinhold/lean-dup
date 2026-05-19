@@ -3,9 +3,8 @@
 What every audit report—text, JSON, and `show`—must explain. Renderers consume typed explanation facts and never
 invent the policy themselves.
 
-For the pipeline that builds these facts, see
-[06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md). This
-document closes `G7 report_contract` once fixture and real-workload artifacts back the contract.
+For the pipeline that builds these facts, see [06-end-to-end-architecture.md](06-end-to-end-architecture.md).
+This document defines `G7 report_contract` in [04-production-readiness.md](04-production-readiness.md).
 
 ## Schema
 
@@ -105,13 +104,13 @@ cargo run -p lean-dup-cli -- audit --workspace tests/fixtures/tiny --module Tiny
   --no-semantic-probes > target/report-contract/fixture-audit.txt
 
 target/release/lean-dup --progress --profile audit \
-  --workspace /Users/jcreinhold/Code/kan-proofs --module KanProofs \
-  --compare-mathlib --format json > target/report-contract/kanproofs-full-mathlib.json
+  --workspace <workspace> --module <Root.Module> \
+  --compare-mathlib --format json > target/report-contract/full-mathlib.json
 ```
 
 Verification:
 
 ```sh
 cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
-cd /Users/jcreinhold/Code/lean-dup/lean && lake build
+(cd lean && lake build)
 ```

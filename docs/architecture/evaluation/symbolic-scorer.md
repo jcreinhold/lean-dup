@@ -41,41 +41,14 @@ hard-negative hits and survival, candidate count, stage metrics, timing, peak RS
 Production-gate ablation artifacts include aggregate variant metrics and child-suite variant metrics for completed
 children. Skipped children stay skipped and are not counted as quality passes.
 
-## Evidence
-
-Default fixture suite:
-
-| Variant | Recall@10 | Visible precision | Hard-neg hits | Candidates |
-| --- | ---: | ---: | ---: | ---: |
-| `all-features` | 16/16 | 14/34 | 0/3 | 299 |
-| `no-role-features` | 16/16 | 15/82 | 2/3 | 299 |
-| `no-connective-conclusion-features` | 16/16 | 13/32 | 0/3 | 299 |
-| `no-source-module-features` | 16/16 | 15/82 | 2/3 | 299 |
-| `no-static-evidence-features` | 16/16 | 15/82 | 2/3 | 299 |
-| `semantic-evidence-only-rerank` | 0/16 | 0/0 | 0/3 | 0 |
-
-Production-gate. Completed the fast children; skipped the KanProofs manual suites because the local
-KanProofs workspace was missing compiled oleans:
-
-| Variant | Recall@10 | Visible precision | Hard-neg hits | Candidates |
-| --- | ---: | ---: | ---: | ---: |
-| `all-features` | 17/17 | 15/68 | 0/8 | 598 |
-| `no-role-features` | 17/17 | 16/164 | 3/8 | 598 |
-| `no-connective-conclusion-features` | 17/17 | 14/64 | 0/8 | 598 |
-| `no-source-module-features` | 17/17 | 16/164 | 3/8 | 598 |
-| `no-static-evidence-features` | 17/17 | 16/164 | 3/8 | 598 |
-| `semantic-evidence-only-rerank` | 0/17 | 0/0 | 0/8 | 0 |
-
-The `all-features` row matches normal eval metrics. Other rows are diagnostic: they show which feature families
-currently carry positives, hard negatives, and visible findings. They are not release gates.
-
-The numbers above are evidence that the ablation harness works and that default behavior is preserved. They are not
-evidence that the search-quality gates are closed.
-
-Evidence commands:
+## Evidence commands
 
 ```sh
 cargo run -p lean-dup-cli -- eval --suite default --format json --write-scorer-ablations
 cargo run -p lean-dup-cli -- eval --suite production-gate --format json \
-  --write-scorer-ablations --output target/eval/prompt33-production-gate.json
+  --write-scorer-ablations --output target/eval/production-gate.json
 ```
+
+The `all-features` row of each artifact matches the normal eval metrics; other rows are
+diagnostic, naming which feature families currently carry positives, hard negatives, and
+visible findings. The ablations are not release gates.

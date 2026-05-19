@@ -4,12 +4,21 @@ A read-only duplication auditor for Lean 4 Lake workspaces. It indexes declarati
 elaborated Lean environment and reports likely duplicate or subsumed statements. Local and
 deterministic: no network services, no embeddings, no proof-term analysis.
 
+## Requirements
+
+Lean toolchain `leanprover/lean4:v4.30.0-rc2` (other 4.x versions are untested); Rust 1.85+
+(`edition = "2024"`); a Lake workspace whose `lake build` already succeeds, with `.olean` files
+present for the modules to be audited.
+
 ## Build
 
 ```sh
 cargo build --release -p lean-dup-cli
 cd lean && lake build
 ```
+
+For a walkthrough with sample output, the full audit/show loop, and what each field means, see
+[docs/getting-started.md](docs/getting-started.md).
 
 ## Audit a workspace
 
@@ -35,12 +44,21 @@ group), `diff` (saved baselines), `eval` (quality suites).
 
 ## Caches and replacement hints
 
-Project and mathlib indexes are cached under the resolved `lean-dup` cache root; shared project-pinned mathlib
-indexes default to `~/.cache/lean-dup` (`LEAN_DUP_CACHE_DIR` overrides).
+Project and mathlib indexes are cached under the resolved `lean-dup` cache root; shared
+project-pinned mathlib indexes default to `~/.cache/lean-dup` (`LEAN_DUP_CACHE_DIR` overrides).
 
-For confirmed external matches, text and JSON reports include read-only replacement hints: the target declaration,
-the specific import line, direct-import status, and bounded local source references to replace or preserve behind a
-transitional alias.
+For confirmed external matches, text and JSON reports include read-only replacement hints: the
+target declaration, the specific import line, direct-import status, and bounded local source
+references to replace or preserve behind a transitional alias.
+
+## Current status
+
+Intra-workspace audits are usable today. `--compare-mathlib` runs but the release-quality gates
+`G1 regression_quality` and `G2 precision_control` are open: recall against real mathlib corpora
+has not been demonstrated yet. See
+[docs/architecture/04-production-readiness.md](docs/architecture/04-production-readiness.md) for
+the gate table. The CLI is read-only with respect to your Lean source, so trying it costs only
+time.
 
 ## Architecture
 
@@ -56,3 +74,7 @@ as-built pipeline. Then:
 The Python implementation has been retired; the production command surface is the Rust
 `lean-dup` binary. The [deprecation map](docs/architecture/python-deprecation-map.md) records what
 each Python module was superseded by.
+
+## License
+
+Apache-2.0 OR MIT, at your option. See `LICENSE-APACHE` and `LICENSE-MIT`.

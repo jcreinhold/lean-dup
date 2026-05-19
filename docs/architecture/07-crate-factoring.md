@@ -4,8 +4,7 @@ Eight Rust crates, each owning one kind of hidden knowledge. The split is functi
 class of change (Lean protocol mechanics, Lake project resolution, persisted storage, search and review policy,
 report projection, quality measurement, terminal I/O), not to mirror one old source file.
 
-For the pipeline the crates implement, see
-[06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md).
+For the pipeline the crates implement, see [06-end-to-end-architecture.md](06-end-to-end-architecture.md).
 
 ## Crates
 
@@ -26,23 +25,26 @@ Package and directory names omit `-rs`. The binary is `lean-dup` until a user-fa
 
 Each crate root is the supported public facade. Submodules and internals stay private.
 
-- **`lean-dup-worker`**: `WorkerClient`, request/result DTOs, stream row/progress/diagnostic DTOs, version/build
-  policy, worker errors. DTOs are semantic worker facts; subprocess transport, JSONL framing, protocol envelopes,
-  request ids, and timeouts are private.
-- **`lean-dup-project`**: `WorkspaceRequest`, `ResolvedWorkspace`, `SourceFile`, `resolve`, `ProjectMathlib`,
-  `resolve_project_mathlib`, `resolve_workspace_mathlib`, project errors. Lake path rules and `.olean` discovery live
+- **`lean-dup-worker`** — `WorkerClient`, request/result DTOs, version/build policy. Subprocess
+  transport, JSONL framing, protocol envelopes, request ids, and timeouts are private.
+- **`lean-dup-diagnostics`** — progress/profile events, runtime measurement helpers. No
+  semantic dependencies.
+- **`lean-dup-project`** — `WorkspaceRequest`, `ResolvedWorkspace`, `SourceFile`, `resolve`,
+  `ProjectMathlib`, mathlib resolution entry points. Lake path rules and `.olean` discovery sit
   on `ResolvedWorkspace`.
-- **`lean-dup-index`**: `IndexStore`, build/open/hydrate DTOs, `SemanticFeatureFanout`, `SemanticFeatureMatches`,
-  provenance summaries, cache diagnostics, safe cleanup reports. Feature keys are opaque Lean-owned strings; SQLite
-  schema, posting layout, queries, and latest-pointer layout are private.
-- **`lean-dup-search`**: `ReviewProfile`, `ProbePolicy`, `AuditRequest`, `AuditOutput`, audit DTOs, `ShowOutput`,
-  `DiffOutput`, `run_audit`, `run_show`, `run_diff`, `SearchObservationRequest`, `SearchObservation`,
-  `observe_search`. Retrieval keys, ranking constants, probe obligations, source-scan policy, replacement-hint
-  internals, baseline storage stay private.
-- **`lean-dup-report`**: report DTOs, projection functions, explanation facts, `render_text`.
-- **`lean-dup-eval`**: `EvalSuite`, `EvalRequest`, `EvalOutput`, suite execution, stage metrics, quality
-  denominators. Text rendering belongs to report; runtime memory measurement belongs to diagnostics.
-- **`lean-dup-cli`**: clap argument types, command dispatch, stdout/stderr/file I/O, final app error aggregation.
+- **`lean-dup-index`** — `IndexStore`, build/open/hydrate DTOs, `SemanticFeatureFanout`,
+  provenance summaries, cache diagnostics, safe cleanup reports. SQLite schema, posting layout,
+  and latest-pointer layout are private; feature keys are opaque Lean-owned strings.
+- **`lean-dup-search`** — `ReviewProfile`, `ProbePolicy`, `AuditRequest`, `AuditOutput`,
+  `ShowOutput`, `DiffOutput`, `run_audit`, `run_show`, `run_diff`, `observe_search`. Retrieval
+  keys, ranking constants, probe obligations, source-scan policy, and replacement-hint internals
+  stay private.
+- **`lean-dup-report`** — report DTOs, projection functions, explanation facts, `render_text`.
+- **`lean-dup-eval`** — `EvalSuite`, `EvalRequest`, `EvalOutput`, stage metrics, quality
+  denominators. Text rendering belongs to report; runtime/memory measurement belongs to
+  diagnostics.
+- **`lean-dup-cli`** — clap argument types, command dispatch, stdout/stderr/file I/O, final
+  error aggregation.
 
 ## Removed flags
 
@@ -51,11 +53,10 @@ Misleading audit flags that parsed without reliably changing behavior were remov
 
 ## Why eight, not seven, not "core + cli"
 
-A crate per old module would produce shallow pass-through crates around `retrieval`, `ranking`, `semantic_verification`,
-`cache`, `render`, forcing unstable internal records into public APIs.
+A crate per old module would produce shallow pass-through crates around `retrieval`, `ranking`,
+`semantic_verification`, `cache`, and `render`, forcing unstable internal records into public
+APIs. A single `core` plus a CLI crate is easy to move around but leaves the same complected
+internal architecture.
 
-A single `core` plus a CLI crate is easy to move around but leaves the same complected internal architecture.
-
-The previous seven-crate split misnamed diagnostics as report output and left audit phase ordering in the CLI. The
-current split moves audit ordering into `lean-dup-search`, separates diagnostic plumbing from user-facing report
-contracts, and lets `lean-dup-report` own stable projection and wording.
+The current split moves audit ordering into `lean-dup-search`, separates diagnostic plumbing
+from user-facing report contracts, and lets `lean-dup-report` own stable projection and wording.

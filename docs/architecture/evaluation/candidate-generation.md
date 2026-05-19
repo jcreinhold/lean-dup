@@ -1,8 +1,8 @@
 # Candidate Generation
 
-Candidate generation is now an explicit private search stage with named observability. The goal is high-recall
-visibility into where positives are lost, without changing ranking thresholds, semantic-probe policy, report JSON,
-command names, or ordinary mathlib hydration limits.
+Candidate generation is an explicit private search stage with named observability. The goal is
+high-recall visibility into where positives are lost, without changing ranking thresholds,
+semantic-probe policy, report JSON, command names, or ordinary mathlib hydration limits.
 
 ## Generation policies
 
@@ -60,10 +60,7 @@ cargo run -p lean-dup-cli -- eval --suite default --format json --write-search-d
 
 # Production-gate evidence
 cargo run -p lean-dup-cli -- eval --suite production-gate --format json \
-  --output target/eval/prompt32-production-gate.json
-
-# Leak check for dataset artifacts. Any match must be intentional stable
-# vocabulary, not a leaked internal key.
-rg -n 'sqlite|posting|IndexQuery|FeatureMatch|/Users/|statement_text|raw' \
-  target/search-quality/default-dataset.json
+  --output target/eval/production-gate.json
 ```
+
+Dataset artifact privacy is verified by the leak-check rule in [search-datasets.md](search-datasets.md).

@@ -21,20 +21,6 @@ contract release hardening waits on.
 The class is part of the quality target. A system that finds many related theorems but cannot tell replacement
 candidates apart from hard negatives is not production-ready, however high its aggregate candidate count.
 
-## Where we are today
-
-The Rust/Lean aggregate eval command runs end to end. The numbers are not release-quality:
-
-| Metric | Result |
-| ---: | ---: |
-| KanProofs/mathlib recall@10 | 0/11 |
-| KanProofs/mathlib hard-negative leakage | 3/4 |
-| Aggregate recall@10 | 15/32 |
-| Aggregate hard-negative hits | 3/16 |
-
-`eval status = ok` means the command completed. A professional search-quality gate must explain *where* positives are
-lost and *where* hard negatives survive: candidate generation, ranking, semantic verification, or report visibility.
-
 ## The four stages
 
 Each stage has one objective and one failure mode. A bug at any stage looks different from a bug at any other.

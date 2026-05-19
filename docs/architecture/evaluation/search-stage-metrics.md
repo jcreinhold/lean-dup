@@ -58,18 +58,15 @@ cargo run -p lean-dup-cli -- eval --suite hard-negatives --format json
 
 # Production-gate evidence
 cargo run -p lean-dup-cli -- eval --suite production-gate --format json \
-  --output target/eval/prompt30-production-gate.json
+  --output target/eval/production-gate.json
 ```
 
-The aggregate `status` still reports command/gate execution. Release-quality claims use the raw stage denominators,
-especially KanProofs/mathlib recall and hard-negative survival.
+The aggregate `status` reports command/gate execution. Release-quality claims use the raw stage
+denominators, especially KanProofs/mathlib recall and hard-negative survival.
 
 ## Known limitations
 
 - Stage metrics measure existing behavior. They reveal bad behavior; they do not fix it.
-- The semantic-verification counters are zero for retrieval-only suites. Audit-backed observations are a later
-  extension; the slots exist now so artifacts stay stable when they land.
-- Top-k recall before final ranking still uses the current first-stage selection order.
-- *Residual temporal decomposition.* Current eval observes retrieval output as the candidate stage because retrieval
-  has not yet been split internally. Until that split lands, generated and ranked are aliases for the current single
-  stage.
+- The semantic-verification counters are zero for retrieval-only suites; the slots exist so
+  artifact shape stays stable when audit-backed observations are added.
+- Top-k recall before final ranking uses the current first-stage selection order.

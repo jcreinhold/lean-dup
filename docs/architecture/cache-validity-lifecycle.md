@@ -3,8 +3,7 @@
 `lean-dup` reuses indexes across audits. This document defines when an index is still good, when it must be rebuilt,
 and how `doctor` and the hidden `cache-cleanup` keep the cache directory honest.
 
-For the pipeline that uses the cache, see
-[06-end-to-end-architecture.md](/Users/jcreinhold/Code/lean-dup/docs/architecture/06-end-to-end-architecture.md).
+For the pipeline that uses the cache, see [06-end-to-end-architecture.md](06-end-to-end-architecture.md).
 
 ## What makes an index stale
 
@@ -83,7 +82,7 @@ for table rows, digests, or deletion steps.
 cargo test
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
-cd /Users/jcreinhold/Code/lean-dup/lean && lake build
+(cd lean && lake build)
 
 cargo test -p lean-dup-cli cache_lifecycle
 cargo test -p lean-dup-cli cache_key_ignores_unrelated_files_and_tracks_lake_inputs
@@ -91,7 +90,6 @@ cargo test -p lean-dup-cli hidden_cache_cleanup
 cargo test -p lean-dup-cli doctor_json_reports_cache_lifecycle_diagnostics
 
 cargo run -p lean-dup-cli -- doctor \
-  --workspace /Users/jcreinhold/Code/lean-dup/tests/fixtures/tiny \
-  --module Tiny --format json \
+  --workspace tests/fixtures/tiny --module Tiny --format json \
   > target/cache/doctor-production.json
 ```
