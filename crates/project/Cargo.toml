@@ -1,15 +1,15 @@
 [package]
-edition.workspace = true
-license.workspace = true
+edition = { workspace = true }
+license = { workspace = true }
 name = "lean-dup-project"
-version.workspace = true
+version = { workspace = true }
 
 [dependencies]
-lean-dup-diagnostics.workspace = true
-serde.workspace = true
-thiserror.workspace = true
-toml.workspace = true
-walkdir.workspace = true
+lean-dup-diagnostics = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+walkdir = { workspace = true }
 
 [dev-dependencies]
-tempfile.workspace = true
+tempfile = { workspace = true }

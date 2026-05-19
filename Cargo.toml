@@ -18,6 +18,25 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 version = "0.1.0"
 
+[workspace.dependencies]
+lean-dup-diagnostics = { path = "crates/diagnostics" }
+lean-dup-embedding = { path = "crates/embedding" }
+lean-dup-eval = { path = "crates/eval" }
+lean-dup-index = { path = "crates/index" }
+lean-dup-project = { path = "crates/project" }
+lean-dup-report = { path = "crates/report" }
+lean-dup-search = { path = "crates/search" }
+lean-dup-worker = { path = "crates/worker" }
+rusqlite = { version = "0.39", features = ["bundled"] }
+rustc-hash = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+tempfile = "3"
+thiserror = "2"
+toml = "1"
+walkdir = "2"
+
 [workspace.lints.rust]
 future-incompatible = "warn"
 let-underscore = "warn"

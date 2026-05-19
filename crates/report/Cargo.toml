@@ -1,14 +1,14 @@
 [package]
-edition.workspace = true
-license.workspace = true
+edition = { workspace = true }
+license = { workspace = true }
 name = "lean-dup-report"
-version.workspace = true
+version = { workspace = true }
 
 [dependencies]
-lean-dup-diagnostics = { path = "../diagnostics" }
-lean-dup-eval = { path = "../eval" }
-lean-dup-index = { path = "../index" }
-lean-dup-search = { path = "../search" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "2"
+lean-dup-diagnostics = { workspace = true }
+lean-dup-eval = { workspace = true }
+lean-dup-index = { workspace = true }
+lean-dup-search = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

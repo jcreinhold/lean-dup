@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{EmbeddingInputPolicy, Error, Result};
+use crate::{EmbeddingInputPolicy, Error, Result, hex_bytes};
 
 #[derive(Debug, Clone)]
 pub(crate) struct VectorCache {
@@ -86,7 +86,7 @@ fn cache_key(model_fingerprint: &str, policy_version: &str, text: &str) -> Strin
     hasher.update(policy_version.as_bytes());
     hasher.update([0]);
     hasher.update(text.as_bytes());
-    format!("{:x}", hasher.finalize())
+    hex_bytes(&hasher.finalize())
 }
 
 #[cfg(test)]

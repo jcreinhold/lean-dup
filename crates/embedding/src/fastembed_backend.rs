@@ -12,7 +12,7 @@ use crate::{
     EmbeddingAcquisitionPolicy, EmbeddingCacheStatus, EmbeddingCacheSummary, EmbeddingModelFileRole,
     EmbeddingModelFileState, EmbeddingModelSpec, EmbeddingPrepareRequest, EmbeddingPrepareResult,
     EmbeddingRequiredFileStatus, EmbeddingRuntimeCounters, EmbeddingVector, Error, Result, TextEmbeddingBatchRequest,
-    TextEmbeddingBatchResult, resolve_hf_cache_root,
+    TextEmbeddingBatchResult, hex_bytes, resolve_hf_cache_root,
 };
 
 const DEFAULT_FASTEMBED_BATCH_SIZE: usize = 256;
@@ -435,7 +435,7 @@ fn profile_fingerprint(profile: ModelProfile, model: &EmbeddingModelSpec, files:
             hasher.update(bytes);
         }
     }
-    format!("{:x}", hasher.finalize())
+    hex_bytes(&hasher.finalize())
 }
 
 fn stable_fastembed_error(error: String) -> String {
