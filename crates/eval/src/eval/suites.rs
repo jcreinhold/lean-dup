@@ -5,7 +5,6 @@ use std::time::Instant;
 use serde::Serialize;
 
 use crate::EvalSuite;
-use crate::eval::embedding_rerank::{self, EmbeddingRerankRequest};
 use crate::eval::labels::{GoldLabels, load_builtin};
 use crate::eval::scorer_ablations::{self, ScorerAblationVariantReport};
 use crate::eval::scoring::{
@@ -35,7 +34,6 @@ pub struct EvalRequest {
     pub k_values: Vec<usize>,
     pub write_search_dataset: bool,
     pub write_scorer_ablations: bool,
-    pub embedding_rerank: Option<EmbeddingRerankRequest>,
     pub vector_search: Option<VectorSearchRequest>,
 }
 
@@ -50,17 +48,11 @@ pub struct EvalOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scorer_ablation_artifact: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub embedding_rerank_status: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub embedding_rerank_artifact: Option<PathBuf>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub vector_search_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vector_search_artifact: Option<PathBuf>,
     #[serde(skip)]
     pub scorer_ablations: Vec<ScorerAblationVariantReport>,
-    #[serde(skip)]
-    pub embedding_rerank_metrics: Option<EvaluationMetrics>,
     #[serde(skip)]
     pub vector_search_metrics: Option<EvaluationMetrics>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -78,18 +70,12 @@ pub struct EvaluationRunReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub embedding_rerank_status: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub embedding_rerank_artifact: Option<PathBuf>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub vector_search_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vector_search_artifact: Option<PathBuf>,
     pub manual: bool,
     #[serde(skip)]
     pub scorer_ablations: Vec<ScorerAblationVariantReport>,
-    #[serde(skip)]
-    pub embedding_rerank_metrics: Option<EvaluationMetrics>,
     #[serde(skip)]
     pub vector_search_metrics: Option<EvaluationMetrics>,
 }
@@ -296,21 +282,6 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
     } else {
         None
     };
-    let embedding_rerank = if let Some(request) = &request.embedding_rerank {
-        let root = repo_root();
-        Some(embedding_rerank::run(embedding_rerank::EmbeddingRerankRun {
-            repo_root: &root,
-            suite: &labels.suite,
-            request,
-            labels: &labels,
-            observation: &output,
-            baseline_metrics: &metrics,
-            scorer_version: &scorer_version,
-            k_values: &k_values,
-        })?)
-    } else {
-        None
-    };
     let vector_search = if request.vector_search.is_some() {
         let root = repo_root();
         Some(vector_search::report(vector_search::VectorSearchReportRun {
@@ -334,12 +305,9 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
         metrics,
         search_dataset_artifact,
         scorer_ablation_artifact,
-        embedding_rerank_status: embedding_rerank.as_ref().map(|outcome| outcome.status.clone()),
-        embedding_rerank_artifact: embedding_rerank.as_ref().map(|outcome| outcome.artifact.clone()),
         vector_search_status: vector_search.as_ref().map(|outcome| outcome.status.clone()),
         vector_search_artifact: vector_search.as_ref().map(|outcome| outcome.artifact.clone()),
         scorer_ablations,
-        embedding_rerank_metrics: embedding_rerank.and_then(|outcome| outcome.metrics),
         vector_search_metrics: vector_search.and_then(|outcome| outcome.metrics),
         runs: Vec::new(),
     })
@@ -427,7 +395,6 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
                 k_values: request.k_values.clone(),
                 write_search_dataset: false,
                 write_scorer_ablations: request.write_scorer_ablations,
-                embedding_rerank: request.embedding_rerank.clone(),
                 vector_search: request.vector_search.clone(),
             },
             false,
@@ -445,7 +412,6 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
                 k_values: request.k_values.clone(),
                 write_search_dataset: false,
                 write_scorer_ablations: request.write_scorer_ablations,
-                embedding_rerank: request.embedding_rerank.clone(),
                 vector_search: request.vector_search.clone(),
             },
             true,
@@ -502,30 +468,6 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
     } else {
         None
     };
-    let embedding_rerank = if let Some(request) = &request.embedding_rerank {
-        let children = runs
-            .iter()
-            .map(|run| {
-                embedding_rerank::child_report(
-                    run.suite.clone(),
-                    run.embedding_rerank_status.clone(),
-                    run.embedding_rerank_artifact.clone(),
-                    run.embedding_rerank_metrics.clone(),
-                    run.reason.clone(),
-                )
-            })
-            .collect();
-        Some(embedding_rerank::aggregate(
-            &repo_root(),
-            request,
-            "production-gate",
-            &metrics,
-            &scorer_version,
-            children,
-        )?)
-    } else {
-        None
-    };
     let vector_search = if request.vector_search.is_some() {
         let children = runs
             .iter()
@@ -557,12 +499,9 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
         metrics,
         search_dataset_artifact: None,
         scorer_ablation_artifact,
-        embedding_rerank_status: embedding_rerank.as_ref().map(|outcome| outcome.status.clone()),
-        embedding_rerank_artifact: embedding_rerank.as_ref().map(|outcome| outcome.artifact.clone()),
         vector_search_status: vector_search.as_ref().map(|outcome| outcome.status.clone()),
         vector_search_artifact: vector_search.as_ref().map(|outcome| outcome.artifact.clone()),
         scorer_ablations,
-        embedding_rerank_metrics: embedding_rerank.and_then(|outcome| outcome.metrics),
         vector_search_metrics: vector_search.and_then(|outcome| outcome.metrics),
         runs,
     })
@@ -576,13 +515,10 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
             scorer_version: None,
             metrics: None,
             reason: Some("manual suite workspace is unavailable".to_owned()),
-            embedding_rerank_status: None,
-            embedding_rerank_artifact: None,
             vector_search_status: None,
             vector_search_artifact: None,
             manual,
             scorer_ablations: Vec::new(),
-            embedding_rerank_metrics: None,
             vector_search_metrics: None,
         };
     }
@@ -595,13 +531,10 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
             scorer_version: Some(report.scorer_version),
             metrics: Some(report.metrics),
             reason: None,
-            embedding_rerank_status: report.embedding_rerank_status,
-            embedding_rerank_artifact: report.embedding_rerank_artifact,
             vector_search_status: report.vector_search_status,
             vector_search_artifact: report.vector_search_artifact,
             manual,
             scorer_ablations: report.scorer_ablations,
-            embedding_rerank_metrics: report.embedding_rerank_metrics,
             vector_search_metrics: report.vector_search_metrics,
         },
         Err(error) => {
@@ -617,13 +550,10 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
                 scorer_version: None,
                 metrics: None,
                 reason: Some(reason),
-                embedding_rerank_status: None,
-                embedding_rerank_artifact: None,
                 vector_search_status: None,
                 vector_search_artifact: None,
                 manual,
                 scorer_ablations: Vec::new(),
-                embedding_rerank_metrics: None,
                 vector_search_metrics: None,
             }
         }
@@ -1005,7 +935,6 @@ mod tests {
                 k_values: vec![1, 5, 10],
                 write_search_dataset: false,
                 write_scorer_ablations: false,
-                embedding_rerank: None,
                 vector_search: None,
             },
             &mut Reporter::new(false, false),
@@ -1063,7 +992,6 @@ mod tests {
                 k_values: vec![1, 5, 10],
                 write_search_dataset: false,
                 write_scorer_ablations: false,
-                embedding_rerank: None,
                 vector_search: None,
             },
             true,
@@ -1100,7 +1028,6 @@ mod tests {
                 k_values: vec![1, 5, 10],
                 write_search_dataset: false,
                 write_scorer_ablations: false,
-                embedding_rerank: None,
                 vector_search: None,
             },
             &mut Reporter::new(false, true),
@@ -1121,7 +1048,6 @@ mod tests {
                 k_values: vec![1, 5, 10],
                 write_search_dataset: false,
                 write_scorer_ablations: false,
-                embedding_rerank: None,
                 vector_search: None,
             },
             &mut Reporter::new(false, true),

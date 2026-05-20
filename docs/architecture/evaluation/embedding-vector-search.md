@@ -6,9 +6,9 @@ The default audit path stays read-only, deterministic, embedding-free, and autho
 Vector candidate facts may enter threshold calibration only after a labeled validation
 shows recall gain (see [vector-search-validation.md](vector-search-validation.md)).
 
-For the prior rerank-only experiment over the symbolic candidate pool, see
-[embedding-rerank-experiment.md](embedding-rerank-experiment.md). That experiment was a
-useful negative probe; it does not test candidate-generation recall.
+The prior rerank-only implementation over the symbolic candidate pool has been removed.
+It was a useful negative probe, but it did not test candidate-generation recall and is
+not part of the supported architecture.
 
 ## Crate boundaries
 

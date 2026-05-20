@@ -128,7 +128,7 @@ fn dependency_direction_keeps_lower_crates_out_of_report_and_cli() {
 }
 
 #[test]
-fn embedding_acquisition_dependency_stays_inside_embedding_crate() {
+fn embedding_runtime_dependency_stays_inside_embedding_crate() {
     let manifests = crate_manifests();
     assert!(
         manifests.contains_key("lean-dup-embedding"),
@@ -355,12 +355,11 @@ fn old_file_shaped_modules_are_not_public_api() {
         }
         if !path.starts_with(root.join("crates/embedding"))
             && !path.starts_with(root.join("crates/cli"))
-            && !path.starts_with(root.join("crates/eval"))
             && !path.starts_with(root.join("crates/search"))
         {
             assert!(
                 !contents.contains("lean_dup_embedding::"),
-                "{display} imports lean_dup_embedding outside hidden CLI prepare, eval rerank, or search vector experiment boundaries"
+                "{display} imports lean_dup_embedding outside hidden CLI prepare or search vector experiment boundaries"
             );
         }
         if !path.starts_with(root.join("crates/embedding")) {

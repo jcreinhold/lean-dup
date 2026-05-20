@@ -10,7 +10,7 @@ use lean_dup_embedding::{
     EmbeddingAcquisitionPolicy, EmbeddingCacheStatus, EmbeddingModelFileRole, EmbeddingModelFileState,
     EmbeddingModelSpec, EmbeddingPrepareRequest, EmbeddingPrepareResult, prepare_embedding_model,
 };
-use lean_dup_eval::{EmbeddingRerankRequest, EvalRequest, VectorSearchRequest};
+use lean_dup_eval::{EvalRequest, VectorSearchRequest};
 use lean_dup_index::CleanupPolicy;
 use lean_dup_index::{self, CacheFacts};
 use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexStore, IndexSummary};
@@ -282,7 +282,6 @@ fn audit_request(args: AuditArgs) -> AuditRequest {
 }
 
 fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<lean_dup_report::EvalReportDto> {
-    let embedding_rerank = embedding_rerank_request(&args);
     let vector_search = vector_search_request(&args);
     Ok(lean_dup_report::eval_report(lean_dup_eval::run(
         EvalRequest {
@@ -293,23 +292,10 @@ fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<lean_dup_report::Eval
             k_values: args.k_values,
             write_search_dataset: args.write_search_dataset,
             write_scorer_ablations: args.write_scorer_ablations,
-            embedding_rerank,
             vector_search,
         },
         reporter,
     )?))
-}
-
-fn embedding_rerank_request(args: &EvalArgs) -> Option<EmbeddingRerankRequest> {
-    args.write_embedding_rerank.then(|| EmbeddingRerankRequest {
-        model: EmbeddingModelSpec {
-            id: args.embedding_model_id.clone(),
-            revision: args.embedding_revision.clone(),
-        },
-        acquisition_policy: args.embedding_acquisition.into(),
-        model_cache_root: args.embedding_cache_root.clone(),
-        vector_cache_root: args.embedding_vector_cache_root.clone(),
-    })
 }
 
 fn vector_search_request(args: &EvalArgs) -> Option<VectorSearchRequest> {

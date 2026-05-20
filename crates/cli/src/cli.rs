@@ -190,24 +190,6 @@ pub struct EvalArgs {
     pub write_scorer_ablations: bool,
 
     #[arg(long, hide = true)]
-    pub write_embedding_rerank: bool,
-
-    #[arg(long = "embedding-acquisition", hide = true, value_enum, default_value_t = CliEmbeddingAcquisitionPolicy::CacheOnly)]
-    pub embedding_acquisition: CliEmbeddingAcquisitionPolicy,
-
-    #[arg(long = "embedding-model-id", hide = true, default_value = "BAAI/bge-small-en-v1.5")]
-    pub embedding_model_id: String,
-
-    #[arg(long = "embedding-revision", hide = true)]
-    pub embedding_revision: Option<String>,
-
-    #[arg(long = "embedding-cache-root", hide = true)]
-    pub embedding_cache_root: Option<PathBuf>,
-
-    #[arg(long = "embedding-vector-cache-root", hide = true)]
-    pub embedding_vector_cache_root: Option<PathBuf>,
-
-    #[arg(long, hide = true)]
     pub write_vector_search: bool,
 
     #[arg(long = "vector-acquisition", hide = true, value_enum, default_value_t = CliEmbeddingAcquisitionPolicy::CacheOnly)]
@@ -340,7 +322,6 @@ pub enum CliVectorDocumentPolicy {
     FormalStatement,
     NameAndFormalStatement,
     InformalOrFormal,
-    LegacyRerankV1,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -355,7 +336,6 @@ impl From<CliVectorDocumentPolicy> for SearchEmbeddingDocumentPolicy {
             CliVectorDocumentPolicy::FormalStatement => Self::FormalStatement,
             CliVectorDocumentPolicy::NameAndFormalStatement => Self::NameAndFormalStatement,
             CliVectorDocumentPolicy::InformalOrFormal => Self::InformalOrFormal,
-            CliVectorDocumentPolicy::LegacyRerankV1 => Self::LegacyRerankV1,
         }
     }
 }

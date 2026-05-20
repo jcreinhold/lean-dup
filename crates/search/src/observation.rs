@@ -114,7 +114,6 @@ pub enum SearchEmbeddingDocumentPolicy {
     #[default]
     NameAndFormalStatement,
     InformalOrFormal,
-    LegacyRerankV1,
 }
 
 impl SearchEmbeddingDocumentPolicy {
@@ -123,7 +122,6 @@ impl SearchEmbeddingDocumentPolicy {
             Self::FormalStatement => "formal-statement",
             Self::NameAndFormalStatement => "name-and-formal-statement",
             Self::InformalOrFormal => "informal-or-formal",
-            Self::LegacyRerankV1 => "legacy-rerank-v1",
         }
     }
 }
@@ -408,13 +406,6 @@ fn document_text(document: &SearchEmbeddingDocument, policy: SearchEmbeddingDocu
             .filter(|text| !text.trim().is_empty())
             .unwrap_or(&document.normalized_formal_statement)
             .to_owned(),
-        SearchEmbeddingDocumentPolicy::LegacyRerankV1 => format!(
-            "name: {}\nmodule: {}\nkind: {}\nstatement: {}",
-            document.declaration_name,
-            document.module_name,
-            document.declaration_kind,
-            document.normalized_formal_statement
-        ),
     }
 }
 
@@ -444,7 +435,6 @@ impl SearchEmbeddingDocumentPolicy {
             "formal-statement" => Some(Self::FormalStatement),
             "name-and-formal-statement" => Some(Self::NameAndFormalStatement),
             "informal-or-formal" => Some(Self::InformalOrFormal),
-            "legacy-rerank-v1" => Some(Self::LegacyRerankV1),
             _ => None,
         }
     }

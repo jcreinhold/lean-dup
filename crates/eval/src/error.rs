@@ -11,9 +11,6 @@ pub enum Error {
     Index(#[from] lean_dup_index::Error),
 
     #[error("{0}")]
-    Embedding(#[from] lean_dup_embedding::Error),
-
-    #[error("{0}")]
     Project(#[from] lean_dup_project::Error),
 
     #[error("{0}")]

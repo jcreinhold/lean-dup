@@ -92,7 +92,7 @@ snapshot hashes, blob paths, or individual model filenames.
 download models, read model environment variables, know tokenizer metadata or model
 prefixes, or write embedding artifacts. The default vector-search policy is
 `name-and-formal-statement`. Other stable policies: `formal-statement`,
-`informal-or-formal`, `legacy-rerank-v1`. The default excludes retrieval feature families,
+`informal-or-formal`. The default excludes retrieval feature families,
 ranking facts, semantic obligations, SQLite details, and worker protocol fields.
 
 A search-owned declaration document carries: declaration name, module name, declaration
