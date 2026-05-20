@@ -5,7 +5,7 @@ use lean_dup_embedding::EmbeddingAcquisitionPolicy;
 use lean_dup_eval::EvalSuite;
 use lean_dup_search::{
     ProbePolicy, ReviewProfile, SearchEmbeddingDocumentPolicy, SearchVectorAcquisitionPolicy,
-    SearchVectorEligibilityPolicy,
+    SearchVectorEligibilityPolicy, SearchVectorInputFormat,
 };
 use serde::{Deserialize, Serialize};
 
@@ -195,8 +195,11 @@ pub struct EvalArgs {
     #[arg(long = "vector-acquisition", hide = true, value_enum, default_value_t = CliEmbeddingAcquisitionPolicy::CacheOnly)]
     pub vector_acquisition: CliEmbeddingAcquisitionPolicy,
 
-    #[arg(long = "vector-model-id", hide = true, default_value = "BAAI/bge-small-en-v1.5")]
-    pub vector_model_id: String,
+    #[arg(long = "vector-profile-id", hide = true, default_value = "bge-small-en-v1.5")]
+    pub vector_profile_id: String,
+
+    #[arg(long = "vector-input-format", hide = true, value_enum, default_value_t = CliVectorInputFormat::AsymmetricQueryDocument)]
+    pub vector_input_format: CliVectorInputFormat,
 
     #[arg(long = "vector-revision", hide = true)]
     pub vector_revision: Option<String>,
@@ -331,6 +334,12 @@ pub enum CliVectorEligibilityPolicy {
     Broad,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum CliVectorInputFormat {
+    SymmetricDocument,
+    AsymmetricQueryDocument,
+}
+
 impl From<CliVectorDocumentPolicy> for SearchEmbeddingDocumentPolicy {
     fn from(value: CliVectorDocumentPolicy) -> Self {
         match value {
@@ -347,6 +356,15 @@ impl From<CliVectorEligibilityPolicy> for SearchVectorEligibilityPolicy {
         match value {
             CliVectorEligibilityPolicy::ActionablePublicStatement => Self::ActionablePublicStatement,
             CliVectorEligibilityPolicy::Broad => Self::Broad,
+        }
+    }
+}
+
+impl From<CliVectorInputFormat> for SearchVectorInputFormat {
+    fn from(value: CliVectorInputFormat) -> Self {
+        match value {
+            CliVectorInputFormat::SymmetricDocument => Self::SymmetricDocument,
+            CliVectorInputFormat::AsymmetricQueryDocument => Self::AsymmetricQueryDocument,
         }
     }
 }

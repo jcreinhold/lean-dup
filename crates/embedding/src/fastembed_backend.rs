@@ -92,6 +92,7 @@ pub(crate) fn embed_text_batch(
     let cache = VectorCache::new(
         request.vector_cache_root,
         model_fingerprint.clone(),
+        request.input_format,
         &request.input_policy,
     );
     let mut runtime = EmbeddingRuntimeCounters::default();
@@ -100,7 +101,7 @@ pub(crate) fn embed_text_batch(
     let wrapped_inputs = request
         .inputs
         .iter()
-        .map(|input| profile.wrap_text(request.role, &input.text))
+        .map(|input| profile.wrap_text(request.input_format, request.role, &input.text))
         .collect::<Vec<_>>();
 
     for (index, wrapped_text) in wrapped_inputs.iter().enumerate() {
@@ -162,6 +163,7 @@ pub(crate) fn embed_text_batch(
             model: request.model,
             cache_label: Some(cache_root.display().to_string()),
         },
+        input_format: request.input_format.summary(),
         input_policy: request.input_policy,
         vector_dimension,
         runtime,

@@ -165,6 +165,63 @@ role-format ids, dimensions, model/cache/runtime facts, and validation denominat
 FastEmbed enum names, prefix strings, ONNX/ORT details, tokenizer files, model paths, and
 feature flags remain private implementation details of `lean-dup-embedding`.
 
+## 35U Profile And Input-Format Runtime
+
+Prompt 35U implements exactly the 35T decision. The supported profile ids are
+`bge-small-en-v1.5` and `bge-base-en-v1.5`. The supported input-format ids are
+`asymmetric-query-document` and `symmetric-document`, both under
+`lean-dup.embedding-input-format.v1`. Unsupported profile, model, or input-format ids
+fail before model-cache probing or runtime initialization.
+
+Design Note:
+
+- Hidden knowledge: `lean-dup-embedding` owns the profile registry, model-id mapping,
+  FastEmbed runtime mapping, role-format wrapping, vector dimension, normalization, and
+  vector-cache identity.
+- Smallest public interface: callers may prepare a supported model, request a batch with
+  a stable input-format id, and receive stable model/profile/input-format/cache/runtime
+  summaries.
+- Non-leaking decisions: FastEmbed enum names, model-specific prefixes, tokenizer files,
+  ONNX/ORT behavior, model filenames, and vector-cache filenames stay private.
+- Preserved capability: ordinary audit and ordinary eval remain symbolic and
+  embedding-free.
+- Discarded behavior: arbitrary model ids, unselected Qwen/Nomic/Jina-style runtime
+  branches, and retired rerank-only compatibility paths are not kept as comparison
+  shells.
+
+Design It Twice:
+
+- *Expose role-format and model-specific prefix choices to search/eval flags.* Rejected:
+  that would make search and eval know model formatting details.
+- *Add separate public embedding functions for each model/input variant.* Rejected:
+  shallow API growth would mirror implementation variants.
+- *Keep private profiles with stable public profile/input-format ids.* Chosen: search and
+  eval request ids, while embedding maps those ids to runtime, wrapping, dimension, and
+  cache identity.
+
+Vector-cache keys include model fingerprint, input-format id/version, document-policy
+version, and the profile-wrapped text. Persisted vector-corpus provenance records the
+input-format id/version as a stable fact so corpora are not reused across incompatible
+formatting experiments.
+
+Red Flag Review:
+
+- *Shallow module:* the embedding crate hides profile mapping, wrapping, runtime, and
+  cache identity behind one batch capability.
+- *Pass-through wrapper:* public ids are lean-dup experiment facts, not FastEmbed enum
+  forwarding.
+- *Temporal decomposition:* callers do not sequence tokenizer loading, wrapping,
+  inference, normalization, and caching.
+- *Information leakage:* runtime and prefix details stay private to embedding.
+- *Special-general mixture:* model mechanics stay in embedding; search-quality policy
+  stays in search/eval.
+- *Conjoined methods:* profile selection and role-format selection are separate facts
+  for validation.
+- *Hard-to-describe public API:* two profile ids, two input-format ids, prepare, and
+  embed batch.
+- *Implementation-detail comments:* interface comments describe caller-visible
+  capability and stable ids, not runtime files or tokenization.
+
 ## Red-flag checklist
 
 - *Shallow module:* the public surface is a text-embedding capability with stable

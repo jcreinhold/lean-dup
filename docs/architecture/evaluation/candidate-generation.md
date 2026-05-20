@@ -43,6 +43,9 @@ Eligibility is not document policy. Eligibility decides whether a declaration ca
 query or corpus row. Document policy decides which stable declaration facts are selected
 for embedding. Embedding still owns model-specific wrapping such as query/document
 prefixes; vector-index still owns persistence and nearest-neighbor mechanics.
+Hidden vector requests record a stable input-format id (`asymmetric-query-document` or
+`symmetric-document`) so validation can compare role formatting without teaching search
+the model-specific strings or runtime choices behind that id.
 
 ## Semantic document policy
 

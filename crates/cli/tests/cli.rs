@@ -371,6 +371,8 @@ fn eval_hidden_search_dataset_mode_writes_feature_artifact() {
     assert!(!help_stdout.contains("--write-scorer-ablations"));
     assert!(!help_stdout.contains("--write-vector-search"));
     assert!(!help_stdout.contains("--vector-acquisition"));
+    assert!(!help_stdout.contains("--vector-profile-id"));
+    assert!(!help_stdout.contains("--vector-input-format"));
     assert!(!help_stdout.contains("--vector-document-policy"));
     assert!(!help_stdout.contains("--vector-eligibility"));
 
@@ -452,6 +454,10 @@ fn eval_hidden_vector_search_mode_writes_skipped_artifact_without_model() {
             "cache-only",
             "--vector-eligibility",
             "actionable-public-statement",
+            "--vector-profile-id",
+            "bge-small-en-v1.5",
+            "--vector-input-format",
+            "asymmetric-query-document",
             "--vector-model-cache-root",
         ])
         .arg(model_cache.path())
@@ -477,6 +483,16 @@ fn eval_hidden_vector_search_mode_writes_skipped_artifact_without_model() {
     assert_eq!(vector["reason"], "vector-model-not-prepared");
     assert_eq!(vector["vector_candidates"]["status"], "skipped");
     assert_eq!(vector["vector_candidates"]["acquisition_policy"], "cache-only");
+    assert_eq!(vector["vector_candidates"]["model_id"], "BAAI/bge-small-en-v1.5");
+    assert_eq!(vector["vector_candidates"]["model_profile_id"], "bge-small-en-v1.5");
+    assert_eq!(
+        vector["vector_candidates"]["input_format_id"],
+        "asymmetric-query-document"
+    );
+    assert_eq!(
+        vector["vector_candidates"]["input_format_version"],
+        "lean-dup.embedding-input-format.v1"
+    );
     assert_eq!(
         vector["vector_candidates"]["query_eligibility"]["policy_id"],
         "actionable-public-statement"

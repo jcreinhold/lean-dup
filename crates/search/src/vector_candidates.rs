@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use lean_dup_embedding::{
-    EmbeddingAcquisitionPolicy, EmbeddingCacheStatus, EmbeddingInputPolicy, EmbeddingInputRole, EmbeddingModelSpec,
-    EmbeddingPrepareRequest, TextEmbeddingBatchRequest, TextEmbeddingInput, embed_text_batch, prepare_embedding_model,
+    EmbeddingAcquisitionPolicy, EmbeddingCacheStatus, EmbeddingInputFormat, EmbeddingInputPolicy, EmbeddingInputRole,
+    EmbeddingModelSpec, EmbeddingPrepareRequest, TextEmbeddingBatchRequest, TextEmbeddingInput, embed_text_batch,
+    model_spec_for_profile, prepare_embedding_model,
 };
 use lean_dup_index::HydratedDeclaration;
 use lean_dup_vector_index::{
@@ -29,8 +30,9 @@ const VECTOR_CANDIDATE_TOP_K: usize = 32;
 /// facades.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchVectorCandidateRequest {
-    pub model_id: String,
+    pub profile_id: String,
     pub revision: Option<String>,
+    pub input_format: SearchVectorInputFormat,
     pub acquisition_policy: SearchVectorAcquisitionPolicy,
     pub model_cache_root: Option<PathBuf>,
     pub text_vector_cache_root: Option<PathBuf>,
@@ -44,6 +46,27 @@ pub struct SearchVectorCandidateRequest {
 pub enum SearchVectorAcquisitionPolicy {
     CacheOnly,
     DownloadIfMissing,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SearchVectorInputFormat {
+    SymmetricDocument,
+    #[default]
+    AsymmetricQueryDocument,
+}
+
+impl SearchVectorInputFormat {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::SymmetricDocument => "symmetric-document",
+            Self::AsymmetricQueryDocument => "asymmetric-query-document",
+        }
+    }
+
+    pub fn version(self) -> &'static str {
+        "lean-dup.embedding-input-format.v1"
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -99,8 +122,9 @@ pub struct SearchVectorCandidateSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     pub model_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_profile_id: Option<String>,
+    pub model_profile_id: String,
+    pub input_format_id: String,
+    pub input_format_version: String,
     pub acquisition_policy: SearchVectorAcquisitionPolicy,
     pub document_policy_id: String,
     pub document_policy_version: String,
@@ -128,7 +152,9 @@ impl Default for SearchVectorCandidateSummary {
             status: SearchVectorCandidateStatus::Disabled,
             reason: None,
             model_id: String::new(),
-            model_profile_id: None,
+            model_profile_id: String::new(),
+            input_format_id: SearchVectorInputFormat::default().id().to_owned(),
+            input_format_version: SearchVectorInputFormat::default().version().to_owned(),
             acquisition_policy: SearchVectorAcquisitionPolicy::CacheOnly,
             document_policy_id: String::new(),
             document_policy_version: String::new(),
@@ -187,16 +213,14 @@ pub(crate) fn generate_vector_candidates(
         embedding_documents_for_declarations_with_policy(&query_eligibility.declarations, request.document_policy);
     let corpus_documents =
         embedding_documents_for_declarations_with_policy(&corpus_eligibility.declarations, request.document_policy);
-    let model = EmbeddingModelSpec {
-        id: request.model_id.clone(),
-        revision: request.revision.clone(),
-    };
     let mut summary = SearchVectorCandidateSummary {
         version: VECTOR_CANDIDATE_POLICY_VERSION,
         status: SearchVectorCandidateStatus::Skipped,
         reason: None,
-        model_id: request.model_id.clone(),
-        model_profile_id: None,
+        model_id: String::new(),
+        model_profile_id: request.profile_id.clone(),
+        input_format_id: request.input_format.id().to_owned(),
+        input_format_version: request.input_format.version().to_owned(),
         acquisition_policy: request.acquisition_policy,
         document_policy_id: query_documents.policy_id.clone(),
         document_policy_version: query_documents.policy_version.clone(),
@@ -237,6 +261,21 @@ pub(crate) fn generate_vector_candidates(
         };
     }
 
+    let model = match model_spec_for_profile(&request.profile_id, request.revision.clone()) {
+        Ok(model) => {
+            summary.model_id = model.id.clone();
+            model
+        }
+        Err(error) => {
+            summary.status = SearchVectorCandidateStatus::Failed;
+            summary.reason = Some(stable_embedding_error(&error));
+            return VectorCandidateOutput {
+                summary,
+                candidates: Vec::new(),
+            };
+        }
+    };
+
     let prepare = match prepare_embedding_model(EmbeddingPrepareRequest {
         model: model.clone(),
         acquisition_policy: request.acquisition_policy.into(),
@@ -252,7 +291,7 @@ pub(crate) fn generate_vector_candidates(
             };
         }
     };
-    summary.model_profile_id = Some(prepare.model.profile_id.clone());
+    summary.model_profile_id = prepare.model.profile_id.clone();
     if prepare.cache.status != EmbeddingCacheStatus::Prepared {
         summary.reason = Some(
             match prepare.cache.status {
@@ -297,7 +336,9 @@ pub(crate) fn generate_vector_candidates(
         .saturating_add(corpus_embedding.runtime.inference_ms)
         .saturating_add(query_embedding.runtime.model_load_ms)
         .saturating_add(query_embedding.runtime.inference_ms);
-    summary.model_profile_id = Some(corpus_embedding.model.profile_id.clone());
+    summary.model_profile_id = corpus_embedding.model.profile_id.clone();
+    summary.input_format_id = corpus_embedding.input_format.id.clone();
+    summary.input_format_version = corpus_embedding.input_format.version.clone();
 
     let corpus_vectors = corpus_embedding
         .vectors
@@ -321,6 +362,8 @@ pub(crate) fn generate_vector_candidates(
         embedding_model_fingerprint: corpus_embedding.model.fingerprint.clone().unwrap_or_else(|| {
             fallback_model_fingerprint(&corpus_embedding.model.id, corpus_embedding.model.revision.as_deref())
         }),
+        embedding_input_format_id: corpus_embedding.input_format.id.clone(),
+        embedding_input_format_version: corpus_embedding.input_format.version.clone(),
         document_policy_id: corpus_documents.policy_id.clone(),
         document_policy_version: corpus_documents.policy_version.clone(),
         vector_dimension: corpus_embedding.vector_dimension,
@@ -527,6 +570,7 @@ fn embed_documents(
     embed_text_batch(TextEmbeddingBatchRequest {
         model: model.clone(),
         role,
+        input_format: request.input_format.into(),
         input_policy: EmbeddingInputPolicy {
             policy_id: documents.policy_id.clone(),
             version: documents.policy_version.clone(),
@@ -637,6 +681,15 @@ impl From<SearchVectorAcquisitionPolicy> for EmbeddingAcquisitionPolicy {
     }
 }
 
+impl From<SearchVectorInputFormat> for EmbeddingInputFormat {
+    fn from(value: SearchVectorInputFormat) -> Self {
+        match value {
+            SearchVectorInputFormat::SymmetricDocument => Self::SymmetricDocument,
+            SearchVectorInputFormat::AsymmetricQueryDocument => Self::AsymmetricQueryDocument,
+        }
+    }
+}
+
 impl From<VectorCorpusStatus> for SearchVectorCorpusStatus {
     fn from(value: VectorCorpusStatus) -> Self {
         match value {
@@ -657,7 +710,7 @@ mod tests {
 
     use super::{
         SearchVectorAcquisitionPolicy, SearchVectorCandidateRequest, SearchVectorCandidateStatus,
-        SearchVectorEligibilityPolicy, eligible_declarations, generate_vector_candidates,
+        SearchVectorEligibilityPolicy, SearchVectorInputFormat, eligible_declarations, generate_vector_candidates,
     };
     use crate::SearchEmbeddingDocumentPolicy;
 
@@ -818,8 +871,9 @@ mod tests {
         eligibility_policy: SearchVectorEligibilityPolicy,
     ) -> SearchVectorCandidateRequest {
         SearchVectorCandidateRequest {
-            model_id: "unsupported/test-model".to_owned(),
+            profile_id: "unsupported-profile".to_owned(),
             revision: None,
+            input_format: SearchVectorInputFormat::AsymmetricQueryDocument,
             acquisition_policy: SearchVectorAcquisitionPolicy::CacheOnly,
             model_cache_root: None,
             text_vector_cache_root: None,

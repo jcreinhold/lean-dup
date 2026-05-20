@@ -1,10 +1,11 @@
 use fastembed::EmbeddingModel;
 
-use crate::{EmbeddingInputRole, EmbeddingModelSpec, EmbeddingModelSummary, Error, Result};
+use crate::{EmbeddingInputFormat, EmbeddingInputRole, EmbeddingModelSpec, EmbeddingModelSummary, Error, Result};
 
 pub(crate) const BGE_SMALL_PROFILE_ID: &str = "bge-small-en-v1.5";
 pub(crate) const BGE_SMALL_MODEL_ID: &str = "BAAI/bge-small-en-v1.5";
-pub(crate) const QWEN3_MODEL_ID: &str = "Qwen/Qwen3-Embedding-0.6B";
+pub(crate) const BGE_BASE_PROFILE_ID: &str = "bge-base-en-v1.5";
+pub(crate) const BGE_BASE_MODEL_ID: &str = "BAAI/bge-base-en-v1.5";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InputRole {
@@ -29,13 +30,6 @@ pub(crate) struct ModelProfile {
     pub(crate) max_length: usize,
     pub(crate) input_roles: &'static [InputRole],
     pub(crate) normalized_output: bool,
-    pub(crate) support_status: ProfileSupportStatus,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ProfileSupportStatus {
-    Supported,
-    UnsupportedNotEnabled,
 }
 
 impl ModelProfile {
@@ -68,17 +62,19 @@ impl ModelProfile {
     pub(crate) fn fastembed_model(self) -> Option<EmbeddingModel> {
         match self.profile_id {
             BGE_SMALL_PROFILE_ID => Some(EmbeddingModel::BGESmallENV15),
+            BGE_BASE_PROFILE_ID => Some(EmbeddingModel::BGEBaseENV15),
             _ => None,
         }
     }
 
-    pub(crate) fn wrap_text(self, role: EmbeddingInputRole, text: &str) -> String {
-        match self.profile_id {
-            BGE_SMALL_PROFILE_ID => match role {
-                EmbeddingInputRole::Document => format!("passage: {text}"),
-                EmbeddingInputRole::Query => format!("query: {text}"),
-            },
-            _ => text.to_owned(),
+    pub(crate) fn wrap_text(self, input_format: EmbeddingInputFormat, role: EmbeddingInputRole, text: &str) -> String {
+        match (input_format, role) {
+            (EmbeddingInputFormat::SymmetricDocument, _) | (_, EmbeddingInputRole::Document) => {
+                format!("passage: {text}")
+            }
+            (EmbeddingInputFormat::AsymmetricQueryDocument, EmbeddingInputRole::Query) => {
+                format!("query: {text}")
+            }
         }
     }
 }
@@ -86,7 +82,17 @@ impl ModelProfile {
 pub(crate) fn resolve_profile(model: &EmbeddingModelSpec) -> Result<ModelProfile> {
     match model.id.as_str() {
         BGE_SMALL_MODEL_ID => Ok(BGE_SMALL_PROFILE),
-        QWEN3_MODEL_ID => Ok(QWEN3_PROFILE),
+        BGE_BASE_MODEL_ID => Ok(BGE_BASE_PROFILE),
+        _ => Err(Error::UnsupportedModel {
+            reason: "unsupported-model-profile".to_owned(),
+        }),
+    }
+}
+
+pub(crate) fn resolve_profile_id(profile_id: &str) -> Result<ModelProfile> {
+    match profile_id {
+        BGE_SMALL_PROFILE_ID => Ok(BGE_SMALL_PROFILE),
+        BGE_BASE_PROFILE_ID => Ok(BGE_BASE_PROFILE),
         _ => Err(Error::UnsupportedModel {
             reason: "unsupported-model-profile".to_owned(),
         }),
@@ -102,15 +108,13 @@ const BGE_SMALL_PROFILE: ModelProfile = ModelProfile {
     max_length: 512,
     input_roles: DOCUMENT_AND_QUERY,
     normalized_output: true,
-    support_status: ProfileSupportStatus::Supported,
 };
 
-const QWEN3_PROFILE: ModelProfile = ModelProfile {
-    profile_id: "qwen3-embedding-0.6b",
-    model_id: QWEN3_MODEL_ID,
-    dimension: 1024,
-    max_length: 8192,
+const BGE_BASE_PROFILE: ModelProfile = ModelProfile {
+    profile_id: BGE_BASE_PROFILE_ID,
+    model_id: BGE_BASE_MODEL_ID,
+    dimension: 768,
+    max_length: 512,
     input_roles: DOCUMENT_AND_QUERY,
     normalized_output: true,
-    support_status: ProfileSupportStatus::UnsupportedNotEnabled,
 };

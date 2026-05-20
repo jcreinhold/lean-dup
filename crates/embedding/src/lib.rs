@@ -15,7 +15,7 @@ pub use error::{Error, Result};
 use std::path::PathBuf;
 
 use hf_hub::Cache;
-use profiles::{BGE_SMALL_MODEL_ID, resolve_profile};
+use profiles::{BGE_SMALL_MODEL_ID, resolve_profile, resolve_profile_id};
 use serde::{Deserialize, Serialize};
 
 /// Version of the declaration-document input contract consumed by embeddings.
@@ -40,6 +40,18 @@ impl EmbeddingModelSpec {
             revision: None,
         }
     }
+}
+
+/// Return the canonical model spec for a supported profile id.
+///
+/// Hidden experiments may select a stable lean-dup profile id while the
+/// embedding crate keeps model ids, runtime mappings, and file details private.
+pub fn model_spec_for_profile(profile_id: &str, revision: Option<String>) -> Result<EmbeddingModelSpec> {
+    let profile = resolve_profile_id(profile_id)?;
+    Ok(EmbeddingModelSpec {
+        id: profile.model_id.to_owned(),
+        revision,
+    })
 }
 
 /// Whether model preparation may use the network.
@@ -88,6 +100,49 @@ pub struct EmbeddingModelSummary {
     pub backend_family: String,
     pub dimension: usize,
     pub input_roles: Vec<String>,
+}
+
+/// Version of the profile-owned role-format contract.
+pub const EMBEDDING_INPUT_FORMAT_VERSION: &str = "lean-dup.embedding-input-format.v1";
+
+/// Stable role-format variants selected for hidden semantic-search ablations.
+///
+/// The ids are public experiment facts. Their mapping to model-specific
+/// instructions, prefixes, or no-prefix behavior is private to the profile
+/// registry.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum EmbeddingInputFormat {
+    SymmetricDocument,
+    #[default]
+    AsymmetricQueryDocument,
+}
+
+impl EmbeddingInputFormat {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::SymmetricDocument => "symmetric-document",
+            Self::AsymmetricQueryDocument => "asymmetric-query-document",
+        }
+    }
+
+    pub fn version(self) -> &'static str {
+        EMBEDDING_INPUT_FORMAT_VERSION
+    }
+
+    pub fn summary(self) -> EmbeddingInputFormatSummary {
+        EmbeddingInputFormatSummary {
+            id: self.id().to_owned(),
+            version: self.version().to_owned(),
+        }
+    }
+}
+
+/// Stable input-format facts returned with embedding batches.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EmbeddingInputFormatSummary {
+    pub id: String,
+    pub version: String,
 }
 
 /// Prepared-model cache state visible to callers and artifacts.
@@ -194,6 +249,7 @@ pub struct TextEmbeddingInput {
 pub struct TextEmbeddingBatchRequest {
     pub model: EmbeddingModelSpec,
     pub role: EmbeddingInputRole,
+    pub input_format: EmbeddingInputFormat,
     pub input_policy: EmbeddingInputPolicy,
     pub inputs: Vec<TextEmbeddingInput>,
     pub model_cache_root: Option<PathBuf>,
@@ -224,6 +280,7 @@ pub struct EmbeddingRuntimeCounters {
 pub struct TextEmbeddingBatchResult {
     pub model: EmbeddingModelSummary,
     pub cache: EmbeddingCacheSummary,
+    pub input_format: EmbeddingInputFormatSummary,
     pub input_policy: EmbeddingInputPolicy,
     pub vector_dimension: usize,
     pub runtime: EmbeddingRuntimeCounters,
@@ -238,7 +295,6 @@ pub struct TextEmbeddingBatchResult {
 /// pooling, or vector-cache layout.
 pub fn embed_text_batch(request: TextEmbeddingBatchRequest) -> Result<TextEmbeddingBatchResult> {
     let profile = resolve_profile(&request.model)?;
-    ensure_profile_enabled(profile)?;
     fastembed_backend::embed_text_batch(request, profile)
 }
 
@@ -250,17 +306,7 @@ pub fn embed_text_batch(request: TextEmbeddingBatchRequest) -> Result<TextEmbedd
 pub fn prepare_embedding_model(request: EmbeddingPrepareRequest) -> Result<EmbeddingPrepareResult> {
     validate_prepare_request(&request)?;
     let profile = resolve_profile(&request.model)?;
-    ensure_profile_enabled(profile)?;
     fastembed_backend::prepare_embedding_model(request, profile)
-}
-
-fn ensure_profile_enabled(profile: profiles::ModelProfile) -> Result<()> {
-    if profile.support_status == profiles::ProfileSupportStatus::UnsupportedNotEnabled {
-        return Err(Error::UnsupportedModel {
-            reason: "unsupported-model-profile:not-enabled".to_owned(),
-        });
-    }
-    Ok(())
 }
 
 impl EmbeddingModelFileRole {
@@ -338,6 +384,20 @@ mod tests {
     }
 
     #[test]
+    fn selected_bge_base_profile_reports_stable_summary() -> Result<()> {
+        let model = model_spec_for_profile("bge-base-en-v1.5", None)?;
+        let profile = resolve_profile(&model)?;
+        let summary = profile.summary(&model, Some("fingerprint".to_owned()));
+        assert_eq!(model.id, "BAAI/bge-base-en-v1.5");
+        assert_eq!(summary.profile_id, "bge-base-en-v1.5");
+        assert_eq!(summary.backend_family, "fastembed");
+        assert_eq!(summary.dimension, 768);
+        assert!(summary.input_roles.contains(&"document".to_owned()));
+        assert!(summary.input_roles.contains(&"query".to_owned()));
+        Ok(())
+    }
+
+    #[test]
     fn unsupported_model_fails_before_cache_or_runtime() {
         let model = EmbeddingModelSpec {
             id: "arbitrary/model".to_owned(),
@@ -349,6 +409,14 @@ mod tests {
                 acquisition_policy: EmbeddingAcquisitionPolicy::CacheOnly,
                 cache_root: None,
             }),
+            Err(Error::UnsupportedModel { reason }) if reason == "unsupported-model-profile"
+        ));
+    }
+
+    #[test]
+    fn unsupported_profile_id_fails_before_cache_or_runtime() {
+        assert!(matches!(
+            model_spec_for_profile("unsupported-profile", None),
             Err(Error::UnsupportedModel { reason }) if reason == "unsupported-model-profile"
         ));
     }
@@ -368,11 +436,42 @@ mod tests {
     fn profile_wrapping_is_role_aware_and_private() -> Result<()> {
         let model = EmbeddingModelSpec::default_experiment_model();
         let profile = resolve_profile(&model)?;
-        let document = profile.wrap_text(EmbeddingInputRole::Document, "P = Q");
-        let query = profile.wrap_text(EmbeddingInputRole::Query, "P = Q");
+        let document = profile.wrap_text(
+            EmbeddingInputFormat::AsymmetricQueryDocument,
+            EmbeddingInputRole::Document,
+            "P = Q",
+        );
+        let query = profile.wrap_text(
+            EmbeddingInputFormat::AsymmetricQueryDocument,
+            EmbeddingInputRole::Query,
+            "P = Q",
+        );
         assert_ne!(document, query);
         assert!(!document.is_empty());
         assert!(!query.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn symmetric_document_format_wraps_query_as_document_style() -> Result<()> {
+        let model = EmbeddingModelSpec::default_experiment_model();
+        let profile = resolve_profile(&model)?;
+        let document = profile.wrap_text(
+            EmbeddingInputFormat::SymmetricDocument,
+            EmbeddingInputRole::Document,
+            "P = Q",
+        );
+        let query = profile.wrap_text(
+            EmbeddingInputFormat::SymmetricDocument,
+            EmbeddingInputRole::Query,
+            "P = Q",
+        );
+        assert_eq!(document, query);
+        assert_eq!(EmbeddingInputFormat::SymmetricDocument.id(), "symmetric-document");
+        assert_eq!(
+            EmbeddingInputFormat::AsymmetricQueryDocument.id(),
+            "asymmetric-query-document"
+        );
         Ok(())
     }
 
@@ -382,6 +481,7 @@ mod tests {
         let request = TextEmbeddingBatchRequest {
             model: EmbeddingModelSpec::default_experiment_model(),
             role: EmbeddingInputRole::Document,
+            input_format: EmbeddingInputFormat::default(),
             input_policy: EmbeddingInputPolicy::default(),
             inputs: vec![TextEmbeddingInput {
                 id: "Tiny.same_left".to_owned(),

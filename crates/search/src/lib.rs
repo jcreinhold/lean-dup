@@ -45,7 +45,7 @@ pub use semantic_reranking::{
 pub use vector_candidates::{
     SearchVectorAcquisitionPolicy, SearchVectorCandidateRequest, SearchVectorCandidateStatus,
     SearchVectorCandidateSummary, SearchVectorCorpusStatus, SearchVectorEligibilityPolicy,
-    SearchVectorEligibilitySummary,
+    SearchVectorEligibilitySummary, SearchVectorInputFormat,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]

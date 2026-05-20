@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use lean_dup_search::{
     SearchEmbeddingDocumentPolicy, SearchObservation, SearchObservedPair, SearchScoringVariant,
     SearchVectorAcquisitionPolicy, SearchVectorCandidateRequest, SearchVectorCandidateStatus,
-    SearchVectorCandidateSummary, SearchVectorEligibilityPolicy, rescore_observation,
+    SearchVectorCandidateSummary, SearchVectorEligibilityPolicy, SearchVectorInputFormat, rescore_observation,
 };
 use serde::Serialize;
 
@@ -19,8 +19,9 @@ pub const VECTOR_SEARCH_SCHEMA_VERSION: &str = "lean-dup.vector-search.v2";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VectorSearchRequest {
-    pub model_id: String,
+    pub profile_id: String,
     pub revision: Option<String>,
+    pub input_format: SearchVectorInputFormat,
     pub acquisition_policy: SearchVectorAcquisitionPolicy,
     pub model_cache_root: Option<PathBuf>,
     pub text_vector_cache_root: Option<PathBuf>,
@@ -145,8 +146,9 @@ pub(crate) struct VectorSearchChildReport {
 impl VectorSearchRequest {
     pub(crate) fn to_search_request(&self, suite: &str) -> SearchVectorCandidateRequest {
         SearchVectorCandidateRequest {
-            model_id: self.model_id.clone(),
+            profile_id: self.profile_id.clone(),
             revision: self.revision.clone(),
+            input_format: self.input_format,
             acquisition_policy: self.acquisition_policy,
             model_cache_root: self.model_cache_root.clone(),
             text_vector_cache_root: self.text_vector_cache_root.clone(),

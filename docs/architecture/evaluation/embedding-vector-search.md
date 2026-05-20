@@ -40,6 +40,13 @@ role-format variants. Search/eval/report artifacts may record profile id, role-f
 dimension, model/cache/runtime facts, and denominators; they must not record FastEmbed
 enum names, model prefixes, ONNX/ORT details, tokenizer files, or model paths.
 
+Prompt 35U makes that decision executable. Hidden vector experiments request stable
+profile ids and input-format ids. The embedding crate maps those ids to canonical model
+ids, runtime support, role wrapping, dimensions, normalization, and vector-cache identity.
+Search and eval never choose prefixes or runtime types. Vector corpus provenance includes
+the input-format id/version because corpus vectors are formatting-dependent experiment
+data, not just model data.
+
 Decisions that do not cross those boundaries: tokenizer mechanics, pooling, normalization,
 model-file layout, backend names, persistence format, ANN parameters, database cache
 layout, raw declaration-document text, vector-cache filenames, and vector-database query
@@ -58,9 +65,10 @@ backend is LanceDB, sqlite-vec, Qdrant, HNSW, or a future replacement.
 - report corpus status as `built`, `reused`, `missing`, `stale`, or `unusable`.
 
 Public provenance: source corpus fingerprint, embedding model profile and fingerprint,
-declaration-document policy id and version, vector dimension, normalization contract.
-The schema version is owned by the vector-index crate. If any provenance fact changes,
-the crate reports `stale` rather than letting search inspect database files.
+embedding input-format id and version, declaration-document policy id and version, vector
+dimension, normalization contract. The schema version is owned by the vector-index crate.
+If any provenance fact changes, the crate reports `stale` rather than letting search
+inspect database files.
 
 LanceDB is the first persistent local backend. Lance dependencies use vendored protobuf
 so the crate is self-contained without a machine-level `protoc` prerequisite. Fixture

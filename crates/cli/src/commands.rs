@@ -300,8 +300,9 @@ fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<lean_dup_report::Eval
 
 fn vector_search_request(args: &EvalArgs) -> Option<VectorSearchRequest> {
     args.write_vector_search.then(|| VectorSearchRequest {
-        model_id: args.vector_model_id.clone(),
+        profile_id: args.vector_profile_id.clone(),
         revision: args.vector_revision.clone(),
+        input_format: args.vector_input_format.into(),
         acquisition_policy: args.vector_acquisition.into(),
         model_cache_root: args.vector_model_cache_root.clone(),
         text_vector_cache_root: args.vector_text_cache_root.clone(),
