@@ -177,3 +177,68 @@ Red Flag Review:
 - Conjoined methods: generation, scoring, and validation remain separate surfaces.
 - Hard-to-describe API: variant id plus raw denominators.
 - Implementation-detail comments: comments describe metric meaning, not vector storage or runtime mechanics.
+
+## 35V Vector Scorer Artifact Consistency
+
+Hidden vector scorer variants are valid only if their artifacts are internally
+consistent. Prompt 35V makes two repairs part of the metric contract:
+
+- `symbolic-only` is the symbolic baseline. It may carry vector-generated pairs
+  as candidate-generation facts, but it does not rank them from vector evidence.
+- `vector-evidence-only` ranks only pairs with search-owned vector evidence
+  facts.
+- `symbolic-plus-vector` combines symbolic feature facts and stable vector
+  evidence facts without changing ordinary audit or eval.
+
+Search converts raw nearest-neighbor output into stable evidence facts before
+scoring: feature version, score bucket, rank bucket, reciprocal-rank fact, and
+top-k membership. Raw vector score values, backend distance direction, model
+normalization assumptions, model prefixes, vector-cache filenames, and storage
+vocabulary are not metric or artifact fields.
+
+Eval reports variant metrics from search stage facts and labels. It must not
+rerank from raw vector values. Visible group counts are group counts, not pair
+row counts: a variant can show multiple pair rows for one query group, but
+`visible_groups.found` counts that group once and must never exceed
+`visible_groups.total`.
+
+Design Note:
+
+- Hidden knowledge: search owns vector evidence and scorer variant behavior;
+  eval owns denominators, label truth, and artifact invariants.
+- Smallest public interface: variant id, vector evidence feature version,
+  stable vector evidence facts, visible group counts, and raw stage denominators.
+- Non-leaking decisions: nearest-neighbor distance semantics, backend names,
+  model formatting, tokenizer/runtime details, cache filenames, paths, and
+  storage layout stay private.
+- Preserved capability: ordinary symbolic audit/eval metrics are unchanged.
+- Discarded behavior: impossible visible group counts and raw vector score
+  artifacts.
+
+Design It Twice:
+
+- *Eval reranks from vector values.* Rejected because eval would duplicate
+  search scoring and learn vector score semantics.
+- *Expose raw score thresholds in artifacts.* Rejected because artifacts would
+  become a calibration surface for backend/model details.
+- *Search-owned vector evidence, eval-owned truth.* Chosen because it keeps
+  ranking policy in search and validation truth in eval.
+
+Red Flag Review:
+
+- Shallow module: variant metrics now enforce an invariant instead of merely
+  recording command output.
+- Pass-through wrapper: eval consumes stable search facts, not vector-index
+  records.
+- Temporal decomposition: generation, scoring, and validation are separated by
+  ownership, not execution order.
+- Information leakage: raw scores and backend/model/runtime vocabulary stay out
+  of metrics and artifacts.
+- Special-general mixture: hidden vector variant metrics do not affect ordinary
+  eval metrics.
+- Conjoined methods: eval verifies scorer outputs without reconstructing the
+  scorer.
+- Hard-to-describe API: variant id, evidence version, group counts, and
+  denominators are the complete metric surface.
+- Implementation-detail comments: documentation names metric facts and
+  invariants, not storage or runtime mechanics.

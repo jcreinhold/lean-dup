@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use lean_dup_search::{
     SearchEmbeddingDocumentPolicy, SearchObservation, SearchObservedPair, SearchScoringVariant,
     SearchVectorAcquisitionPolicy, SearchVectorCandidateRequest, SearchVectorCandidateStatus,
-    SearchVectorCandidateSummary, SearchVectorEligibilityPolicy, SearchVectorInputFormat, rescore_observation,
+    SearchVectorCandidateSummary, SearchVectorEligibilityPolicy, SearchVectorEvidence, SearchVectorInputFormat,
+    rescore_observation,
 };
 use serde::Serialize;
 
@@ -107,7 +108,8 @@ pub(crate) struct VectorSearchPairReport {
     pub visible: bool,
     pub rank: Option<usize>,
     pub vector_rank: Option<usize>,
-    pub vector_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector_evidence: Option<SearchVectorEvidence>,
     pub generation_policies: Vec<String>,
     pub feature_families: Vec<String>,
 }
@@ -363,7 +365,7 @@ struct PairAccumulator {
     visible: bool,
     rank: Option<usize>,
     vector_rank: Option<usize>,
-    vector_score: Option<f64>,
+    vector_evidence: Option<SearchVectorEvidence>,
     generation_policies: BTreeSet<String>,
     feature_families: BTreeSet<String>,
 }
@@ -389,7 +391,7 @@ impl PairAccumulator {
             visible: false,
             rank: None,
             vector_rank: None,
-            vector_score: None,
+            vector_evidence: None,
             generation_policies: BTreeSet::new(),
             feature_families: BTreeSet::new(),
         }
@@ -402,8 +404,13 @@ impl PairAccumulator {
         self.ranked |= pair.ranked;
         self.visible |= pair.shown;
         self.rank = min_optional(self.rank, pair.rank);
+        let previous_vector_rank = self.vector_rank;
         self.vector_rank = min_optional(self.vector_rank, pair.vector_rank);
-        self.vector_score = max_optional(self.vector_score, pair.vector_score);
+        if let Some(evidence) = &pair.features.vector_evidence
+            && should_replace_vector_evidence(previous_vector_rank, pair.vector_rank, self.vector_rank)
+        {
+            self.vector_evidence = Some(evidence.clone());
+        }
         if self.left_hash == declaration_hash(&self.key.left)
             && let Some(hash) = oriented_hash(
                 &self.key.left,
@@ -451,7 +458,7 @@ impl PairAccumulator {
             visible: self.visible,
             rank: self.rank,
             vector_rank: self.vector_rank,
-            vector_score: self.vector_score,
+            vector_evidence: self.vector_evidence,
             generation_policies: self.generation_policies.into_iter().collect(),
             feature_families: self.feature_families.into_iter().collect(),
         }
@@ -576,12 +583,15 @@ fn min_optional(left: Option<usize>, right: Option<usize>) -> Option<usize> {
     }
 }
 
-fn max_optional(left: Option<f64>, right: Option<f64>) -> Option<f64> {
-    match (left, right) {
-        (Some(left), Some(right)) => Some(left.max(right)),
-        (Some(left), None) => Some(left),
-        (None, Some(right)) => Some(right),
-        (None, None) => None,
+fn should_replace_vector_evidence(
+    previous_best_rank: Option<usize>,
+    incoming_rank: Option<usize>,
+    new_best_rank: Option<usize>,
+) -> bool {
+    match (previous_best_rank, incoming_rank, new_best_rank) {
+        (None, Some(_), _) => true,
+        (_, Some(incoming), Some(best)) => incoming <= best,
+        _ => false,
     }
 }
 
@@ -762,7 +772,10 @@ mod tests {
         assert!(row.visible);
         assert_eq!(row.rank, Some(3));
         assert_eq!(row.vector_rank, Some(2));
-        assert_eq!(row.vector_score, Some(0.92));
+        let evidence = row.vector_evidence.as_ref().expect("vector evidence");
+        assert_eq!(evidence.score_bucket, "very-high");
+        assert_eq!(evidence.rank_bucket, "rank-2-3");
+        assert!(evidence.top_k_member);
         assert_eq!(row.generation_policies, vec!["symbolic_audit", "vector_mathlib"]);
         assert_eq!(row.left_hash, "hash-A");
         assert_eq!(row.right_hash, "hash-B");
@@ -1018,6 +1031,7 @@ mod tests {
         assert_eq!(symbolic.metrics.shown_queue_precision.total, 0);
         assert_eq!(vector_only.metrics.shown_queue_precision.found, 1);
         assert_eq!(vector_only.vector_feature_version, "lean-dup.vector-evidence.v1");
+        assert!(vector_only.metrics.visible_groups.found <= vector_only.metrics.visible_groups.total);
     }
 
     fn empty_labels() -> GoldLabels {
@@ -1081,7 +1095,7 @@ mod tests {
         shown: bool,
         symbolic_generated: bool,
         vector_generated: bool,
-        vector_score: Option<f64>,
+        raw_score: Option<f64>,
         vector_rank: Option<usize>,
         generation_policy: &str,
     ) -> SearchObservedPair {
@@ -1098,7 +1112,6 @@ mod tests {
             shown,
             left_content_hash: Some(format!("hash-{left}")),
             right_content_hash: Some(format!("hash-{right}")),
-            vector_score,
             vector_rank,
             origin: "workspace".to_owned(),
             feature_families: if vector_generated && !symbolic_generated {
@@ -1111,11 +1124,12 @@ mod tests {
                 retrieval_feature_families: Vec::new(),
                 declaration_kinds: vec!["theorem".to_owned()],
                 evidence_mode: SearchEvidenceMode::Local,
-                vector_evidence: vector_score.zip(vector_rank).map(|(score, rank)| SearchVectorEvidence {
+                vector_evidence: raw_score.zip(vector_rank).map(|(score, rank)| SearchVectorEvidence {
                     version: "lean-dup.vector-evidence.v1".to_owned(),
                     score_bucket: if score >= 0.90 { "very-high" } else { "high" }.to_owned(),
                     rank_bucket: if rank == 1 { "rank-1" } else { "rank-2-3" }.to_owned(),
                     reciprocal_rank_micros: (1_000_000usize / rank.max(1)) as u32,
+                    top_k_member: true,
                 }),
                 structural_fingerprint_families: Vec::new(),
                 role_overlap: Vec::new(),

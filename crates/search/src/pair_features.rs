@@ -39,6 +39,7 @@ pub struct SearchVectorEvidence {
     pub score_bucket: String,
     pub rank_bucket: String,
     pub reciprocal_rank_micros: u32,
+    pub top_k_member: bool,
 }
 
 pub(crate) const VECTOR_EVIDENCE_FEATURE_VERSION: &str = "lean-dup.vector-evidence.v1";
@@ -114,6 +115,7 @@ pub(crate) fn vector_evidence(score: f64, rank: usize) -> SearchVectorEvidence {
         score_bucket: score_bucket(score).to_owned(),
         rank_bucket: rank_bucket(rank).to_owned(),
         reciprocal_rank_micros,
+        top_k_member: true,
     }
 }
 

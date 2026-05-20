@@ -260,7 +260,6 @@ mod tests {
             shown: rank == 1,
             left_content_hash: None,
             right_content_hash: None,
-            vector_score: None,
             vector_rank: None,
             origin: "workspace".to_owned(),
             feature_families: vec!["statement_fingerprint".to_owned()],

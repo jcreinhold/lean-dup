@@ -167,7 +167,6 @@ pub struct SearchObservedPair {
     pub shown: bool,
     pub left_content_hash: Option<String>,
     pub right_content_hash: Option<String>,
-    pub vector_score: Option<f64>,
     pub vector_rank: Option<usize>,
     pub origin: String,
     pub feature_families: Vec<String>,
@@ -215,7 +214,6 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
                 shown: scored.shown,
                 left_content_hash: None,
                 right_content_hash: None,
-                vector_score: None,
                 vector_rank: None,
                 origin: candidate.declaration.origin.clone(),
                 feature_families: feature_families(&candidate.explanation.contributions),
@@ -288,11 +286,7 @@ pub fn rescore_observation(observation: &SearchObservation, variant: SearchScori
         .pairs
         .iter()
         .map(|pair| {
-            let candidate_rankable = if uses_vector_evidence(variant) {
-                pair.merged_generated
-            } else {
-                pair.ranked
-            };
+            let candidate_rankable = rankable_for_variant(pair, variant);
             let scored = score_observation(&pair.features, variant, candidate_rankable, pair.shown);
             let mut rescored = pair.clone();
             rescored.ranked = scored.ranked;
@@ -303,11 +297,11 @@ pub fn rescore_observation(observation: &SearchObservation, variant: SearchScori
         })
         .collect::<Vec<_>>();
     rerank_pairs(&mut pairs);
-    let visible_groups_found = pairs.iter().filter(|pair| pair.shown).count();
+    let (visible_groups_found, visible_groups_total) = visible_group_counts(&pairs);
     SearchObservation {
         pairs,
         visible_groups_found,
-        visible_groups_total: observation.visible_groups_total,
+        visible_groups_total,
         scoring: SearchScoringSummary::new(variant),
         semantic_reranking: observation.semantic_reranking.clone(),
         semantic_obligation_yield: observation.semantic_obligation_yield.clone(),
@@ -321,6 +315,30 @@ fn uses_vector_evidence(variant: SearchScoringVariant) -> bool {
         variant,
         SearchScoringVariant::VectorEvidenceOnly | SearchScoringVariant::SymbolicPlusVector
     )
+}
+
+fn rankable_for_variant(pair: &SearchObservedPair, variant: SearchScoringVariant) -> bool {
+    match variant {
+        SearchScoringVariant::VectorEvidenceOnly => pair.vector_generated && pair.features.vector_evidence.is_some(),
+        SearchScoringVariant::SymbolicPlusVector => pair.merged_generated,
+        _ => pair.ranked,
+    }
+}
+
+fn visible_group_counts(pairs: &[SearchObservedPair]) -> (usize, usize) {
+    let total = pairs
+        .iter()
+        .filter(|pair| pair.ranked)
+        .map(|pair| pair.left.as_str())
+        .collect::<BTreeSet<_>>()
+        .len();
+    let visible = pairs
+        .iter()
+        .filter(|pair| pair.shown)
+        .map(|pair| pair.left.as_str())
+        .collect::<BTreeSet<_>>()
+        .len();
+    (visible, total)
 }
 
 fn rerank_pairs(pairs: &mut [SearchObservedPair]) {
@@ -568,9 +586,14 @@ fn merge_vector_candidates(
             if let Some(pair) = pairs.get_mut(index) {
                 pair.vector_generated = true;
                 pair.merged_generated = pair.symbolic_generated || pair.vector_generated;
-                pair.vector_score = Some(f64::from(vector.score));
                 pair.vector_rank = Some(vector.rank);
                 pair.features.vector_evidence = Some(vector_evidence(f64::from(vector.score), vector.rank));
+                let scored =
+                    score_observation(&pair.features, variant, rankable_for_variant(pair, variant), pair.shown);
+                pair.ranked = scored.ranked;
+                pair.shown = scored.shown;
+                pair.survived_shown_filter = scored.survived_shown_filter;
+                pair.scoring = scored.scoring;
                 if !pair.feature_families.iter().any(|family| family == "vector_similarity") {
                     pair.feature_families.push("vector_similarity".to_owned());
                     pair.feature_families.sort();
@@ -588,7 +611,11 @@ fn merge_vector_candidates(
         let mut features = pair_features(anchor, &vector.declaration, &[]);
         features.retrieval_feature_families = feature_families.clone();
         features.vector_evidence = Some(vector_evidence(f64::from(vector.score), vector.rank));
-        let scored = score_observation(&features, variant, true, false);
+        let vector_rankable = !matches!(
+            variant,
+            SearchScoringVariant::SymbolicOnly | SearchScoringVariant::AllFeatures
+        );
+        let scored = score_observation(&features, variant, vector_rankable, false);
         let observed = SearchObservedPair {
             left: anchor.qualified_name.clone(),
             right: vector.declaration.qualified_name.clone(),
@@ -599,19 +626,22 @@ fn merge_vector_candidates(
             ranked: scored.ranked,
             generation_policy: generation_policy_for_vector(&vector.declaration),
             rank: scored.ranked.then_some(vector.rank),
-            shown: false,
+            shown: scored.shown,
             left_content_hash: Some(vector.anchor_content_hash),
             right_content_hash: Some(vector.declaration_content_hash),
-            vector_score: Some(f64::from(vector.score)),
             vector_rank: Some(vector.rank),
             origin: vector.declaration.origin.clone(),
             feature_families,
-            survived_shown_filter: false,
+            survived_shown_filter: scored.survived_shown_filter,
             features,
             scoring: scored.scoring,
         };
         pair_index_by_key.insert(key, pairs.len());
         pairs.push(observed);
+    }
+    if uses_vector_evidence(variant) {
+        rerank_pairs(pairs);
+        return vector_count;
     }
     pairs.sort_by(|left, right| {
         left.left
@@ -785,7 +815,6 @@ fn generated_observed_pair(
         shown: scored.shown,
         left_content_hash: None,
         right_content_hash: None,
-        vector_score: None,
         vector_rank: None,
         origin: candidate.origin.clone(),
         feature_families,
@@ -841,8 +870,9 @@ mod tests {
     use lean_dup_worker::{Fingerprints, RoleFeature};
 
     use super::{
-        SearchEmbeddingDocumentPolicy, SearchObservationRequest, SearchScoringVariant, SearchTrackedPair,
-        content_hash_for, merge_vector_candidates, observe_search, rescore_observation,
+        SearchEmbeddingDocumentPolicy, SearchEmbeddingDocuments, SearchObservation, SearchObservationRequest,
+        SearchRetrievalObservation, SearchScoringSummary, SearchScoringVariant, SearchTrackedPair, content_hash_for,
+        merge_vector_candidates, observe_search, rescore_observation,
     };
     use crate::vector_candidates::{SearchVectorCandidateStatus, VectorCandidate};
 
@@ -884,7 +914,7 @@ mod tests {
     }
 
     #[test]
-    fn vector_only_candidates_are_ranked_but_not_shown() {
+    fn vector_only_candidates_are_generated_but_not_ranked_by_symbolic_baseline() {
         let rows = generated_rows(2);
         let mut pairs = Vec::new();
 
@@ -909,12 +939,88 @@ mod tests {
         assert!(!pair.symbolic_generated);
         assert!(pair.vector_generated);
         assert!(pair.merged_generated);
-        assert!(pair.ranked);
+        assert!(!pair.ranked);
         assert!(!pair.shown);
         assert_eq!(pair.vector_rank, Some(1));
         assert_eq!(pair.left_content_hash.as_deref(), Some("hash-left"));
         assert_eq!(pair.right_content_hash.as_deref(), Some("hash-right"));
         assert_eq!(pair.generation_policy, "vector_local_duplicate_audit");
+    }
+
+    #[test]
+    fn vector_evidence_variant_ranks_vector_only_candidates_from_stable_facts() {
+        let rows = generated_rows(2);
+        let mut pairs = Vec::new();
+
+        merge_vector_candidates(
+            &rows,
+            &mut pairs,
+            vec![VectorCandidate {
+                anchor_name: "Synthetic.generated_0".to_owned(),
+                anchor_content_hash: "hash-left".to_owned(),
+                declaration: rows[1].clone(),
+                declaration_content_hash: "hash-right".to_owned(),
+                score: 0.95,
+                rank: 1,
+            }],
+            SearchScoringVariant::VectorEvidenceOnly,
+        );
+
+        let pair = &pairs[0];
+        assert!(pair.ranked);
+        assert!(pair.shown);
+        let evidence = pair.features.vector_evidence.as_ref().expect("vector evidence");
+        assert_eq!(evidence.score_bucket, "very-high");
+        assert_eq!(evidence.rank_bucket, "rank-1");
+        assert!(evidence.top_k_member);
+        assert!(pair.scoring.component_scores.contains_key("vector_rank"));
+        assert!(!pair.scoring.component_scores.contains_key("statement_fingerprint"));
+    }
+
+    #[test]
+    fn rescoring_counts_visible_groups_by_anchor_not_visible_pair_rows() {
+        let rows = generated_rows(3);
+        let mut pairs = Vec::new();
+        merge_vector_candidates(
+            &rows,
+            &mut pairs,
+            vec![
+                VectorCandidate {
+                    anchor_name: "Synthetic.generated_0".to_owned(),
+                    anchor_content_hash: "hash-left".to_owned(),
+                    declaration: rows[1].clone(),
+                    declaration_content_hash: "hash-right-1".to_owned(),
+                    score: 0.95,
+                    rank: 1,
+                },
+                VectorCandidate {
+                    anchor_name: "Synthetic.generated_0".to_owned(),
+                    anchor_content_hash: "hash-left".to_owned(),
+                    declaration: rows[2].clone(),
+                    declaration_content_hash: "hash-right-2".to_owned(),
+                    score: 0.94,
+                    rank: 2,
+                },
+            ],
+            SearchScoringVariant::SymbolicOnly,
+        );
+        let observation = SearchObservation {
+            pairs,
+            visible_groups_found: 0,
+            visible_groups_total: 1,
+            scoring: SearchScoringSummary::new(SearchScoringVariant::SymbolicOnly),
+            semantic_reranking: crate::SearchSemanticRerankingSummary::default(),
+            semantic_obligation_yield: Vec::new(),
+            retrieval: SearchRetrievalObservation::default(),
+            embedding_documents: SearchEmbeddingDocuments::default(),
+        };
+
+        let rescored = rescore_observation(&observation, SearchScoringVariant::VectorEvidenceOnly);
+
+        assert_eq!(rescored.pairs.iter().filter(|pair| pair.shown).count(), 2);
+        assert_eq!(rescored.visible_groups_found, 1);
+        assert_eq!(rescored.visible_groups_total, 1);
+        assert!(rescored.visible_groups_found <= rescored.visible_groups_total);
     }
 
     #[test]

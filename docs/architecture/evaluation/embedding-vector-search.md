@@ -490,3 +490,82 @@ is not allowed.
 - *Hard-to-describe public API:* variant id plus vector evidence version plus raw denominators.
 - *Implementation-detail comments:* comments describe stable evidence and artifact facts, not backend or model
   mechanics.
+
+## 35V scorer and artifact repair
+
+Prompt 35V repairs hidden vector scorer variants before new validation can
+interpret them. The rule is strict: search converts nearest-neighbor output into
+stable vector evidence facts, and eval records artifact truth from search stage
+facts plus labels. Eval must not reverse-engineer ranking from vector
+similarities.
+
+Design Note:
+
+- Hidden knowledge: search owns vector evidence construction, hidden scorer
+  rankability rules, and visible-stage group accounting; eval owns row truth,
+  denominators, label joining, and artifact consistency checks.
+- Smallest public interface: scorer variant id, vector evidence feature version,
+  rank bucket, bounded score bucket, reciprocal-rank fact, top-k membership, and
+  raw denominators for candidate generation, ranked survival, visible precision,
+  and hard-negative survival.
+- Non-leaking decisions: raw nearest-neighbor score direction, backend distance
+  conventions, model normalization behavior, model prefixes, tokenizer/runtime
+  details, vector-cache filenames, database layout, and storage vocabulary stay
+  below their owning crate boundaries.
+- Preserved capability: default audit and ordinary eval still use the symbolic
+  scorer and do not prepare models, build corpora, query vector indexes, or
+  change visibility.
+- Discarded behavior: reporting impossible visible group counts, ranking
+  vector-only pairs under the symbolic baseline, and serializing raw vector
+  score values in pair artifacts.
+
+Design It Twice:
+
+- *Eval recomputes ranks from vector scores.* Rejected because it creates a
+  second ranking implementation and forces eval to know search scoring policy.
+- *Artifacts expose raw vector scores and tune visibility there.* Rejected
+  because backend/model score semantics would leak upward and become calibration
+  inputs.
+- *Search-owned vector evidence with eval-owned truth summaries.* Chosen because
+  search already owns ranking policy and pair features, while eval owns labels
+  and denominators. The interface is deeper: eval sees stable evidence facts and
+  variant outcomes, not the mechanics that produced them.
+
+Hidden scorer variants now have distinct obligations:
+
+| Variant | Obligation |
+| --- | --- |
+| `symbolic-only` | match the current symbolic baseline; vector-generated pairs remain generated evidence but are not ranked by vector facts |
+| `vector-evidence-only` | rank only pairs with search-owned vector evidence facts |
+| `symbolic-plus-vector` | combine symbolic scorer facts and stable vector evidence facts without changing the default scorer |
+
+Artifact rows and search observation JSON no longer expose raw vector score
+values. They carry stable vector evidence facts instead: feature version, score
+bucket, rank bucket, bounded reciprocal-rank value, top-k membership, and vector
+rank. Variant artifacts count visible groups by distinct query/anchor group
+rather than by visible pair row, so `visible_groups.found <=
+visible_groups.total` is an invariant.
+
+Candidate-generation recall stays separate from ranking. `vector_generated`
+records whether vector top-k produced a pair. Variant `ranked_recall`,
+`visible_precision`, and visible hard-negative counts record what the scorer did
+with generated pairs.
+
+35V Red Flag Review:
+
+- *Shallow module:* search now owns real vector evidence conversion and group
+  accounting instead of forwarding raw scores to eval.
+- *Pass-through wrapper:* eval records truth summaries from stage facts; it does
+  not wrap or replay vector-index output.
+- *Temporal decomposition:* the split follows hidden knowledge: search ranks,
+  eval joins labels, vector-index searches, embedding embeds.
+- *Information leakage:* raw score semantics, backend names, model formatting,
+  storage paths, and cache filenames are not public search/eval/report facts.
+- *Special-general mixture:* hidden vector scorer variants stay out of ordinary
+  audit and ordinary eval behavior.
+- *Conjoined methods:* eval no longer needs to understand scorer internals to
+  explain variant artifacts.
+- *Hard-to-describe public API:* the variant surface is describable as variant
+  id, stable vector evidence facts, raw denominators, and label truth.
+- *Implementation-detail comments:* public comments describe caller-visible
+  facts, not vector storage, model files, or temporary migration details.
