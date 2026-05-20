@@ -748,15 +748,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
-name = "cmake"
-version = "0.1.58"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0f78a02292a74a88ac736019ab962ece0bc380e3f977bf72e376c5d78ff0678"
-dependencies = [
- "cc",
-]
-
-[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2954,7 +2945,6 @@ dependencies = [
  "prost",
  "prost-build",
  "prost-types",
- "protobuf-src",
  "rand",
  "roaring",
  "semver",
@@ -3070,7 +3060,6 @@ dependencies = [
  "pin-project",
  "prost",
  "prost-build",
- "protobuf-src",
  "snafu 0.9.0",
  "tokio",
  "tracing",
@@ -3126,7 +3115,6 @@ dependencies = [
  "prost",
  "prost-build",
  "prost-types",
- "protobuf-src",
  "rand",
  "snafu 0.9.0",
  "strum 0.26.3",
@@ -3165,7 +3153,6 @@ dependencies = [
  "prost",
  "prost-build",
  "prost-types",
- "protobuf-src",
  "snafu 0.9.0",
  "tokio",
  "tracing",
@@ -3222,7 +3209,6 @@ dependencies = [
  "prost",
  "prost-build",
  "prost-types",
- "protobuf-src",
  "rand",
  "rand_distr",
  "rangemap",
@@ -3383,7 +3369,6 @@ dependencies = [
  "prost",
  "prost-build",
  "prost-types",
- "protobuf-src",
  "rand",
  "rangemap",
  "roaring",
@@ -3550,7 +3535,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
- "walkdir",
 ]
 
 [[package]]
@@ -3567,7 +3551,6 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
  "thiserror",
- "toml",
  "walkdir",
 ]
 
@@ -3619,8 +3602,6 @@ dependencies = [
  "arrow-array",
  "arrow-schema",
  "futures",
- "lance",
- "lance-datafusion",
  "lancedb",
  "serde",
  "serde_json",
@@ -4676,15 +4657,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8991c4cbdb8bc5b11f0b074ffe286c30e523de90fee5ba8132f1399f23cb3dd7"
 dependencies = [
  "prost",
-]
-
-[[package]]
-name = "protobuf-src"
-version = "2.1.1+27.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6217c3504da19b85a3a4b2e9a5183d635822d83507ba0986624b5c05b83bfc40"
-dependencies = [
- "cmake",
 ]
 
 [[package]]

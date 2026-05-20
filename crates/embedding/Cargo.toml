@@ -5,8 +5,11 @@ name = "lean-dup-embedding"
 version = { workspace = true }
 
 [dependencies]
-fastembed = { version = "5.13.4", default-features = false, features = ["hf-hub-rustls-tls", "ort-download-binaries-rustls-tls"] }
-hf-hub = { version = "0.5", default-features = false, features = ["ureq", "rustls-tls"] }
+fastembed = { version = "5.13.4", default-features = false, features = [
+  "hf-hub-rustls-tls",
+  "ort-download-binaries-rustls-tls",
+] }
+hf-hub = { version = "0.5", default-features = false, features = ["rustls-tls", "ureq"] }
 lean-dup-diagnostics = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -15,3 +18,6 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[lib]
+doctest = false

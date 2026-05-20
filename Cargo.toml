@@ -1,17 +1,17 @@
 # Workspace root for the lean-dup Rust crates.
 [workspace]
 members = [
-    "crates/diagnostics",
-    "crates/worker",
-    "crates/project",
-    "crates/index",
-    "crates/search",
-    "crates/vector-search",
-    "crates/embedding",
-    "crates/vector-index",
-    "crates/report",
-    "crates/eval",
-    "crates/cli",
+  "crates/cli",
+  "crates/diagnostics",
+  "crates/embedding",
+  "crates/eval",
+  "crates/index",
+  "crates/project",
+  "crates/report",
+  "crates/search",
+  "crates/vector-index",
+  "crates/vector-search",
+  "crates/worker",
 ]
 resolver = "3"
 
@@ -28,7 +28,6 @@ lean-dup-index = { path = "crates/index" }
 lean-dup-project = { path = "crates/project" }
 lean-dup-report = { path = "crates/report" }
 lean-dup-search = { path = "crates/search" }
-lean-dup-vector-search = { path = "crates/vector-search" }
 lean-dup-vector-index = { path = "crates/vector-index" }
 lean-dup-worker = { path = "crates/worker" }
 rusqlite = { version = "0.39", features = ["bundled"] }
