@@ -179,22 +179,22 @@ that index from the cache (default `~/.cache/lean-dup`).
 Each group describes one kind of relationship between declarations. The full taxonomy lives in the
 [search-quality charter](architecture/search-quality.md); the ones you will see most often:
 
-- *exact theorem duplicate* — same proposition after binder-preserving normalization.
-- *binder/permutation duplicate* — same statement under safe binder reordering or premise permutation.
-- *reducible-definition duplicate* — reducible definitions that compute to the same value.
-- *replacement candidate* — your declaration can likely be replaced by an imported or mathlib one.
-- *hard negative* — a tracked non-match; the tool should never surface this as actionable.
+- *exact theorem duplicate*: same proposition after binder-preserving normalization.
+- *binder/permutation duplicate*: same statement under safe binder reordering or premise permutation.
+- *reducible-definition duplicate*: reducible definitions that compute to the same value.
+- *replacement candidate*: your declaration can likely be replaced by an imported or mathlib one.
+- *hard negative*: a tracked non-match; the tool should never surface this as actionable.
 
 ### Evidence mode
 
 Each group declares how strong the evidence behind it is. See
 [external comparison provenance](architecture/external-comparison-provenance.md) for the policy.
 
-- `proof-grade` — Lean verified the relationship, or the comparison index is source-backed and importable in the
+- `proof-grade`: Lean verified the relationship, or the comparison index is source-backed and importable in the
   current Lean environment.
-- `source-backed-not-importable` — the index has source provenance, but its execution root differs from your audit; no
+- `source-backed-not-importable`: the index has source provenance, but its execution root differs from your audit; no
   Lean probe was possible.
-- `static` — the group rests on indexed/static fingerprint evidence. Useful as a suggestion; not a proof.
+- `static`: the group rests on indexed/static fingerprint evidence. Useful as a suggestion; not a proof.
 
 The fixture quick-start above shows `evidence mode: static` because the run was local and used `--no-semantic-probes`.
 
@@ -208,9 +208,9 @@ review profile to widen the queue. An empty visible queue is always explained by
 
 When the right side of a group is importable, the report attaches:
 
-- `target` — the declaration you would call instead.
-- `import status` — `direct` if your module already imports the target's module; otherwise the module to add.
-- `callers` — how many local references would need to change, with file:line for each.
+- `target`: the declaration you would call instead.
+- `import status`: `direct` if your module already imports the target's module; otherwise the module to add.
+- `callers`: how many local references would need to change, with file:line for each.
 
 You can act on a hint by hand, or save the JSON for later tooling. `lean-dup` itself never edits your Lean source.
 
@@ -239,26 +239,26 @@ Two practical paths today.
 work through with `show`. This is the workflow the tool serves best right now.
 
 **Compare your branch against mathlib's pinned dependency in another project.** `--compare-mathlib` builds (or reuses)
-a project-pinned mathlib index from `.lake/packages/mathlib`. Currently low recall — see *Current limitations* above —
-so treat results as a starting point, not a guarantee.
+a project-pinned mathlib index from `.lake/packages/mathlib`. Recall is currently low (see
+*Current limitations* above), so treat results as a starting point, not a guarantee.
 
 The first run that touches mathlib is multi-minute: the worker imports a large environment and the index is several
 hundred MB. The shared cache under `~/.cache/lean-dup` makes subsequent runs fast.
 
 ## Troubleshooting
 
-- **`target/release/lean-dup: No such file`** — `cargo build --release -p lean-dup-cli` did not finish, or you are
+- **`target/release/lean-dup: No such file`**: `cargo build --release -p lean-dup-cli` did not finish, or you are
   running from a directory other than the repo root.
-- **Worker fails to start, or schema mismatch in stderr** — the Lean worker was not built or is stale. Run
+- **Worker fails to start, or schema mismatch in stderr**: the Lean worker was not built or is stale. Run
   `(cd lean && lake build)`.
-- **"missing olean" or import failures** — the modules you asked for are not compiled. Run `lake build` in the audited
+- **"missing olean" or import failures**: the modules you asked for are not compiled. Run `lake build` in the audited
   workspace first.
-- **First mathlib run hangs for many minutes** — expected. The worker is importing mathlib and building the index.
+- **First mathlib run hangs for many minutes**: expected. The worker is importing mathlib and building the index.
   Subsequent runs reuse the cache.
-- **`doctor` shows many `status=unchecked` cache entries with large `bytes`** — these are indexes for other workspaces
+- **`doctor` shows many `status=unchecked` cache entries with large `bytes`**: these are indexes for other workspaces
   sharing the cache root. The hidden `cache-cleanup` command is dry-run by default; pass `--execute` to remove
   unprotected stale entries.
-- **An audit reports `visible groups: 0`** — the `visible_queue.reason` field always names why. Common causes: no
+- **An audit reports `visible groups: 0`**: the `visible_queue.reason` field always names why. Common causes: no
   ranked groups (no candidates passed the filters), all groups hidden by the review profile, or all proof-grade
   candidates remained unverified.
 

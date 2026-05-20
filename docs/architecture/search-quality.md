@@ -30,8 +30,9 @@ Each stage has one objective and one failure mode. A bug at any stage looks diff
 Place plausible pairs into the candidate set from indexed facts without requiring proof-grade evidence. Measured by
 candidate-generation recall, candidate volume, origin breakdown, and hard-negative entry by feature family.
 
-Generation may be noisy, but the noise must be measured. It must not hydrate broad mathlib matches unboundedly, and it
-must not encode final visibility decisions as retrieval shortcuts.
+Generation may be noisy; measure the noise by feature family, origin, and hard-negative
+entry. Do not hydrate broad mathlib matches unboundedly, and do not encode final
+visibility decisions as retrieval shortcuts.
 
 ### First-stage ranking: cheap precision
 

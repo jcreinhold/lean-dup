@@ -1,8 +1,8 @@
-# Worker Protocol v1
+# Worker protocol v1
 
-The Lean worker answers six commands over a JSON request → JSONL response wire format. This
-document is the caller-facing contract: schema versions, command guarantees, what Rust may rely
-on, and what stays hidden inside the worker.
+The Lean worker answers six commands over a JSON request → JSONL response wire format.
+This document is the caller-facing contract: schema versions, command guarantees, what
+Rust may rely on, and what stays hidden inside the worker.
 
 For the pipeline that uses this protocol, see [end-to-end-architecture.md](end-to-end-architecture.md).
 For the layering rule behind the boundary, see [overview.md](overview.md).

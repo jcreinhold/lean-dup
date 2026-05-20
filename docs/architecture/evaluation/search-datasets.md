@@ -54,20 +54,15 @@ grow richer.
 
 ## Privacy
 
-Dataset artifacts must not contain:
+Allowed in dataset artifacts: stable family names, typed counts, evidence modes, module
+names, label provenance.
 
-| Allowed | Forbidden |
-| --- | --- |
-| stable family names | absolute private paths |
-| typed counts | raw Lean expressions |
-| evidence modes | raw statement text |
-| module names | source snippets |
-| label provenance | raw retrieval keys |
-| | SQLite row ids, table names, posting records |
-| | worker JSONL rows, transport diagnostics |
+Forbidden: absolute private paths, raw Lean expressions, raw statement text, source
+snippets, raw retrieval keys, SQLite row ids or table names or posting records, worker
+JSONL rows, transport diagnostics.
 
-If a future feature looks like it needs one of those forbidden fields, the feature boundary is wrong. Add a stable
-family, count, mode, or relation instead.
+If a future feature looks like it needs one of the forbidden items, the feature boundary
+is wrong. Add a stable family, count, mode, or relation instead.
 
 ## Verification
 

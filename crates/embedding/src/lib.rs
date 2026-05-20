@@ -23,9 +23,9 @@ pub const EMBEDDING_INPUT_POLICY_VERSION: &str = "lean-dup.embedding-document.v1
 
 /// A model the embedding crate can prepare and run.
 ///
-/// The default is intentionally a model identity, not a filesystem path. Prompt
-/// 35B will teach this crate how to prepare the model through an explicit cache
-/// policy; default audit paths must not download or load it implicitly.
+/// Identified by model id, not filesystem path: model preparation goes through
+/// an explicit cache policy ([`EmbeddingAcquisitionPolicy`]). Default audit
+/// paths must not download or load a model implicitly.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EmbeddingModelSpec {
     pub id: String,
@@ -33,7 +33,7 @@ pub struct EmbeddingModelSpec {
 }
 
 impl EmbeddingModelSpec {
-    /// Return the first candidate model for the embedding experiment sequence.
+    /// The default model id for hidden embedding experiments.
     pub fn default_experiment_model() -> Self {
         Self {
             id: BGE_SMALL_MODEL_ID.to_owned(),

@@ -1098,7 +1098,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "records retrieval timing and candidate counts for prompt-11 performance checks"]
+    #[ignore = "manual benchmark: records retrieval timing and candidate counts"]
     fn retrieval_benchmark_records_counts_and_time() {
         let cache = TempDir::new().unwrap();
         let workspace = hydrated_workspace(&cache);

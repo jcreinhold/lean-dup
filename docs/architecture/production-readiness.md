@@ -1,7 +1,7 @@
-# Production Readiness
+# Production readiness
 
-The release contract: named gates, required evidence, no-go criteria. A gate is open until
-concrete command output or a checked artifact proves it. Prose alone never closes a gate.
+The release contract: named gates, required evidence, no-go criteria. Gates close only on
+command output or a checked artifact, not prose.
 
 For the pipeline these gates measure, see [end-to-end-architecture.md](end-to-end-architecture.md).
 For the search-quality contract that governs `G1`–`G3`, see [search-quality.md](search-quality.md).
@@ -75,9 +75,9 @@ cargo run -p lean-dup-cli -- eval --suite production-gate --format json \
   --output target/eval/production-gate.json
 ```
 
-The `production-gate` suite stays manual and may depend on private paths. It does not become
-default CI without an explicit runtime and privacy decision. Command completion is not enough —
-the raw recall and hard-negative denominators must pass.
+The `production-gate` suite stays manual and may depend on private paths. It does not
+become default CI without an explicit runtime and privacy decision. Command completion is
+not enough: raw recall and hard-negative denominators must pass.
 
 Full audits (operator supplies the project workspace path as `<workspace>`):
 

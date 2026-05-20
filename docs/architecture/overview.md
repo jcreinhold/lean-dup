@@ -28,7 +28,7 @@ pretty-printed types, or let SQLite layout leak into audit, ranking, or reportin
 | role-aware feature keys for constants, heads, binders, conclusions                          | weighted retrieval, broad-key suppression, candidate caps           |
 | binder count, low-signal markers                                                            | source-reference scans, name-token features                         |
 | bounded probe results: same-statement, safe reordering, structural specialization, guarded reducible-definition equality | ranking, blockers, priorities, recommended actions, replacement hints |
-| —                                                                                           | text, JSON, `show`, profile, and baseline diff reports              |
+| (none)                                                                                      | text, JSON, `show`, profile, and baseline diff reports              |
 
 ## Why this shape
 

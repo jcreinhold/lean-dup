@@ -85,9 +85,10 @@ production-gate mathlib indexing completes without user-facing timeout flags.
 
 ### Index store and cache lifecycle
 
-`index.rs` persists local, external, and mathlib indexes in SQLite. Callers ask for capabilities
-— build or reuse an index, query postings, hydrate declarations, read provenance — and do not
-inspect table names, row ids, insertion phases, or transaction order.
+`index.rs` persists local, external, and mathlib indexes in SQLite. Callers ask for
+capabilities (build or reuse an index, query postings, hydrate declarations, read
+provenance) and do not inspect table names, row ids, insertion phases, or transaction
+order.
 
 `cache.rs` and `cache_lifecycle.rs` own cache roots, source-relevant fingerprints, latest-pointer
 interpretation, diagnostics, disk usage, and protected cleanup. Default shared cache root:

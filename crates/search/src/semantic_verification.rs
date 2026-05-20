@@ -36,9 +36,9 @@ pub struct ProbeSettings {
 
 /// Input for turning a cheap review queue into recoverable Lean probes.
 ///
-/// Callers supply candidate and workspace facts. This module owns pair
-/// selection, cache identity, worker chunking, heartbeat recovery, and
-/// diagnostics.
+/// Callers supply candidate and workspace facts; pair selection, cache
+/// identity, worker chunking, heartbeat recovery, and diagnostics stay inside
+/// this module.
 pub struct SemanticVerificationInput<'a> {
     pub candidate_sets: &'a [CandidateSet],
     pub cheap_review: &'a RankedReview,
@@ -51,10 +51,10 @@ pub struct SemanticVerificationInput<'a> {
     pub settings: ProbeSettings,
 }
 
-/// Narrow index capability used by semantic verification.
+/// The slice of an opened index that semantic verification needs.
 ///
-/// The verifier needs an opaque probe cache and nothing about SQLite paths,
-/// table names, declaration handles, or index construction.
+/// Exposes an opaque probe cache; hides SQLite paths, table names,
+/// declaration handles, and index construction.
 #[derive(Debug, Clone, Copy)]
 pub struct VerificationIndex<'a> {
     index: &'a OpenedIndex,

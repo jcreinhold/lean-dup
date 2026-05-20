@@ -28,34 +28,34 @@ Package and directory names omit `-rs`. The binary is `lean-dup` until a user-fa
 
 Each crate root is the supported public facade. Submodules and internals stay private.
 
-- **`lean-dup-worker`** — `WorkerClient`, request/result DTOs, version/build policy. Subprocess
+- **`lean-dup-worker`**: `WorkerClient`, request/result DTOs, version/build policy. Subprocess
   transport, JSONL framing, protocol envelopes, request ids, and timeouts are private.
-- **`lean-dup-diagnostics`** — progress/profile events, runtime measurement helpers. No
+- **`lean-dup-diagnostics`**: progress/profile events, runtime measurement helpers. No
   semantic dependencies.
-- **`lean-dup-project`** — `WorkspaceRequest`, `ResolvedWorkspace`, `SourceFile`, `resolve`,
+- **`lean-dup-project`**: `WorkspaceRequest`, `ResolvedWorkspace`, `SourceFile`, `resolve`,
   `ProjectMathlib`, mathlib resolution entry points. Lake path rules and `.olean` discovery sit
   on `ResolvedWorkspace`.
-- **`lean-dup-index`** — `IndexStore`, build/open/hydrate DTOs, `SemanticFeatureFanout`,
+- **`lean-dup-index`**: `IndexStore`, build/open/hydrate DTOs, `SemanticFeatureFanout`,
   provenance summaries, cache diagnostics, safe cleanup reports. SQLite schema, posting layout,
   and latest-pointer layout are private; feature keys are opaque Lean-owned strings.
-- **`lean-dup-vector-index`** — `VectorCorpusBuildRequest`, `VectorCorpusOpenRequest`,
+- **`lean-dup-vector-index`**: `VectorCorpusBuildRequest`, `VectorCorpusOpenRequest`,
   opaque `VectorCorpus`, nearest-declaration query DTOs, corpus summaries, provenance facts,
   and stable vector-index errors. LanceDB/Arrow rows, vector database layout, index parameters,
   score conversion, cache paths, and backend fallback rules are private.
-- **`lean-dup-search`** — `ReviewProfile`, `ProbePolicy`, `AuditRequest`, `AuditOutput`,
+- **`lean-dup-search`**: `ReviewProfile`, `ProbePolicy`, `AuditRequest`, `AuditOutput`,
   `ShowOutput`, `DiffOutput`, `run_audit`, `run_show`, `run_diff`, `observe_search`. Retrieval
   keys, ranking constants, probe obligations, source-scan policy, and replacement-hint internals
   stay private.
-- **`lean-dup-embedding`** — `EmbeddingModelSpec`, `EmbeddingAcquisitionPolicy`,
+- **`lean-dup-embedding`**: `EmbeddingModelSpec`, `EmbeddingAcquisitionPolicy`,
   `EmbeddingPrepareRequest`, `EmbeddingPrepareResult`, `prepare_embedding_model`, and batch text
   embedding request/result DTOs. Model profiles, FastEmbed backend selection, Hugging Face cache
   layout, model filenames, tokenizer/runtime internals, normalization, vector-cache format, and
   download mechanics stay private. Normal audit/eval paths do not depend on this crate.
-- **`lean-dup-report`** — report DTOs, projection functions, explanation facts, `render_text`.
-- **`lean-dup-eval`** — `EvalSuite`, `EvalRequest`, `EvalOutput`, stage metrics, quality
+- **`lean-dup-report`**: report DTOs, projection functions, explanation facts, `render_text`.
+- **`lean-dup-eval`**: `EvalSuite`, `EvalRequest`, `EvalOutput`, stage metrics, quality
   denominators. Text rendering belongs to report; runtime/memory measurement belongs to
   diagnostics.
-- **`lean-dup-cli`** — clap argument types, command dispatch, stdout/stderr/file I/O, final
+- **`lean-dup-cli`**: clap argument types, command dispatch, stdout/stderr/file I/O, final
   error aggregation.
 
 ## Removed flags
