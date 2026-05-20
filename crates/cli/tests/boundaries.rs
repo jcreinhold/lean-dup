@@ -55,12 +55,15 @@ fn rust_files_under(path: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
-fn only_cli_depends_on_clap() {
+fn only_operator_crates_depend_on_clap() {
     for (name, manifest) in crate_manifests() {
         let has_clap = dependency_names(&manifest)
             .iter()
             .any(|dependency| dependency == "clap");
-        assert!(!has_clap || name == "lean-dup-cli", "{name} must not depend on clap");
+        assert!(
+            !has_clap || matches!(name.as_str(), "lean-dup-cli" | "lean-dup-vector-search"),
+            "{name} must not depend on clap"
+        );
     }
 }
 

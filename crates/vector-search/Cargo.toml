@@ -5,15 +5,21 @@ name = "lean-dup-vector-search"
 version = { workspace = true }
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
 lean-dup-diagnostics = { workspace = true }
 lean-dup-embedding = { workspace = true }
 lean-dup-eval = { workspace = true }
 lean-dup-index = { workspace = true }
+lean-dup-project = { workspace = true }
 lean-dup-search = { workspace = true }
 lean-dup-vector-index = { workspace = true }
+lean-dup-worker = { workspace = true }
+rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
+walkdir = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

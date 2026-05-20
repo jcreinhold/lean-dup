@@ -1,8 +1,8 @@
 //! Persistent declaration-vector corpus boundary.
 //!
 //! This crate owns vector-corpus persistence, provenance validation, nearest
-//! declaration lookup, and backend diagnostics. Callers build/open/query a
-//! declaration corpus through stable DTOs; database layout, index parameters,
+//! declaration lookup, and backend diagnostics. Callers prepare a declaration
+//! corpus and query an opaque handle; database layout, index parameters,
 //! backend rows, and score conversion stay private.
 
 mod error;
@@ -40,17 +40,23 @@ pub struct VectorDeclaration {
     pub vector: Vec<f32>,
 }
 
-/// Request to build or reuse a persisted declaration-vector corpus.
+/// Request to prepare a persisted declaration-vector corpus.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct VectorCorpusBuildRequest {
+pub struct VectorCorpusPrepareRequest {
     pub cache_root: PathBuf,
     pub provenance: VectorCorpusProvenance,
     pub declarations: Vec<VectorDeclaration>,
 }
 
-/// Request to open an already-built vector corpus.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub(crate) struct VectorCorpusBuildRequest {
+    pub cache_root: PathBuf,
+    pub provenance: VectorCorpusProvenance,
+    pub declarations: Vec<VectorDeclaration>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct VectorCorpusOpenRequest {
+pub(crate) struct VectorCorpusOpenRequest {
     pub cache_root: PathBuf,
     pub provenance: VectorCorpusProvenance,
 }
@@ -84,24 +90,63 @@ pub struct VectorCorpusBuildCounters {
     pub build_ms: u128,
 }
 
-/// Result of building or reusing a corpus.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct VectorCorpusBuildOutput {
+pub struct VectorCorpusPrepareCounters {
+    pub input_declarations: usize,
+    pub stored_declarations: usize,
+    pub build_ms: u128,
+    pub open_ms: u128,
+    pub previous_status: VectorCorpusStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct VectorCorpusBuildOutput {
     pub summary: VectorCorpusSummary,
     pub previous_status: VectorCorpusStatus,
     pub counters: VectorCorpusBuildCounters,
 }
 
-/// Opaque handle to an opened vector corpus.
+/// Opaque handle to a prepared vector corpus.
 #[derive(Debug, Clone)]
-pub struct VectorCorpus {
+pub struct PreparedVectorCorpus {
+    corpus: VectorCorpus,
+    prepare_counters: VectorCorpusPrepareCounters,
+}
+
+impl PreparedVectorCorpus {
+    /// Return stable facts for this corpus.
+    pub fn summary(&self) -> &VectorCorpusSummary {
+        self.corpus.summary()
+    }
+
+    /// Return build/reuse/open counters recorded during preparation.
+    pub fn prepare_counters(&self) -> &VectorCorpusPrepareCounters {
+        &self.prepare_counters
+    }
+
+    /// Query nearest declarations from this prepared corpus.
+    ///
+    /// Scores are normalized so larger values mean closer declarations; backend
+    /// distance metrics and search parameters are private.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the query vector or limit is invalid, or when the
+    /// private backend cannot execute the nearest-declaration query.
+    pub fn query(&self, request: &VectorCorpusQueryRequest) -> Result<VectorCorpusQueryOutput> {
+        validate_query(self.corpus.summary.vector_dimension, request)?;
+        lancedb_backend::query_vector_corpus(&self.corpus, request)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct VectorCorpus {
     cache_root: PathBuf,
     summary: VectorCorpusSummary,
 }
 
 impl VectorCorpus {
-    /// Return stable facts for this corpus.
-    pub fn summary(&self) -> &VectorCorpusSummary {
+    fn summary(&self) -> &VectorCorpusSummary {
         &self.summary
     }
 
@@ -144,50 +189,39 @@ pub struct VectorCorpusQueryOutput {
     pub counters: VectorCorpusQueryCounters,
 }
 
-/// Build or reuse a persisted declaration-vector corpus.
+/// Prepare a persisted declaration-vector corpus.
 ///
 /// Matching provenance reuses the existing corpus. Missing, stale, or unusable
-/// storage is rebuilt from the supplied declarations.
+/// storage is rebuilt from the supplied declarations. The returned handle is
+/// already opened for queries, so callers do not coordinate build/open order.
 ///
 /// # Errors
 ///
-/// Returns an error when provenance is incomplete, vectors are invalid, or the
-/// private corpus backend cannot persist the requested declarations.
-pub fn build_vector_corpus(request: VectorCorpusBuildRequest) -> Result<VectorCorpusBuildOutput> {
+/// Returns an error when provenance is incomplete, vectors are invalid, the
+/// corpus cannot be persisted, or the prepared corpus cannot be opened.
+pub fn prepare_vector_corpus(request: VectorCorpusPrepareRequest) -> Result<PreparedVectorCorpus> {
     validate_provenance(&request.provenance)?;
     validate_declarations(&request.provenance, &request.declarations)?;
-    lancedb_backend::build_vector_corpus(request)
-}
-
-/// Open a previously built declaration-vector corpus.
-///
-/// The open request validates schema and provenance before returning an opaque
-/// handle. Callers do not inspect storage files to decide reuse.
-///
-/// # Errors
-///
-/// Returns an error when the corpus is missing, stale, unusable, or cannot be
-/// opened by the private backend.
-pub fn open_vector_corpus(request: VectorCorpusOpenRequest) -> Result<VectorCorpus> {
-    validate_provenance(&request.provenance)?;
-    lancedb_backend::open_vector_corpus(request)
-}
-
-/// Query nearest declarations from an opened corpus.
-///
-/// Scores are normalized so larger values mean closer declarations; backend
-/// distance metrics and search parameters are private.
-///
-/// # Errors
-///
-/// Returns an error when the query vector or limit is invalid, or when the
-/// private backend cannot execute the nearest-declaration query.
-pub fn query_vector_corpus(
-    corpus: &VectorCorpus,
-    request: &VectorCorpusQueryRequest,
-) -> Result<VectorCorpusQueryOutput> {
-    validate_query(corpus.summary.vector_dimension, request)?;
-    lancedb_backend::query_vector_corpus(corpus, request)
+    let build = lancedb_backend::build_vector_corpus(VectorCorpusBuildRequest {
+        cache_root: request.cache_root.clone(),
+        provenance: request.provenance.clone(),
+        declarations: request.declarations,
+    })?;
+    let open_started = std::time::Instant::now();
+    let corpus = lancedb_backend::open_vector_corpus(VectorCorpusOpenRequest {
+        cache_root: request.cache_root,
+        provenance: request.provenance,
+    })?;
+    Ok(PreparedVectorCorpus {
+        corpus,
+        prepare_counters: VectorCorpusPrepareCounters {
+            input_declarations: build.counters.input_declarations,
+            stored_declarations: build.counters.stored_declarations,
+            build_ms: build.counters.build_ms,
+            open_ms: open_started.elapsed().as_millis(),
+            previous_status: build.previous_status,
+        },
+    })
 }
 
 fn validate_provenance(provenance: &VectorCorpusProvenance) -> Result<()> {
@@ -311,53 +345,39 @@ mod tests {
     #[test]
     fn corpus_build_open_reopen_and_query_are_deterministic() {
         let temp = TempDir::new().expect("create temp dir");
-        let build = build_vector_corpus(VectorCorpusBuildRequest {
+        let prepared = prepare_vector_corpus(VectorCorpusPrepareRequest {
             cache_root: temp.path().to_path_buf(),
             provenance: provenance(),
             declarations: declarations(),
         })
         .expect("build corpus");
-        assert_eq!(build.summary.status, VectorCorpusStatus::Built);
-        assert_eq!(build.previous_status, VectorCorpusStatus::Missing);
-        assert_eq!(build.summary.declaration_count, 3);
+        assert_eq!(prepared.summary().status, VectorCorpusStatus::Reused);
+        assert_eq!(prepared.prepare_counters().previous_status, VectorCorpusStatus::Missing);
+        assert_eq!(prepared.summary().declaration_count, 3);
 
-        let reused = build_vector_corpus(VectorCorpusBuildRequest {
+        let reused = prepare_vector_corpus(VectorCorpusPrepareRequest {
             cache_root: temp.path().to_path_buf(),
             provenance: provenance(),
             declarations: declarations(),
         })
         .expect("reuse corpus");
-        assert_eq!(reused.summary.status, VectorCorpusStatus::Reused);
-        assert_eq!(reused.previous_status, VectorCorpusStatus::Reused);
+        assert_eq!(reused.summary().status, VectorCorpusStatus::Reused);
+        assert_eq!(reused.prepare_counters().previous_status, VectorCorpusStatus::Reused);
 
-        let corpus = open_vector_corpus(VectorCorpusOpenRequest {
-            cache_root: temp.path().to_path_buf(),
-            provenance: provenance(),
-        })
-        .expect("open corpus");
-        let reopened = open_vector_corpus(VectorCorpusOpenRequest {
-            cache_root: temp.path().to_path_buf(),
-            provenance: provenance(),
-        })
-        .expect("reopen corpus");
-        assert_eq!(corpus.summary(), reopened.summary());
+        assert_eq!(prepared.summary(), reused.summary());
 
-        let first = query_vector_corpus(
-            &corpus,
-            &VectorCorpusQueryRequest {
+        let first = prepared
+            .query(&VectorCorpusQueryRequest {
                 query_vector: vec![1.0, 0.0],
                 limit: 2,
-            },
-        )
-        .expect("query corpus");
-        let second = query_vector_corpus(
-            &reopened,
-            &VectorCorpusQueryRequest {
+            })
+            .expect("query corpus");
+        let second = reused
+            .query(&VectorCorpusQueryRequest {
                 query_vector: vec![1.0, 0.0],
                 limit: 2,
-            },
-        )
-        .expect("query reopened corpus");
+            })
+            .expect("query reopened corpus");
         assert_eq!(first.nearest, second.nearest);
         assert_eq!(first.nearest[0].declaration_name, "Fixture.alpha");
         assert!(first.nearest[0].score > first.nearest[1].score);
@@ -366,7 +386,7 @@ mod tests {
     #[test]
     fn stale_provenance_is_reported_before_reuse() {
         let temp = TempDir::new().expect("create temp dir");
-        build_vector_corpus(VectorCorpusBuildRequest {
+        prepare_vector_corpus(VectorCorpusPrepareRequest {
             cache_root: temp.path().to_path_buf(),
             provenance: provenance(),
             declarations: declarations(),
@@ -375,25 +395,20 @@ mod tests {
 
         let mut stale = provenance();
         stale.embedding_model_fingerprint = "different-model".to_owned();
-        let error = open_vector_corpus(VectorCorpusOpenRequest {
+        let rebuilt = prepare_vector_corpus(VectorCorpusPrepareRequest {
             cache_root: temp.path().to_path_buf(),
             provenance: stale,
+            declarations: declarations(),
         })
-        .expect_err("stale corpus should not open");
-        assert!(matches!(
-            error,
-            VectorIndexError::CorpusUnavailable {
-                status: VectorCorpusStatus::Stale,
-                ..
-            }
-        ));
+        .expect("stale corpus should rebuild");
+        assert_eq!(rebuilt.prepare_counters().previous_status, VectorCorpusStatus::Stale);
     }
 
     #[test]
     fn invalid_vectors_and_limits_are_rejected() {
         let mut bad = declarations();
         bad[0].vector = vec![f32::NAN, 0.0];
-        let error = build_vector_corpus(VectorCorpusBuildRequest {
+        let error = prepare_vector_corpus(VectorCorpusPrepareRequest {
             cache_root: TempDir::new().expect("create temp dir").path().to_path_buf(),
             provenance: provenance(),
             declarations: bad,
@@ -402,24 +417,16 @@ mod tests {
         assert!(matches!(error, VectorIndexError::InvalidRequest { .. }));
 
         let temp = TempDir::new().expect("create temp dir");
-        build_vector_corpus(VectorCorpusBuildRequest {
+        let corpus = prepare_vector_corpus(VectorCorpusPrepareRequest {
             cache_root: temp.path().to_path_buf(),
             provenance: provenance(),
             declarations: declarations(),
         })
         .expect("build corpus");
-        let corpus = open_vector_corpus(VectorCorpusOpenRequest {
-            cache_root: temp.path().to_path_buf(),
-            provenance: provenance(),
-        })
-        .expect("open corpus");
-        let zero_limit = query_vector_corpus(
-            &corpus,
-            &VectorCorpusQueryRequest {
-                query_vector: vec![1.0, 0.0],
-                limit: 0,
-            },
-        );
+        let zero_limit = corpus.query(&VectorCorpusQueryRequest {
+            query_vector: vec![1.0, 0.0],
+            limit: 0,
+        });
         assert!(matches!(zero_limit, Err(VectorIndexError::InvalidRequest { .. })));
     }
 }

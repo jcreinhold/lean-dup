@@ -10,7 +10,12 @@ mod error;
 mod eval;
 
 pub use error::{Error, Result};
-pub use eval::{CountMetric, EvalOutput, EvalRequest, EvaluationMetrics, EvaluationRunReport, run};
+pub use eval::{
+    AdjudicationSource, CandidateStageSurvival, CountMetric, EvalOutput, EvalRequest, EvaluationMetrics,
+    EvaluationRunReport, ExpectedStageVisibility, GoldLabelFact, GoldLabels, GoldPair, HardNegativeSurvival,
+    LabelConfidence, LabelFactSource, LabelPolarity, MatchClass, ObservedPair, ObservedRun, RecallAtK,
+    SearchStageMetrics, TimingMetrics, TypedGoldLabel, load_builtin, parse_json, run, score_run,
+};
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]

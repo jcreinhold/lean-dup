@@ -159,10 +159,10 @@ pub fn load_builtin(suite: EvalSuite) -> Result<GoldLabels> {
             });
         }
     };
-    parse(json)
+    parse_json(json)
 }
 
-fn parse(json: &str) -> Result<GoldLabels> {
+pub fn parse_json(json: &str) -> Result<GoldLabels> {
     let file: LabelFile = serde_json::from_str(json)?;
     let mut label_facts = Vec::new();
     label_facts.extend(expand_cluster_facts(
@@ -323,13 +323,14 @@ fn expand_pair_facts(
 #[cfg(test)]
 mod tests {
     use super::{
-        AdjudicationSource, ExpectedStageVisibility, LabelConfidence, LabelFactSource, LabelPolarity, MatchClass, parse,
+        AdjudicationSource, ExpectedStageVisibility, LabelConfidence, LabelFactSource, LabelPolarity, MatchClass,
+        parse_json,
     };
     use crate::eval::scoring::GoldPair;
 
     #[test]
     fn cluster_expansion_is_direction_insensitive() {
-        let labels = parse(
+        let labels = parse_json(
             r#"{
               "suite": "unit",
               "positive_clusters": [{"id": "p", "members": ["B", "A", "C"]}],
@@ -355,7 +356,7 @@ mod tests {
 
     #[test]
     fn legacy_hard_negative_pairs_are_dropped_only_when_positive() {
-        let labels = parse(
+        let labels = parse_json(
             r#"{
               "suite": "unit",
               "positive_pairs": [{"left": "A", "right": "B"}],
@@ -378,7 +379,7 @@ mod tests {
 
     #[test]
     fn typed_pairs_are_normalized_and_preserved() {
-        let labels = parse(
+        let labels = parse_json(
             r#"{
               "suite": "unit",
               "typed_pairs": [{
@@ -417,7 +418,7 @@ mod tests {
 
     #[test]
     fn typed_positive_and_hard_negative_contradiction_fails() {
-        let error = parse(
+        let error = parse_json(
             r#"{
               "suite": "unit",
               "typed_pairs": [
@@ -453,7 +454,7 @@ mod tests {
 
     #[test]
     fn typed_label_requires_adjudication_source_and_confidence() {
-        let missing_source = parse(
+        let missing_source = parse_json(
             r#"{
               "suite": "unit",
               "typed_pairs": [{
@@ -470,7 +471,7 @@ mod tests {
         .unwrap_err();
         assert!(missing_source.to_string().contains("adjudication_source"));
 
-        let missing_confidence = parse(
+        let missing_confidence = parse_json(
             r#"{
               "suite": "unit",
               "typed_pairs": [{
@@ -491,7 +492,7 @@ mod tests {
 
     #[test]
     fn builtin_default_labels_accept_legacy_and_typed_entries() {
-        let labels = parse(include_str!("../../eval-data/default.json")).unwrap();
+        let labels = parse_json(include_str!("../../eval-data/default.json")).unwrap();
 
         assert!(
             labels
