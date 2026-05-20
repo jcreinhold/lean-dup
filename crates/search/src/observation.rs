@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_index::{HydratedDeclaration, OpenedIndex};
 
 use crate::Result;
@@ -185,6 +186,25 @@ pub struct SearchPrunedFeatureFanout {
 }
 
 pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObservation> {
+    observe_search_inner(request, None)
+}
+
+/// Run search observation while reporting stable workflow progress.
+///
+/// Hidden validation workflows use this entry point to make long vector phases
+/// visible to operators. Events name search-level phases and counts; runtime,
+/// model, and vector-storage internals stay behind their owning crate facades.
+pub fn observe_search_with_progress(
+    request: SearchObservationRequest<'_>,
+    reporter: &mut Reporter,
+) -> Result<SearchObservation> {
+    observe_search_inner(request, Some(reporter))
+}
+
+fn observe_search_inner(
+    request: SearchObservationRequest<'_>,
+    reporter: Option<&mut Reporter>,
+) -> Result<SearchObservation> {
     let output = retrieve_candidates(request.workspace, request.comparison_indexes)?;
     let mut pairs = Vec::new();
     let mut ranked_pair_ids = BTreeSet::new();
@@ -227,7 +247,8 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
     pairs.extend(tracked_generated_pairs(&request, &ranked_pair_ids, &index_facts)?);
     let (vector_summary, vector_generated_count) = if let Some(vector_request) = request.vector_candidates {
         let comparison_declarations = all_comparison_declarations(request.comparison_indexes)?;
-        let vector_output = generate_vector_candidates(vector_request, request.workspace, &comparison_declarations);
+        let vector_output =
+            generate_vector_candidates(vector_request, request.workspace, &comparison_declarations, reporter);
         let count = merge_vector_candidates(
             request.workspace,
             &mut pairs,

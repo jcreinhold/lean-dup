@@ -375,6 +375,10 @@ fn eval_hidden_search_dataset_mode_writes_feature_artifact() {
     assert!(!help_stdout.contains("--vector-input-format"));
     assert!(!help_stdout.contains("--vector-document-policy"));
     assert!(!help_stdout.contains("--vector-eligibility"));
+    assert!(!help_stdout.contains("--vector-max-declarations"));
+    assert!(!help_stdout.contains("--vector-max-queries"));
+    assert!(!help_stdout.contains("--vector-max-runtime-ms"));
+    assert!(!help_stdout.contains("--vector-max-rss-bytes"));
     assert!(!help_stdout.contains("vector-fixture"));
 
     let assert = Command::cargo_bin("lean-dup")
@@ -510,6 +514,17 @@ fn eval_hidden_vector_search_mode_writes_skipped_artifact_without_model() {
     assert!(vector["vector_stage_metrics"]["top_k_saturation"].is_object());
     assert!(vector["vector_stage_metrics"]["vector_only_positives"].is_object());
     assert!(vector["symbolic_baseline"]["stage_metrics"].is_object());
+    assert_eq!(vector["validation_bounds"]["max_declarations"], 5000);
+    assert_eq!(vector["validation_bounds"]["max_queries"], 1000);
+    assert!(vector["validation_cost"]["phase_runtimes"].is_array());
+    assert!(
+        vector["validation_cost"]["peak_rss_bytes"].is_number()
+            || vector["validation_cost"]["peak_rss_bytes"].is_null()
+    );
+    assert!(vector["validation_cost"]["model_cache_bytes"].is_number());
+    assert!(vector["validation_cost"]["text_vector_cache_bytes"].is_number());
+    assert!(vector["validation_cost"]["vector_corpus_bytes"].is_number());
+    assert_eq!(vector["validation_cost"]["top_k"], 32);
 
     let raw = fs::read_to_string(artifact).unwrap();
     let forbidden_artifact_text = [
@@ -604,6 +619,21 @@ fn eval_hidden_vector_fixture_writes_non_saturated_artifact_and_reuses_corpus() 
         assert_eq!(vector["vector_candidates"]["eligible_corpus_size"], 72);
         assert_eq!(vector["vector_candidates"]["query_declaration_count"], 72);
         assert_eq!(vector["vector_candidates"]["top_k_saturated"], false);
+        assert_eq!(vector["validation_bounds"]["max_declarations"], 5000);
+        assert_eq!(vector["validation_bounds"]["max_queries"], 1000);
+        assert_eq!(vector["validation_cost"]["eligible_corpus_size"], 72);
+        assert_eq!(vector["validation_cost"]["query_count"], 72);
+        assert_eq!(vector["validation_cost"]["top_k"], 32);
+        assert_eq!(vector["validation_cost"]["top_k_saturated"], false);
+        assert_eq!(vector["validation_cost"]["corpus_status"], expected_corpus_status);
+        assert!(
+            vector["validation_cost"]["phase_runtimes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|phase| { phase["phase"] == "total-vector-validation" && phase["elapsed_ms"].is_number() })
+        );
+        assert!(vector["validation_cost"]["warm_open_query_ms"].is_number());
         assert_eq!(
             vector["vector_candidates"]["query_eligibility"]["skipped_by_reason"]["generated"],
             1
@@ -718,6 +748,80 @@ fn eval_hidden_vector_fixture_writes_non_saturated_artifact_and_reuses_corpus() 
         {
             assert!(!raw.contains(&forbidden), "vector fixture artifact leaked {forbidden}");
         }
+    }
+}
+
+#[test]
+fn eval_hidden_vector_fixture_budget_exceeded_writes_partial_artifact() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let model_cache = tempfile::TempDir::new().unwrap();
+    let text_cache = tempfile::TempDir::new().unwrap();
+    let corpus_cache = tempfile::TempDir::new().unwrap();
+    let artifact = repo_root().join("target/search-quality/vector-fixture-vector-search.json");
+    let _ = fs::remove_file(&artifact);
+
+    let assert = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args([
+            "eval",
+            "--suite",
+            "vector-fixture",
+            "--format",
+            "json",
+            "--write-vector-search",
+            "--vector-acquisition",
+            "cache-only",
+            "--vector-profile-id",
+            "fixture-deterministic-v1",
+            "--vector-input-format",
+            "symmetric-document",
+            "--vector-max-declarations",
+            "10",
+            "--vector-model-cache-root",
+        ])
+        .arg(model_cache.path())
+        .arg("--vector-text-cache-root")
+        .arg(text_cache.path())
+        .arg("--vector-corpus-cache-root")
+        .arg(corpus_cache.path())
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["vector_search_status"], "budget-exceeded");
+    assert_eq!(
+        payload["vector_search_artifact"],
+        "target/search-quality/vector-fixture-vector-search.json"
+    );
+
+    let vector: Value = serde_json::from_str(&fs::read_to_string(&artifact).unwrap()).unwrap();
+    assert_eq!(vector["schema_version"], "lean-dup.vector-search.v2");
+    assert_eq!(vector["status"], "budget-exceeded");
+    assert!(
+        vector["reason"]
+            .as_str()
+            .unwrap()
+            .starts_with("vector-validation-budget-exceeded:max-declarations")
+    );
+    assert_eq!(vector["validation_bounds"]["max_declarations"], 10);
+    assert_eq!(vector["validation_cost"]["query_count"], 79);
+    assert_eq!(vector["validation_cost"]["eligible_corpus_size"], 79);
+    assert_eq!(vector["pairs"].as_array().unwrap().len(), 0);
+
+    let raw = fs::read_to_string(&artifact).unwrap();
+    for forbidden in [
+        "/Users/".to_owned(),
+        ["query", ":"].concat(),
+        ["passage", ":"].concat(),
+        "FastEmbed".to_owned(),
+        "LanceDB".to_owned(),
+        "\"table\"".to_owned(),
+        "\"row\"".to_owned(),
+    ] {
+        assert!(!raw.contains(&forbidden), "partial vector artifact leaked {forbidden}");
     }
 }
 

@@ -31,7 +31,7 @@ pub use observation::{
     SearchEmbeddingContentAvailability, SearchEmbeddingDocument, SearchEmbeddingDocumentInput,
     SearchEmbeddingDocumentPolicy, SearchEmbeddingDocuments, SearchObservation, SearchObservationRequest,
     SearchObservedPair, SearchPrunedFeatureFanout, SearchRetrievalObservation, SearchTrackedPair, observe_search,
-    rescore_observation,
+    observe_search_with_progress, rescore_observation,
 };
 pub use pair_features::{
     SearchEvidenceMode, SearchModuleRelation, SearchPairFeatures, SearchRoleOverlap, SearchSemanticEvidenceState,
@@ -45,7 +45,7 @@ pub use semantic_reranking::{
 pub use vector_candidates::{
     SearchVectorAcquisitionPolicy, SearchVectorCandidateRequest, SearchVectorCandidateStatus,
     SearchVectorCandidateSummary, SearchVectorCorpusStatus, SearchVectorEligibilityPolicy,
-    SearchVectorEligibilitySummary, SearchVectorInputFormat,
+    SearchVectorEligibilitySummary, SearchVectorInputFormat, VECTOR_CANDIDATE_TOP_K,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]

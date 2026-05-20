@@ -1,14 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use lean_dup_search::{
     SearchEmbeddingDocumentPolicy, SearchObservation, SearchObservedPair, SearchScoringVariant,
     SearchVectorAcquisitionPolicy, SearchVectorCandidateRequest, SearchVectorCandidateStatus,
-    SearchVectorCandidateSummary, SearchVectorEligibilityPolicy, SearchVectorEvidence, SearchVectorInputFormat,
-    rescore_observation,
+    SearchVectorCandidateSummary, SearchVectorCorpusStatus, SearchVectorEligibilityPolicy, SearchVectorEvidence,
+    SearchVectorInputFormat, rescore_observation,
 };
 use serde::Serialize;
+use walkdir::WalkDir;
 
 use crate::eval::labels::{GoldLabelFact, GoldLabels, LabelFactSource, LabelPolarity, TypedGoldLabel};
 use crate::eval::scoring::{
@@ -17,6 +19,10 @@ use crate::eval::scoring::{
 use crate::{Error, Result};
 
 pub const VECTOR_SEARCH_SCHEMA_VERSION: &str = "lean-dup.vector-search.v2";
+pub const DEFAULT_VECTOR_MAX_DECLARATIONS: usize = 5_000;
+pub const DEFAULT_VECTOR_MAX_QUERIES: usize = 1_000;
+pub const DEFAULT_VECTOR_MAX_RUNTIME_MS: u128 = 900_000;
+pub const DEFAULT_VECTOR_MAX_RSS_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VectorSearchRequest {
@@ -29,6 +35,31 @@ pub struct VectorSearchRequest {
     pub corpus_cache_root: Option<PathBuf>,
     pub document_policy: SearchEmbeddingDocumentPolicy,
     pub eligibility_policy: SearchVectorEligibilityPolicy,
+    pub bounds: VectorValidationBounds,
+}
+
+/// Hidden vector validation budget.
+///
+/// Eval uses these workflow limits before and after expensive vector phases.
+/// The values are operator-facing guardrails only; they do not expose model
+/// files, vector storage layout, or search internals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct VectorValidationBounds {
+    pub max_declarations: usize,
+    pub max_queries: usize,
+    pub max_runtime_ms: u128,
+    pub max_rss_bytes: u64,
+}
+
+impl Default for VectorValidationBounds {
+    fn default() -> Self {
+        Self {
+            max_declarations: DEFAULT_VECTOR_MAX_DECLARATIONS,
+            max_queries: DEFAULT_VECTOR_MAX_QUERIES,
+            max_runtime_ms: DEFAULT_VECTOR_MAX_RUNTIME_MS,
+            max_rss_bytes: DEFAULT_VECTOR_MAX_RSS_BYTES,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +78,8 @@ pub(crate) struct VectorSearchReportRun<'a> {
     pub vector_metrics: &'a EvaluationMetrics,
     pub scorer_version: &'a str,
     pub k_values: &'a [usize],
+    pub request: Option<&'a VectorSearchRequest>,
+    pub started: Instant,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -64,8 +97,37 @@ pub(crate) struct VectorSearchReport {
     pub vector_stage_metrics: VectorStageMetrics,
     pub scorer_variants: Vec<VectorScorerVariantReport>,
     pub pairs: Vec<VectorSearchPairReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub validation_bounds: Option<VectorValidationBounds>,
+    pub validation_cost: VectorValidationCostSummary,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<VectorSearchChildReport>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub(crate) struct VectorValidationCostSummary {
+    pub phase_runtimes: Vec<VectorValidationPhaseRuntime>,
+    pub peak_rss_bytes: Option<u64>,
+    pub rss_status: String,
+    pub model_cache_bytes: Option<u64>,
+    pub text_vector_cache_bytes: Option<u64>,
+    pub vector_corpus_bytes: Option<u64>,
+    pub eligible_corpus_size: usize,
+    pub query_count: usize,
+    pub top_k: usize,
+    pub top_k_saturated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub corpus_status: Option<SearchVectorCorpusStatus>,
+    pub cold_build_ms: u128,
+    pub warm_open_query_ms: u128,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct VectorValidationPhaseRuntime {
+    pub phase: String,
+    pub elapsed_ms: u128,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -162,12 +224,19 @@ impl VectorSearchRequest {
             eligibility_policy: self.eligibility_policy,
         }
     }
+
+    pub(crate) fn effective_corpus_cache_root(&self, suite: &str) -> PathBuf {
+        self.corpus_cache_root
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("target/search-quality/vector-corpus").join(suite))
+    }
 }
 
 pub(crate) fn report(run: VectorSearchReportRun<'_>) -> Result<VectorSearchArtifactOutcome> {
     let status = status_label(run.observation.retrieval.vector_candidates.status);
     let metrics = (run.observation.retrieval.vector_candidates.status == SearchVectorCandidateStatus::Ok)
         .then(|| run.vector_metrics.clone());
+    let artifact_path = default_artifact_path(run.suite);
     let report = VectorSearchReport {
         schema_version: VECTOR_SEARCH_SCHEMA_VERSION,
         suite: run.suite.to_owned(),
@@ -180,9 +249,18 @@ pub(crate) fn report(run: VectorSearchReportRun<'_>) -> Result<VectorSearchArtif
         vector_stage_metrics: vector_stage_metrics(run.labels, run.observation),
         scorer_variants: scorer_variant_reports(&run),
         pairs: pair_reports(run.labels, run.observation),
+        validation_bounds: run.request.map(|request| request.bounds),
+        validation_cost: validation_cost_summary(
+            run.suite,
+            run.request,
+            &run.observation.retrieval.vector_candidates,
+            Some(run.vector_metrics),
+            run.started,
+            Some(artifact_path.clone()),
+        ),
         children: Vec::new(),
     };
-    let artifact = write_default_artifact(run.repo_root, &report)?;
+    let artifact = write_artifact(run.repo_root, artifact_path, &report)?;
     Ok(VectorSearchArtifactOutcome {
         status,
         artifact,
@@ -222,6 +300,8 @@ pub(crate) fn aggregate(
         vector_stage_metrics: VectorStageMetrics::default(),
         scorer_variants: Vec::new(),
         pairs: Vec::new(),
+        validation_bounds: None,
+        validation_cost: VectorValidationCostSummary::default(),
         children,
     };
     let artifact = write_default_artifact(repo_root, &report)?;
@@ -246,6 +326,53 @@ pub(crate) fn child_report(
         artifact,
         metrics,
     }
+}
+
+pub(crate) struct VectorSearchPartialReportRun<'a> {
+    pub repo_root: &'a Path,
+    pub suite: &'a str,
+    pub status: &'a str,
+    pub reason: String,
+    pub request: Option<&'a VectorSearchRequest>,
+    pub symbolic_baseline: Option<&'a EvaluationMetrics>,
+    pub vector_candidates: SearchVectorCandidateSummary,
+    pub started: Instant,
+}
+
+pub(crate) fn partial_report(run: VectorSearchPartialReportRun<'_>) -> Result<VectorSearchArtifactOutcome> {
+    let artifact_path = default_artifact_path(run.suite);
+    let report = VectorSearchReport {
+        schema_version: VECTOR_SEARCH_SCHEMA_VERSION,
+        suite: run.suite.to_owned(),
+        status: run.status.to_owned(),
+        reason: Some(run.reason.clone()),
+        scorer_version: "unavailable".to_owned(),
+        vector_candidates: run.vector_candidates.clone(),
+        symbolic_baseline: run
+            .symbolic_baseline
+            .cloned()
+            .unwrap_or_else(|| empty_metrics(run.suite)),
+        vector_search: None,
+        vector_stage_metrics: VectorStageMetrics::default(),
+        scorer_variants: Vec::new(),
+        pairs: Vec::new(),
+        validation_bounds: run.request.map(|request| request.bounds),
+        validation_cost: validation_cost_summary(
+            run.suite,
+            run.request,
+            &run.vector_candidates,
+            run.symbolic_baseline,
+            run.started,
+            Some(artifact_path.clone()),
+        ),
+        children: Vec::new(),
+    };
+    let artifact = write_artifact(run.repo_root, artifact_path, &report)?;
+    Ok(VectorSearchArtifactOutcome {
+        status: run.status.to_owned(),
+        artifact,
+        metrics: None,
+    })
 }
 
 fn scorer_variant_reports(run: &VectorSearchReportRun<'_>) -> Vec<VectorScorerVariantReport> {
@@ -693,7 +820,14 @@ fn status_label(status: SearchVectorCandidateStatus) -> String {
 }
 
 pub(crate) fn write_default_artifact(repo_root: &Path, report: &VectorSearchReport) -> Result<PathBuf> {
-    let artifact = PathBuf::from("target/search-quality").join(format!("{}-vector-search.json", report.suite));
+    write_artifact(repo_root, default_artifact_path(&report.suite), report)
+}
+
+fn default_artifact_path(suite: &str) -> PathBuf {
+    PathBuf::from("target/search-quality").join(format!("{suite}-vector-search.json"))
+}
+
+fn write_artifact(repo_root: &Path, artifact: PathBuf, report: &VectorSearchReport) -> Result<PathBuf> {
     let absolute = repo_root.join(&artifact);
     let parent = absolute.parent().ok_or_else(|| Error::Eval {
         message: format!("vector search artifact has no parent: {}", absolute.display()),
@@ -712,8 +846,114 @@ pub(crate) fn write_default_artifact(repo_root: &Path, report: &VectorSearchRepo
     Ok(artifact)
 }
 
+fn validation_cost_summary(
+    suite: &str,
+    request: Option<&VectorSearchRequest>,
+    summary: &SearchVectorCandidateSummary,
+    metrics: Option<&EvaluationMetrics>,
+    started: Instant,
+    artifact_path: Option<PathBuf>,
+) -> VectorValidationCostSummary {
+    let peak_rss_bytes = metrics
+        .and_then(|metrics| metrics.peak_memory_bytes)
+        .or_else(lean_dup_diagnostics::perf::peak_rss_bytes);
+    let rss_status = if peak_rss_bytes.is_some() {
+        "available"
+    } else {
+        "unavailable"
+    }
+    .to_owned();
+    let (model_cache_bytes, text_vector_cache_bytes, vector_corpus_bytes) =
+        request.map_or((None, None, None), |request| {
+            (
+                request.model_cache_root.as_deref().map(disk_bytes),
+                request.text_vector_cache_root.as_deref().map(disk_bytes),
+                Some(disk_bytes(&request.effective_corpus_cache_root(suite))),
+            )
+        });
+    let cold_build_ms = if summary.corpus_status == Some(SearchVectorCorpusStatus::Built) {
+        summary.corpus_build_ms
+    } else {
+        0
+    };
+    let warm_open_query_ms = if summary.corpus_status == Some(SearchVectorCorpusStatus::Reused) {
+        summary.corpus_open_ms.saturating_add(summary.query_ms)
+    } else {
+        0
+    };
+    VectorValidationCostSummary {
+        phase_runtimes: vector_phase_runtimes(summary, started),
+        peak_rss_bytes,
+        rss_status,
+        model_cache_bytes,
+        text_vector_cache_bytes,
+        vector_corpus_bytes,
+        eligible_corpus_size: summary.eligible_corpus_size,
+        query_count: summary.query_declaration_count,
+        top_k: summary.top_k,
+        top_k_saturated: summary.top_k_saturated,
+        corpus_status: summary.corpus_status,
+        cold_build_ms,
+        warm_open_query_ms,
+        artifact_path,
+    }
+}
+
+fn vector_phase_runtimes(
+    summary: &SearchVectorCandidateSummary,
+    started: Instant,
+) -> Vec<VectorValidationPhaseRuntime> {
+    [
+        ("model-preparation", summary.model_prepare_ms),
+        ("embedding-vector-cache", summary.embedding_ms),
+        ("corpus-build-or-reuse", summary.corpus_build_ms),
+        ("corpus-open", summary.corpus_open_ms),
+        ("vector-query", summary.query_ms),
+        (
+            "total-vector-validation",
+            summary.total_ms.max(started.elapsed().as_millis()),
+        ),
+    ]
+    .into_iter()
+    .map(|(phase, elapsed_ms)| VectorValidationPhaseRuntime {
+        phase: phase.to_owned(),
+        elapsed_ms,
+    })
+    .collect()
+}
+
+fn disk_bytes(path: &Path) -> u64 {
+    if !path.exists() {
+        return 0;
+    }
+    WalkDir::new(path)
+        .into_iter()
+        .filter_map(std::result::Result::ok)
+        .filter_map(|entry| entry.metadata().ok())
+        .filter(|metadata| metadata.is_file())
+        .map(|metadata| metadata.len())
+        .sum()
+}
+
+fn empty_metrics(suite: &str) -> EvaluationMetrics {
+    EvaluationMetrics {
+        suite: suite.to_owned(),
+        recall: Vec::new(),
+        shown_queue_precision: CountMetric::default(),
+        hard_negative_hits: CountMetric::default(),
+        visible_groups: CountMetric::default(),
+        probe_unavailable: CountMetric::default(),
+        stage_metrics: crate::eval::stage_metrics::SearchStageMetrics::default(),
+        candidate_count: 0,
+        timings: TimingMetrics::default(),
+        peak_memory_bytes: lean_dup_diagnostics::perf::peak_rss_bytes(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
+
     use rustc_hash::FxHashSet;
 
     use super::{VectorSearchReportRun, pair_reports, scorer_variant_reports, vector_stage_metrics};
@@ -1017,6 +1257,8 @@ mod tests {
             vector_metrics: &metrics,
             scorer_version: "lean-dup.symbolic-scorer.v1",
             k_values: &[1],
+            request: None,
+            started: Instant::now(),
         });
 
         assert_eq!(reports.len(), 3);

@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::Instant;
 
+use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_embedding::{
     EmbeddingAcquisitionPolicy, EmbeddingCacheStatus, EmbeddingInputFormat, EmbeddingInputPolicy, EmbeddingInputRole,
     EmbeddingModelSpec, EmbeddingPrepareRequest, TextEmbeddingBatchRequest, TextEmbeddingInput, embed_text_batch,
@@ -21,7 +22,7 @@ use crate::observation::{
 };
 
 const VECTOR_CANDIDATE_POLICY_VERSION: &str = "lean-dup.vector-candidate.v1";
-const VECTOR_CANDIDATE_TOP_K: usize = 32;
+pub const VECTOR_CANDIDATE_TOP_K: usize = 32;
 
 /// Hidden vector candidate-generation request.
 ///
@@ -140,9 +141,12 @@ pub struct SearchVectorCandidateSummary {
     pub eligible_corpus_size: usize,
     pub top_k_saturated: bool,
     pub vector_generated_candidate_count: usize,
+    pub model_prepare_ms: u128,
     pub corpus_build_ms: u128,
+    pub corpus_open_ms: u128,
     pub query_ms: u128,
     pub embedding_ms: u128,
+    pub total_ms: u128,
 }
 
 impl Default for SearchVectorCandidateSummary {
@@ -169,9 +173,12 @@ impl Default for SearchVectorCandidateSummary {
             eligible_corpus_size: 0,
             top_k_saturated: false,
             vector_generated_candidate_count: 0,
+            model_prepare_ms: 0,
             corpus_build_ms: 0,
+            corpus_open_ms: 0,
             query_ms: 0,
             embedding_ms: 0,
+            total_ms: 0,
         }
     }
 }
@@ -201,18 +208,63 @@ pub(crate) fn generate_vector_candidates(
     request: &SearchVectorCandidateRequest,
     workspace: &[HydratedDeclaration],
     comparison_declarations: &[HydratedDeclaration],
+    reporter: Option<&mut Reporter>,
 ) -> VectorCandidateOutput {
+    let total_started = Instant::now();
+    let mut reporter = reporter;
+    vector_progress(
+        &mut reporter,
+        "search.vector.declarations",
+        None,
+        None,
+        "starting hidden vector candidate generation",
+    );
     let corpus_declarations = if comparison_declarations.is_empty() {
         workspace
     } else {
         comparison_declarations
     };
+    vector_progress(
+        &mut reporter,
+        "search.vector.eligibility",
+        Some(0),
+        Some(2),
+        "filtering query declarations",
+    );
     let query_eligibility = eligible_declarations(workspace, request.eligibility_policy);
+    vector_progress(
+        &mut reporter,
+        "search.vector.eligibility",
+        Some(1),
+        Some(2),
+        "filtering corpus declarations",
+    );
     let corpus_eligibility = eligible_declarations(corpus_declarations, request.eligibility_policy);
+    vector_progress(
+        &mut reporter,
+        "search.vector.documents",
+        Some(0),
+        Some(2),
+        "building query documents",
+    );
     let query_documents =
         embedding_documents_for_declarations_with_policy(&query_eligibility.declarations, request.document_policy);
+    vector_progress(
+        &mut reporter,
+        "search.vector.documents",
+        Some(1),
+        Some(2),
+        "building corpus documents",
+    );
     let corpus_documents =
         embedding_documents_for_declarations_with_policy(&corpus_eligibility.declarations, request.document_policy);
+    vector_progress(
+        &mut reporter,
+        "search.vector.documents",
+        Some(2),
+        Some(2),
+        "built vector embedding documents",
+    );
     let mut summary = SearchVectorCandidateSummary {
         version: VECTOR_CANDIDATE_POLICY_VERSION,
         status: SearchVectorCandidateStatus::Skipped,
@@ -235,32 +287,33 @@ pub(crate) fn generate_vector_candidates(
         eligible_corpus_size: corpus_documents.documents.len(),
         top_k_saturated: VECTOR_CANDIDATE_TOP_K >= corpus_documents.documents.len(),
         vector_generated_candidate_count: 0,
+        model_prepare_ms: 0,
         corpus_build_ms: 0,
+        corpus_open_ms: 0,
         query_ms: 0,
         embedding_ms: 0,
+        total_ms: 0,
     };
     if workspace.is_empty() || corpus_declarations.is_empty() {
         summary.reason = Some("empty-vector-input".to_owned());
-        return VectorCandidateOutput {
-            summary,
-            candidates: Vec::new(),
-        };
+        return vector_output(summary, Vec::new(), total_started);
     }
     if query_documents.documents.is_empty() {
         summary.reason = Some("no-eligible-vector-queries".to_owned());
-        return VectorCandidateOutput {
-            summary,
-            candidates: Vec::new(),
-        };
+        return vector_output(summary, Vec::new(), total_started);
     }
     if corpus_documents.documents.is_empty() {
         summary.reason = Some("no-eligible-vector-corpus".to_owned());
-        return VectorCandidateOutput {
-            summary,
-            candidates: Vec::new(),
-        };
+        return vector_output(summary, Vec::new(), total_started);
     }
 
+    vector_progress(
+        &mut reporter,
+        "search.vector.model",
+        None,
+        None,
+        "preparing embedding model",
+    );
     let model = match model_spec_for_profile(&request.profile_id, request.revision.clone()) {
         Ok(model) => {
             summary.model_id = model.id.clone();
@@ -269,13 +322,11 @@ pub(crate) fn generate_vector_candidates(
         Err(error) => {
             summary.status = SearchVectorCandidateStatus::Failed;
             summary.reason = Some(stable_embedding_error(&error));
-            return VectorCandidateOutput {
-                summary,
-                candidates: Vec::new(),
-            };
+            return vector_output(summary, Vec::new(), total_started);
         }
     };
 
+    let prepare_started = Instant::now();
     let prepare = match prepare_embedding_model(EmbeddingPrepareRequest {
         model: model.clone(),
         acquisition_policy: request.acquisition_policy.into(),
@@ -285,12 +336,11 @@ pub(crate) fn generate_vector_candidates(
         Err(error) => {
             summary.status = SearchVectorCandidateStatus::Failed;
             summary.reason = Some(stable_embedding_error(&error));
-            return VectorCandidateOutput {
-                summary,
-                candidates: Vec::new(),
-            };
+            summary.model_prepare_ms = prepare_started.elapsed().as_millis();
+            return vector_output(summary, Vec::new(), total_started);
         }
     };
+    summary.model_prepare_ms = prepare.elapsed_ms.max(prepare_started.elapsed().as_millis());
     summary.model_profile_id = prepare.model.profile_id.clone();
     if prepare.cache.status != EmbeddingCacheStatus::Prepared {
         summary.reason = Some(
@@ -302,34 +352,46 @@ pub(crate) fn generate_vector_candidates(
             }
             .to_owned(),
         );
-        return VectorCandidateOutput {
-            summary,
-            candidates: Vec::new(),
-        };
+        return vector_output(summary, Vec::new(), total_started);
     }
 
+    vector_progress(
+        &mut reporter,
+        "search.vector.embedding",
+        Some(0),
+        Some(2),
+        "embedding corpus documents",
+    );
     let corpus_embedding = match embed_documents(request, &model, EmbeddingInputRole::Document, &corpus_documents) {
         Ok(result) => result,
         Err(error) => {
             summary.status = SearchVectorCandidateStatus::Failed;
             summary.reason = Some(stable_embedding_error(&error));
-            return VectorCandidateOutput {
-                summary,
-                candidates: Vec::new(),
-            };
+            return vector_output(summary, Vec::new(), total_started);
         }
     };
+    vector_progress(
+        &mut reporter,
+        "search.vector.embedding",
+        Some(1),
+        Some(2),
+        "embedding query documents",
+    );
     let query_embedding = match embed_documents(request, &model, EmbeddingInputRole::Query, &query_documents) {
         Ok(result) => result,
         Err(error) => {
             summary.status = SearchVectorCandidateStatus::Failed;
             summary.reason = Some(stable_embedding_error(&error));
-            return VectorCandidateOutput {
-                summary,
-                candidates: Vec::new(),
-            };
+            return vector_output(summary, Vec::new(), total_started);
         }
     };
+    vector_progress(
+        &mut reporter,
+        "search.vector.embedding",
+        Some(2),
+        Some(2),
+        "embedded vector documents",
+    );
     summary.embedding_ms = corpus_embedding
         .runtime
         .model_load_ms
@@ -385,6 +447,13 @@ pub(crate) fn generate_vector_candidates(
         })
         .collect::<Vec<_>>();
 
+    vector_progress(
+        &mut reporter,
+        "search.vector.corpus",
+        Some(0),
+        Some(2),
+        "building or reusing vector corpus",
+    );
     let build_started = Instant::now();
     let build = match build_vector_corpus(VectorCorpusBuildRequest {
         cache_root: request.corpus_cache_root.clone(),
@@ -395,14 +464,19 @@ pub(crate) fn generate_vector_candidates(
         Err(error) => {
             summary.status = SearchVectorCandidateStatus::Failed;
             summary.reason = Some(stable_vector_error(&error));
-            return VectorCandidateOutput {
-                summary,
-                candidates: Vec::new(),
-            };
+            return vector_output(summary, Vec::new(), total_started);
         }
     };
     summary.corpus_build_ms = build.counters.build_ms.max(build_started.elapsed().as_millis());
     summary.corpus_status = Some(build.summary.status.into());
+    vector_progress(
+        &mut reporter,
+        "search.vector.corpus",
+        Some(1),
+        Some(2),
+        "opening vector corpus",
+    );
+    let open_started = Instant::now();
     let corpus = match open_vector_corpus(VectorCorpusOpenRequest {
         cache_root: request.corpus_cache_root.clone(),
         provenance,
@@ -411,16 +485,29 @@ pub(crate) fn generate_vector_candidates(
         Err(error) => {
             summary.status = SearchVectorCandidateStatus::Failed;
             summary.reason = Some(stable_vector_error(&error));
-            return VectorCandidateOutput {
-                summary,
-                candidates: Vec::new(),
-            };
+            summary.corpus_open_ms = open_started.elapsed().as_millis();
+            return vector_output(summary, Vec::new(), total_started);
         }
     };
+    summary.corpus_open_ms = open_started.elapsed().as_millis();
+    vector_progress(
+        &mut reporter,
+        "search.vector.corpus",
+        Some(2),
+        Some(2),
+        "opened vector corpus",
+    );
 
     let mut candidates = Vec::new();
     let mut seen = BTreeSet::new();
-    for query_document in &query_documents.documents {
+    for (query_index, query_document) in query_documents.documents.iter().enumerate() {
+        vector_progress(
+            &mut reporter,
+            "search.vector.query",
+            Some(query_index as u64),
+            Some(query_documents.documents.len() as u64),
+            "querying vector corpus",
+        );
         let Some(query_vector) = query_vectors.get(&query_document.declaration_name) else {
             continue;
         };
@@ -436,10 +523,7 @@ pub(crate) fn generate_vector_candidates(
             Err(error) => {
                 summary.status = SearchVectorCandidateStatus::Failed;
                 summary.reason = Some(stable_vector_error(&error));
-                return VectorCandidateOutput {
-                    summary,
-                    candidates: Vec::new(),
-                };
+                return vector_output(summary, Vec::new(), total_started);
             }
         };
         summary.query_ms = summary.query_ms.saturating_add(nearest.counters.query_ms);
@@ -469,6 +553,13 @@ pub(crate) fn generate_vector_candidates(
             }
         }
     }
+    vector_progress(
+        &mut reporter,
+        "search.vector.query",
+        Some(query_documents.documents.len() as u64),
+        Some(query_documents.documents.len() as u64),
+        "queried vector corpus",
+    );
     candidates.sort_by(|left, right| {
         left.anchor_name
             .cmp(&right.anchor_name)
@@ -478,7 +569,28 @@ pub(crate) fn generate_vector_candidates(
     summary.status = SearchVectorCandidateStatus::Ok;
     summary.reason = None;
     summary.vector_generated_candidate_count = candidates.len();
+    vector_output(summary, candidates, total_started)
+}
+
+fn vector_output(
+    mut summary: SearchVectorCandidateSummary,
+    candidates: Vec<VectorCandidate>,
+    started: Instant,
+) -> VectorCandidateOutput {
+    summary.total_ms = started.elapsed().as_millis();
     VectorCandidateOutput { summary, candidates }
+}
+
+fn vector_progress(
+    reporter: &mut Option<&mut Reporter>,
+    phase: &'static str,
+    current: Option<u64>,
+    total: Option<u64>,
+    message: &'static str,
+) {
+    if let Some(reporter) = reporter.as_deref_mut() {
+        reporter.event(phase, current, total, message);
+    }
 }
 
 fn eligible_declarations(
@@ -780,6 +892,7 @@ mod tests {
             ),
             &rows,
             &[],
+            None,
         );
 
         assert_eq!(output.summary.status, SearchVectorCandidateStatus::Skipped);
@@ -804,11 +917,13 @@ mod tests {
             &request(cache.path().join("small"), SearchVectorEligibilityPolicy::Broad),
             &small,
             &[],
+            None,
         );
         let large_output = generate_vector_candidates(
             &request(cache.path().join("large"), SearchVectorEligibilityPolicy::Broad),
             &large,
             &[],
+            None,
         );
 
         assert_eq!(small_output.summary.top_k, 32);
@@ -842,6 +957,7 @@ mod tests {
             ),
             &rows,
             &[],
+            None,
         );
 
         assert_eq!(output.summary.query_eligibility.total, 79);

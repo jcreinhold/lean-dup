@@ -10,7 +10,7 @@ use lean_dup_embedding::{
     EmbeddingAcquisitionPolicy, EmbeddingCacheStatus, EmbeddingModelFileRole, EmbeddingModelFileState,
     EmbeddingModelSpec, EmbeddingPrepareRequest, EmbeddingPrepareResult, prepare_embedding_model,
 };
-use lean_dup_eval::{EvalRequest, VectorSearchRequest};
+use lean_dup_eval::{EvalRequest, VectorSearchRequest, VectorValidationBounds};
 use lean_dup_index::CleanupPolicy;
 use lean_dup_index::{self, CacheFacts};
 use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexStore, IndexSummary};
@@ -309,6 +309,12 @@ fn vector_search_request(args: &EvalArgs) -> Option<VectorSearchRequest> {
         corpus_cache_root: args.vector_corpus_cache_root.clone(),
         document_policy: args.vector_document_policy.into(),
         eligibility_policy: args.vector_eligibility.into(),
+        bounds: VectorValidationBounds {
+            max_declarations: args.vector_max_declarations,
+            max_queries: args.vector_max_queries,
+            max_runtime_ms: args.vector_max_runtime_ms,
+            max_rss_bytes: args.vector_max_rss_bytes,
+        },
     })
 }
 

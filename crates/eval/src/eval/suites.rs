@@ -20,8 +20,9 @@ use lean_dup_index::{
 };
 use lean_dup_project::{WorkspaceRequest, resolve, resolve_project_mathlib};
 use lean_dup_search::{
-    SearchObservation, SearchObservationRequest, SearchScoringVariant, SearchTrackedPair, observe_search,
-    rescore_observation,
+    SearchObservation, SearchObservationRequest, SearchScoringVariant, SearchTrackedPair, SearchVectorCandidateStatus,
+    SearchVectorCandidateSummary, SearchVectorEligibilitySummary, VECTOR_CANDIDATE_TOP_K, observe_search,
+    observe_search_with_progress, rescore_observation,
 };
 use lean_dup_worker::{Fingerprints, WorkerClient};
 
@@ -190,29 +191,90 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
     };
     let base_retrieval_ms = retrieval_started.elapsed().as_millis();
 
+    let vector_query_count = workspace_rows.len();
+    let vector_corpus_count = match &external {
+        Some(external) => external.all_handles()?.len(),
+        None => workspace_rows.len(),
+    };
     let vector_search_request = request
         .vector_search
         .as_ref()
         .map(|request| request.to_search_request(&labels.suite));
+    let mut vector_partial = None;
     let (output, retrieval_ms) = if let Some(vector_request) = vector_search_request.as_ref() {
-        let started = Instant::now();
-        let output = match &external {
-            Some(external) => observe_search(SearchObservationRequest {
-                workspace: &workspace_rows,
-                comparison_indexes: std::slice::from_ref(external),
-                tracked_pairs: &tracked_pairs,
-                scoring_variant: SearchScoringVariant::SymbolicOnly,
-                vector_candidates: Some(vector_request),
-            })?,
-            None => observe_search(SearchObservationRequest {
-                workspace: &workspace_rows,
-                comparison_indexes: &[],
-                tracked_pairs: &tracked_pairs,
-                scoring_variant: SearchScoringVariant::SymbolicOnly,
-                vector_candidates: Some(vector_request),
-            })?,
-        };
-        (output, started.elapsed().as_millis())
+        reporter.event(
+            "eval.vector.bounds",
+            None,
+            None,
+            format!(
+                "checking vector validation bounds for {} queries and {} corpus declarations",
+                vector_query_count, vector_corpus_count
+            ),
+        );
+        if let Some(reason) = vector_budget_violation(
+            request.vector_search.as_ref().expect("vector request is present"),
+            vector_query_count,
+            vector_corpus_count,
+            total_started,
+        ) {
+            let root = repo_root();
+            let summary = budget_vector_summary(
+                request.vector_search.as_ref().expect("vector request is present"),
+                vector_query_count,
+                vector_corpus_count,
+                reason.clone(),
+            );
+            reporter.event(
+                "eval.vector.artifact",
+                None,
+                None,
+                "writing partial vector validation artifact",
+            );
+            vector_partial = Some(vector_search::partial_report(
+                vector_search::VectorSearchPartialReportRun {
+                    repo_root: &root,
+                    suite: &labels.suite,
+                    status: "budget-exceeded",
+                    reason,
+                    request: request.vector_search.as_ref(),
+                    symbolic_baseline: None,
+                    vector_candidates: summary,
+                    started: total_started,
+                },
+            )?);
+            (base_output.clone(), base_retrieval_ms)
+        } else {
+            reporter.event(
+                "eval.vector.search",
+                None,
+                None,
+                "running hidden vector candidate generation",
+            );
+            let started = Instant::now();
+            let output = match &external {
+                Some(external) => observe_search_with_progress(
+                    SearchObservationRequest {
+                        workspace: &workspace_rows,
+                        comparison_indexes: std::slice::from_ref(external),
+                        tracked_pairs: &tracked_pairs,
+                        scoring_variant: SearchScoringVariant::SymbolicOnly,
+                        vector_candidates: Some(vector_request),
+                    },
+                    reporter,
+                )?,
+                None => observe_search_with_progress(
+                    SearchObservationRequest {
+                        workspace: &workspace_rows,
+                        comparison_indexes: &[],
+                        tracked_pairs: &tracked_pairs,
+                        scoring_variant: SearchScoringVariant::SymbolicOnly,
+                        vector_candidates: Some(vector_request),
+                    },
+                    reporter,
+                )?,
+            };
+            (output, started.elapsed().as_millis())
+        }
     } else {
         (base_output.clone(), base_retrieval_ms)
     };
@@ -288,18 +350,46 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
     } else {
         None
     };
-    let vector_search = if request.vector_search.is_some() {
+    let vector_search = if let Some(outcome) = vector_partial {
+        Some(outcome)
+    } else if let Some(vector_request) = request.vector_search.as_ref() {
         let root = repo_root();
-        Some(vector_search::report(vector_search::VectorSearchReportRun {
-            repo_root: &root,
-            suite: &labels.suite,
-            labels: &labels,
-            observation: &output,
-            symbolic_baseline: &baseline_metrics,
-            vector_metrics: &metrics,
-            scorer_version: &scorer_version,
-            k_values: &k_values,
-        })?)
+        if let Some(reason) =
+            vector_budget_violation(vector_request, vector_query_count, vector_corpus_count, total_started)
+        {
+            reporter.event(
+                "eval.vector.artifact",
+                None,
+                None,
+                "writing budget-exceeded vector artifact",
+            );
+            Some(vector_search::partial_report(
+                vector_search::VectorSearchPartialReportRun {
+                    repo_root: &root,
+                    suite: &labels.suite,
+                    status: "budget-exceeded",
+                    reason,
+                    request: Some(vector_request),
+                    symbolic_baseline: None,
+                    vector_candidates: output.retrieval.vector_candidates.clone(),
+                    started: total_started,
+                },
+            )?)
+        } else {
+            reporter.event("eval.vector.artifact", None, None, "writing vector validation artifact");
+            Some(vector_search::report(vector_search::VectorSearchReportRun {
+                repo_root: &root,
+                suite: &labels.suite,
+                labels: &labels,
+                observation: &output,
+                symbolic_baseline: &baseline_metrics,
+                vector_metrics: &metrics,
+                scorer_version: &scorer_version,
+                k_values: &k_values,
+                request: Some(vector_request),
+                started: total_started,
+            })?)
+        }
     } else {
         None
     };
@@ -342,16 +432,70 @@ fn run_vector_fixture(request: EvalRequest, reporter: &mut Reporter) -> Result<E
         .vector_search
         .as_ref()
         .map(|request| request.to_search_request(&labels.suite));
+    let mut vector_partial = None;
     let (output, retrieval_ms) = if let Some(vector_request) = vector_search_request.as_ref() {
-        let started = Instant::now();
-        let output = observe_search(SearchObservationRequest {
-            workspace: &workspace_rows,
-            comparison_indexes: &[],
-            tracked_pairs: &tracked_pairs,
-            scoring_variant: SearchScoringVariant::SymbolicOnly,
-            vector_candidates: Some(vector_request),
-        })?;
-        (output, started.elapsed().as_millis())
+        reporter.event(
+            "eval.vector.bounds",
+            None,
+            None,
+            format!(
+                "checking vector validation bounds for {} queries and {} corpus declarations",
+                workspace_rows.len(),
+                workspace_rows.len()
+            ),
+        );
+        if let Some(reason) = vector_budget_violation(
+            request.vector_search.as_ref().expect("vector request is present"),
+            workspace_rows.len(),
+            workspace_rows.len(),
+            total_started,
+        ) {
+            let root = repo_root();
+            let summary = budget_vector_summary(
+                request.vector_search.as_ref().expect("vector request is present"),
+                workspace_rows.len(),
+                workspace_rows.len(),
+                reason.clone(),
+            );
+            reporter.event(
+                "eval.vector.artifact",
+                None,
+                None,
+                "writing partial vector validation artifact",
+            );
+            vector_partial = Some(vector_search::partial_report(
+                vector_search::VectorSearchPartialReportRun {
+                    repo_root: &root,
+                    suite: &labels.suite,
+                    status: "budget-exceeded",
+                    reason,
+                    request: request.vector_search.as_ref(),
+                    symbolic_baseline: None,
+                    vector_candidates: summary,
+                    started: total_started,
+                },
+            )?);
+            (base_output.clone(), base_retrieval_ms)
+        } else {
+            reporter.event(
+                "eval.vector.search",
+                None,
+                None,
+                "running hidden vector candidate generation",
+            );
+            let started = Instant::now();
+            let output = observe_search_with_progress(
+                SearchObservationRequest {
+                    workspace: &workspace_rows,
+                    comparison_indexes: &[],
+                    tracked_pairs: &tracked_pairs,
+                    scoring_variant: SearchScoringVariant::SymbolicOnly,
+                    vector_candidates: Some(vector_request),
+                },
+                reporter,
+            )?;
+            (output, started.elapsed().as_millis())
+        }
     } else {
         (base_output.clone(), base_retrieval_ms)
     };
@@ -427,18 +571,49 @@ fn run_vector_fixture(request: EvalRequest, reporter: &mut Reporter) -> Result<E
     } else {
         None
     };
-    let vector_search = if request.vector_search.is_some() {
+    let vector_search = if let Some(outcome) = vector_partial {
+        Some(outcome)
+    } else if let Some(vector_request) = request.vector_search.as_ref() {
         let root = repo_root();
-        Some(vector_search::report(vector_search::VectorSearchReportRun {
-            repo_root: &root,
-            suite: &labels.suite,
-            labels: &labels,
-            observation: &output,
-            symbolic_baseline: &baseline_metrics,
-            vector_metrics: &metrics,
-            scorer_version: &scorer_version,
-            k_values: &k_values,
-        })?)
+        if let Some(reason) = vector_budget_violation(
+            vector_request,
+            workspace_rows.len(),
+            workspace_rows.len(),
+            total_started,
+        ) {
+            reporter.event(
+                "eval.vector.artifact",
+                None,
+                None,
+                "writing budget-exceeded vector artifact",
+            );
+            Some(vector_search::partial_report(
+                vector_search::VectorSearchPartialReportRun {
+                    repo_root: &root,
+                    suite: &labels.suite,
+                    status: "budget-exceeded",
+                    reason,
+                    request: Some(vector_request),
+                    symbolic_baseline: Some(&baseline_metrics),
+                    vector_candidates: output.retrieval.vector_candidates.clone(),
+                    started: total_started,
+                },
+            )?)
+        } else {
+            reporter.event("eval.vector.artifact", None, None, "writing vector validation artifact");
+            Some(vector_search::report(vector_search::VectorSearchReportRun {
+                repo_root: &root,
+                suite: &labels.suite,
+                labels: &labels,
+                observation: &output,
+                symbolic_baseline: &baseline_metrics,
+                vector_metrics: &metrics,
+                scorer_version: &scorer_version,
+                k_values: &k_values,
+                request: Some(vector_request),
+                started: total_started,
+            })?)
+        }
     } else {
         None
     };
@@ -654,21 +829,24 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
 
 fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) -> EvaluationRunReport {
     if manual && !manual_workspace_exists(&request) {
+        let reason = "manual suite workspace is unavailable".to_owned();
+        let vector_search = unstarted_vector_partial(&request, "skipped", reason.clone());
         return EvaluationRunReport {
             suite: request.suite.as_str().to_owned(),
             status: "skipped".to_owned(),
             scorer_version: None,
             metrics: None,
-            reason: Some("manual suite workspace is unavailable".to_owned()),
-            vector_search_status: None,
-            vector_search_artifact: None,
+            reason: Some(reason),
+            vector_search_status: vector_search.as_ref().map(|outcome| outcome.status.clone()),
+            vector_search_artifact: vector_search.as_ref().map(|outcome| outcome.artifact.clone()),
             manual,
             scorer_ablations: Vec::new(),
-            vector_search_metrics: None,
+            vector_search_metrics: vector_search.and_then(|outcome| outcome.metrics),
         };
     }
 
     let suite = request.suite;
+    let requested_vector_search = request.vector_search.clone();
     match run_single(request, reporter) {
         Ok(report) => EvaluationRunReport {
             suite: report.suite,
@@ -689,20 +867,55 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
             } else {
                 "failed"
             };
+            let vector_search = unstarted_vector_partial(
+                &EvalRequest {
+                    suite,
+                    workspace: None,
+                    mathlib_workspace: None,
+                    manual_module: None,
+                    k_values: Vec::new(),
+                    write_search_dataset: false,
+                    write_scorer_ablations: false,
+                    vector_search: requested_vector_search,
+                },
+                status,
+                reason.clone(),
+            );
             EvaluationRunReport {
                 suite: suite.as_str().to_owned(),
                 status: status.to_owned(),
                 scorer_version: None,
                 metrics: None,
                 reason: Some(reason),
-                vector_search_status: None,
-                vector_search_artifact: None,
+                vector_search_status: vector_search.as_ref().map(|outcome| outcome.status.clone()),
+                vector_search_artifact: vector_search.as_ref().map(|outcome| outcome.artifact.clone()),
                 manual,
                 scorer_ablations: Vec::new(),
-                vector_search_metrics: None,
+                vector_search_metrics: vector_search.and_then(|outcome| outcome.metrics),
             }
         }
     }
+}
+
+fn unstarted_vector_partial(
+    request: &EvalRequest,
+    status: &str,
+    reason: String,
+) -> Option<vector_search::VectorSearchArtifactOutcome> {
+    let vector_request = request.vector_search.as_ref()?;
+    let root = repo_root();
+    let summary = budget_vector_summary(vector_request, 0, 0, reason.clone());
+    vector_search::partial_report(vector_search::VectorSearchPartialReportRun {
+        repo_root: &root,
+        suite: request.suite.as_str(),
+        status,
+        reason,
+        request: Some(vector_request),
+        symbolic_baseline: None,
+        vector_candidates: summary,
+        started: Instant::now(),
+    })
+    .ok()
 }
 
 fn aggregate_scorer_ablations(runs: &[EvaluationRunReport]) -> Vec<ScorerAblationVariantReport> {
@@ -808,6 +1021,76 @@ fn sum_count<'a>(
     CountMetric {
         found: runs.iter().map(|run| metric(run).found).sum(),
         total: runs.iter().map(|run| metric(run).total).sum(),
+    }
+}
+
+fn vector_budget_violation(
+    request: &VectorSearchRequest,
+    query_count: usize,
+    corpus_count: usize,
+    started: Instant,
+) -> Option<String> {
+    let total_declarations = query_count.saturating_add(corpus_count);
+    if total_declarations > request.bounds.max_declarations {
+        return Some(format!(
+            "vector-validation-budget-exceeded:max-declarations:{total_declarations}>{}",
+            request.bounds.max_declarations
+        ));
+    }
+    if query_count > request.bounds.max_queries {
+        return Some(format!(
+            "vector-validation-budget-exceeded:max-queries:{query_count}>{}",
+            request.bounds.max_queries
+        ));
+    }
+    if started.elapsed().as_millis() > request.bounds.max_runtime_ms {
+        return Some(format!(
+            "vector-validation-budget-exceeded:max-runtime-ms:{}>{}",
+            started.elapsed().as_millis(),
+            request.bounds.max_runtime_ms
+        ));
+    }
+    if let Some(peak_rss_bytes) = perf::peak_rss_bytes()
+        && peak_rss_bytes > request.bounds.max_rss_bytes
+    {
+        return Some(format!(
+            "vector-validation-budget-exceeded:max-rss-bytes:{peak_rss_bytes}>{}",
+            request.bounds.max_rss_bytes
+        ));
+    }
+    None
+}
+
+fn budget_vector_summary(
+    request: &VectorSearchRequest,
+    query_count: usize,
+    corpus_count: usize,
+    reason: String,
+) -> SearchVectorCandidateSummary {
+    let eligibility = |total| SearchVectorEligibilitySummary {
+        policy_id: request.eligibility_policy.id().to_owned(),
+        policy_version: "lean-dup.vector-candidate.v1",
+        total,
+        eligible: 0,
+        skipped_by_reason: Default::default(),
+    };
+    SearchVectorCandidateSummary {
+        status: SearchVectorCandidateStatus::Skipped,
+        reason: Some(reason),
+        model_profile_id: request.profile_id.clone(),
+        input_format_id: request.input_format.id().to_owned(),
+        input_format_version: request.input_format.version().to_owned(),
+        acquisition_policy: request.acquisition_policy,
+        document_policy_id: request.document_policy.id().to_owned(),
+        document_policy_version: "lean-dup.embedding-document.v1".to_owned(),
+        query_declaration_count: query_count,
+        corpus_declaration_count: corpus_count,
+        query_eligibility: eligibility(query_count),
+        corpus_eligibility: eligibility(corpus_count),
+        top_k: VECTOR_CANDIDATE_TOP_K,
+        eligible_corpus_size: corpus_count,
+        top_k_saturated: VECTOR_CANDIDATE_TOP_K >= corpus_count,
+        ..SearchVectorCandidateSummary::default()
     }
 }
 

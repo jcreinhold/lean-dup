@@ -213,3 +213,63 @@ progress reporting for long validation, and rerun only then.
   runtime/RSS/cache cost, and a single go/no-go decision.
 - *Implementation details in interface comments:* this pass adds a validation document only; no public interface comments
   were changed.
+
+## 35X Addendum: Bounded Manual Validation Contract
+
+Prompt 35X repairs the operational gap found above: the interrupted production-gate/manual run produced no vector-search
+artifact after a long runtime and high RSS. That run remains non-evidence for mathlib-scale quality. Future manual
+validation must complete under explicit bounds or write a partial status artifact that explains why it did not.
+
+Design Note:
+
+- Hidden knowledge: eval owns workload lifecycle, bounds, partial status artifacts, runtime/RSS/cache accounting, and
+  the final validation interpretation. CLI owns operator-visible progress. Search, embedding, and vector-index continue
+  to expose only stable counters and statuses.
+- Smallest public interface: hidden validation bounds and artifact fields for phase runtimes, RSS availability, cache
+  sizes, vector corpus size, query count, eligible corpus size, top-k, saturation status, corpus reuse status,
+  cold-build time, warm-open/query time, and artifact path.
+- Non-leaking decisions: model runtime details, tokenizer files, vector storage layout, table names, backend names,
+  worker rows, raw source text, model input prefixes, and private filesystem paths are not validation facts.
+- Preserved capability: ordinary eval and audit remain symbolic and embedding-free unless the hidden vector experiment
+  is explicitly requested.
+- Discarded behavior: treating an opaque interrupted manual run as an acceptable validation attempt.
+
+Design It Twice:
+
+- *Wait for full mathlib validation without progress.* Rejected because interruption gives no stable result and hides
+  cost.
+- *Add prints inside model/vector internals.* Rejected because it spreads operator workflow knowledge into the wrong
+  crates.
+- *Make eval/CLI own progress, bounds, and partial artifacts.* Chosen because it keeps backend mechanics hidden while
+  making validation cost and cache reuse visible.
+
+Required large-workload behavior for Prompt 35Y:
+
+- Report progress for model preparation, declaration loading, eligibility filtering, document construction,
+  embedding/vector-cache lookup, corpus build/open/reuse, vector query, scoring variants, artifact writing, and leak
+  checks.
+- Enforce or record hidden bounds for maximum declarations, maximum queries, maximum runtime, and RSS observation
+  threshold.
+- Write partial artifacts for skipped, interrupted, timed-out, or budget-exceeded runs.
+- Separate cold-build timing from warm-open/query timing.
+- Record model cache size, text-vector cache size, vector corpus size, corpus reuse status, top-k, eligible corpus size,
+  query count, and saturation status.
+- Do not count skipped, interrupted, timed-out, budget-exceeded, or saturated runs as mathlib-scale retrieval-quality
+  passes.
+
+35X Red Flag Review:
+
+- *Shallow module:* validation now has workflow-level observability and budget semantics, not just a command invocation.
+- *Pass-through wrapper:* artifacts summarize stable cost/reuse facts rather than copying backend logs.
+- *Temporal decomposition:* progress phases are workflow facts and do not make eval own embedding or vector-index
+  internals.
+- *Information leakage:* cost/progress artifacts exclude raw text, private paths, backend/storage vocabulary, model
+  prefixes, tokenizer details, and worker rows.
+- *Special-general mixture:* large-workload bounds remain hidden/manual validation controls and do not affect default
+  audit/eval.
+- *Conjoined methods:* eval owns validation lifecycle and decision evidence; search/embedding/vector-index own their
+  respective hidden mechanics.
+- *Hard-to-describe public API:* the validation surface is explicit bounds, phase timings, cache/corpus sizes, reuse
+  status, and a stable completion status.
+- *Implementation-detail comments:* comments must describe operator-visible progress/budget behavior, not storage or
+  runtime layouts.

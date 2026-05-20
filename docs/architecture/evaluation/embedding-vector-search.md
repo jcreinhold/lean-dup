@@ -626,3 +626,66 @@ KanProofs/mathlib workload.
   classes, and cache reuse status.
 - *Implementation-detail comments:* public comments describe validation facts and privacy rules, not backend or runtime
   layout.
+
+## 35X bounded large-workload validation and progress
+
+Prompt 35X makes hidden large semantic/vector validation observable and bounded. It does not decide whether vector
+search is useful; it makes long KanProofs/mathlib-scale runs measurable enough for Prompt 35Y to decide.
+
+Design Note:
+
+- Hidden knowledge: CLI/eval own operator interaction, workflow budgets, phase progress, partial status artifacts,
+  runtime/RSS/cache-size accounting, and validation lifecycle. Search owns candidate-generation progress counters and
+  stable vector summaries. Embedding owns model/runtime/cache mechanics; vector-index owns corpus persistence and
+  nearest-neighbor mechanics.
+- Smallest public interface: hidden validation bounds plus stable vector artifact fields for phase runtimes, RSS
+  availability, model/text-vector/vector-corpus cache sizes, corpus reuse status, query count, eligible corpus size,
+  top-k, saturation status, cold-build timing, warm-open/query timing, and artifact path.
+- Non-leaking decisions: model files, tokenizer/runtime details, vector-cache layout, corpus table/storage layout,
+  backend names, worker rows, retrieval keys, raw statements, model input prefixes, and private paths do not appear in
+  public search/eval/report APIs or artifacts.
+- Preserved capability: default audit and ordinary eval remain symbolic and do not prepare models, build vector
+  corpora, query vector indexes, or show vector progress.
+- Discarded behavior: opaque manual vector validation runs that consume minutes or large RSS without progress, cache
+  reuse facts, or a partial artifact.
+
+Design It Twice:
+
+- *Run full mathlib validation as one opaque command.* Rejected because failure or interruption leaves no useful
+  validation evidence and hides runtime/RSS/cache cost.
+- *Print ad hoc progress from embedding/vector-index/search internals.* Rejected because it leaks ownership details and
+  teaches workflow code about backend phases.
+- *Report progress and cost at workflow boundaries through stable DTOs.* Chosen because CLI/eval own operator-facing
+  behavior, while embedding, vector-index, and search only expose stable counters and statuses through crate-root
+  surfaces.
+
+Hidden vector validation now reports progress for these stable phases: model preparation, declaration loading,
+eligibility filtering, document construction, embedding/vector-cache lookup, corpus build/open/reuse, vector query,
+scoring variants, artifact writing, and leak checks where the workflow performs them. Phase names are workflow/search
+facts, not backend implementation names.
+
+Vector artifacts carry a `validation_bounds` block and a `validation_cost` block. Bounds include maximum declarations,
+queries, runtime, and RSS observation threshold. Cost includes phase runtimes, RSS or `unavailable`, cache sizes, vector
+corpus size, query count, eligible corpus size, top-k, saturation, corpus reuse status, cold-build timing,
+warm-open/query timing, and artifact path. A warm validation run is expected to reuse the model cache, text-vector
+cache, and vector corpus when provenance matches; the artifact records whether the vector corpus was built or reused.
+
+When a hidden validation is skipped or exceeds a configured budget, eval writes a partial vector artifact with a stable
+status and reason. Partial artifacts intentionally contain stable bounds, cost, query/corpus counts, and vector summary
+facts, but no pair rows and no raw declaration/model/backend details.
+
+35X Red Flag Review:
+
+- *Shallow module:* CLI/eval now own real workflow observability and budget enforcement instead of forwarding an opaque
+  long-running command.
+- *Pass-through wrapper:* progress/cost fields summarize stable validation facts, not backend logs.
+- *Temporal decomposition:* long-run lifecycle, candidate generation, embedding, and vector persistence remain separated
+  by hidden knowledge rather than by execution order alone.
+- *Information leakage:* progress events and artifacts use phase names, counts, statuses, and cache sizes; they do not
+  expose model files, vector storage layout, backend names, worker rows, raw text, prefixes, or private paths.
+- *Special-general mixture:* bounds and progress are hidden validation behavior, not ordinary audit behavior.
+- *Conjoined methods:* eval handles budgets/artifacts, search reports vector candidate phases, embedding handles model
+  runtime, and vector-index handles corpus reuse.
+- *Hard-to-describe public API:* the operator-facing surface is bounded validation plus phase/cost facts.
+- *Implementation-detail comments:* interface comments describe caller-visible progress and budget facts, not temporary
+  backend mechanics.

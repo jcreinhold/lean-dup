@@ -11,7 +11,9 @@ mod eval;
 
 pub use error::{Error, Result};
 pub use eval::{
-    CountMetric, EvalOutput, EvalRequest, EvaluationMetrics, EvaluationRunReport, VectorSearchRequest, run,
+    CountMetric, DEFAULT_VECTOR_MAX_DECLARATIONS, DEFAULT_VECTOR_MAX_QUERIES, DEFAULT_VECTOR_MAX_RSS_BYTES,
+    DEFAULT_VECTOR_MAX_RUNTIME_MS, EvalOutput, EvalRequest, EvaluationMetrics, EvaluationRunReport,
+    VectorSearchRequest, VectorValidationBounds, run,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]

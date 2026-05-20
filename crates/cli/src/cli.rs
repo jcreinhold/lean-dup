@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use lean_dup_embedding::EmbeddingAcquisitionPolicy;
-use lean_dup_eval::EvalSuite;
+use lean_dup_eval::{
+    DEFAULT_VECTOR_MAX_DECLARATIONS, DEFAULT_VECTOR_MAX_QUERIES, DEFAULT_VECTOR_MAX_RSS_BYTES,
+    DEFAULT_VECTOR_MAX_RUNTIME_MS, EvalSuite,
+};
 use lean_dup_search::{
     ProbePolicy, ReviewProfile, SearchEmbeddingDocumentPolicy, SearchVectorAcquisitionPolicy,
     SearchVectorEligibilityPolicy, SearchVectorInputFormat,
@@ -218,6 +221,18 @@ pub struct EvalArgs {
 
     #[arg(long = "vector-eligibility", hide = true, value_enum, default_value_t = CliVectorEligibilityPolicy::ActionablePublicStatement)]
     pub vector_eligibility: CliVectorEligibilityPolicy,
+
+    #[arg(long = "vector-max-declarations", hide = true, default_value_t = DEFAULT_VECTOR_MAX_DECLARATIONS)]
+    pub vector_max_declarations: usize,
+
+    #[arg(long = "vector-max-queries", hide = true, default_value_t = DEFAULT_VECTOR_MAX_QUERIES)]
+    pub vector_max_queries: usize,
+
+    #[arg(long = "vector-max-runtime-ms", hide = true, default_value_t = DEFAULT_VECTOR_MAX_RUNTIME_MS)]
+    pub vector_max_runtime_ms: u128,
+
+    #[arg(long = "vector-max-rss-bytes", hide = true, default_value_t = DEFAULT_VECTOR_MAX_RSS_BYTES)]
+    pub vector_max_rss_bytes: u64,
 }
 
 #[derive(Debug, Clone, clap::Args)]
