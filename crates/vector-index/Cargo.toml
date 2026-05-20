@@ -4,10 +4,18 @@ license = { workspace = true }
 name = "lean-dup-vector-index"
 version = { workspace = true }
 
+[package.metadata.cargo-shear]
+# LanceDB does not forward Lance's vendored-protoc feature. These direct
+# dependencies are feature anchors so this crate builds without a system
+# `protoc`; keep them even though Rust code imports only `lancedb`.
+ignored = ["lance", "lance-datafusion"]
+
 [dependencies]
 arrow-array = { workspace = true }
 arrow-schema = { workspace = true }
 futures = { workspace = true }
+lance = { version = "6.0.0", default-features = false, features = ["protoc"] }
+lance-datafusion = { version = "6.0.0", default-features = false, features = ["protoc"] }
 lancedb = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
