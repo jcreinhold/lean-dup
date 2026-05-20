@@ -32,7 +32,10 @@ struct Foundation {
 
 pub fn run(cli: Cli) -> Result<Outcome> {
     let mut reporter = Reporter::new_live(cli.progress, cli.profile);
-    let (report, output_format, output_path) = match cli.command {
+    let command = cli.command.ok_or_else(|| AppError::Cli {
+        message: "missing command; run `lean-dup --help`".to_owned(),
+    })?;
+    let (report, output_format, output_path) = match command {
         Command::Doctor(args) => {
             let format = args.format;
             (Report::Doctor(doctor(args, &mut reporter)?), format, None)
@@ -70,6 +73,11 @@ pub fn run(cli: Cli) -> Result<Outcome> {
             None,
         ),
         Command::Diff(args) => (Report::Diff(diff(args, &mut reporter)?), OutputFormat::Text, None),
+        Command::External(_) => {
+            return Err(AppError::Cli {
+                message: "external command dispatch must happen before built-in command execution".to_owned(),
+            });
+        }
     };
 
     Ok(Outcome {

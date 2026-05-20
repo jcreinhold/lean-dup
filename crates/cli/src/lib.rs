@@ -1,6 +1,7 @@
 mod cli;
 mod commands;
 mod error;
+mod extensions;
 mod perf;
 mod render;
 
@@ -19,8 +20,8 @@ pub fn run<I, T, O, E>(args: I, stdout: &mut O, stderr: &mut E) -> i32
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
-    O: Write,
-    E: Write,
+    O: Write + Send,
+    E: Write + Send,
 {
     let cli = match cli::Cli::try_parse_from(args) {
         Ok(cli) => cli,
@@ -38,6 +39,20 @@ where
             return code;
         }
     };
+
+    if cli.list {
+        return match extensions::write_command_list(stdout) {
+            Ok(()) => 0,
+            Err(error) => {
+                let _ = writeln!(stderr, "error: {error}");
+                1
+            }
+        };
+    }
+
+    if let Some(cli::Command::External(external)) = cli.command.as_ref() {
+        return extensions::run_external(&cli, external, stdout, stderr);
+    }
 
     match commands::run(cli) {
         Ok(outcome) => {

@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -8,6 +9,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Parser)]
 #[command(name = "lean-dup")]
 #[command(about = "Rust foundation CLI for Lean duplicate audits")]
+#[command(arg_required_else_help = true)]
 pub struct Cli {
     #[arg(long, global = true, help = "Render typed progress events on stderr")]
     pub progress: bool,
@@ -15,8 +17,11 @@ pub struct Cli {
     #[arg(long, global = true, help = "Render phase timings on stderr")]
     pub profile: bool,
 
+    #[arg(long, help = "List built-in commands and installed external extensions")]
+    pub list: bool,
+
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -33,7 +38,24 @@ pub enum Command {
     Diff(DiffArgs),
     #[command(hide = true)]
     Perf(PerfArgs),
+    #[command(external_subcommand)]
+    External(Vec<OsString>),
 }
+
+pub(crate) const VISIBLE_BUILT_IN_COMMANDS: &[&str] =
+    &["doctor", "index", "index-mathlib", "audit", "eval", "show", "diff"];
+
+pub(crate) const ALL_BUILT_IN_COMMANDS: &[&str] = &[
+    "doctor",
+    "cache-cleanup",
+    "index",
+    "index-mathlib",
+    "audit",
+    "eval",
+    "show",
+    "diff",
+    "perf",
+];
 
 #[derive(Debug, Clone, clap::Args)]
 pub struct DoctorArgs {

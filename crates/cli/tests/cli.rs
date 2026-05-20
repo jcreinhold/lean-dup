@@ -1,5 +1,7 @@
 use std::fs;
-use std::path::PathBuf;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
@@ -23,6 +25,25 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
+#[cfg(unix)]
+fn write_test_extension(directory: &Path, executable: &str, script: &str) -> PathBuf {
+    let path = directory.join(executable);
+    fs::write(&path, script).unwrap();
+    let mut permissions = fs::metadata(&path).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&path, permissions).unwrap();
+    path
+}
+
+#[cfg(unix)]
+fn path_with_extension_dir(directory: &Path) -> std::ffi::OsString {
+    let mut paths = vec![directory.to_path_buf()];
+    if let Some(current) = std::env::var_os("PATH") {
+        paths.extend(std::env::split_paths(&current));
+    }
+    std::env::join_paths(paths).unwrap()
+}
+
 #[test]
 fn help_lists_foundation_commands() {
     let assert = Command::cargo_bin("lean-dup").unwrap().arg("--help").assert().success();
@@ -43,6 +64,144 @@ fn help_lists_foundation_commands() {
         !stdout.contains("embedding"),
         "hidden embedding command leaked into help:\n{stdout}"
     );
+    assert!(stdout.contains("--list"));
+    assert!(
+        !stdout.contains("vector"),
+        "external vector command should not be hardcoded into static help:\n{stdout}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn cargo_style_external_extension_dispatches_unknown_command() {
+    let temp = tempfile::TempDir::new().unwrap();
+    write_test_extension(
+        temp.path(),
+        "lean-dup-vector",
+        "#!/bin/sh\necho \"OUT:$*\"\necho \"ERR:$*\" >&2\nexit 23\n",
+    );
+
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("PATH", path_with_extension_dir(temp.path()))
+        .args(["vector", "validate", "--flag"])
+        .assert()
+        .code(23)
+        .stdout(predicate::str::contains("OUT:validate --flag"))
+        .stderr(predicate::str::contains("ERR:validate --flag"));
+}
+
+#[cfg(unix)]
+#[test]
+fn external_extension_receives_global_flags_before_extension_args() {
+    let temp = tempfile::TempDir::new().unwrap();
+    write_test_extension(
+        temp.path(),
+        "lean-dup-vector",
+        "#!/bin/sh\necho \"OUT:$*\"\necho \"ERR:$*\" >&2\nexit 23\n",
+    );
+
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("PATH", path_with_extension_dir(temp.path()))
+        .args(["--progress", "--profile", "vector", "validate"])
+        .assert()
+        .code(23)
+        .stdout(predicate::str::contains("OUT:--progress --profile validate"))
+        .stderr(predicate::str::contains("ERR:--progress --profile validate"));
+}
+
+#[cfg(unix)]
+#[test]
+fn external_extension_help_dispatches_to_installed_tool() {
+    let temp = tempfile::TempDir::new().unwrap();
+    write_test_extension(
+        temp.path(),
+        "lean-dup-vector",
+        "#!/bin/sh\necho \"VECTOR HELP:$*\"\nexit 0\n",
+    );
+
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("PATH", path_with_extension_dir(temp.path()))
+        .args(["vector", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("VECTOR HELP:--help"));
+}
+
+#[cfg(unix)]
+#[test]
+fn missing_vector_extension_reports_install_hint() {
+    let temp = tempfile::TempDir::new().unwrap();
+
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("PATH", temp.path())
+        .args(["vector", "validate"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("lean-dup-vector"))
+        .stderr(predicate::str::contains("cargo install lean-dup-vector-search"));
+}
+
+#[cfg(unix)]
+#[test]
+fn invalid_external_names_are_rejected_without_execution() {
+    let temp = tempfile::TempDir::new().unwrap();
+    write_test_extension(
+        temp.path(),
+        "lean-dup-vector",
+        "#!/bin/sh\necho SHOULD_NOT_RUN\nexit 23\n",
+    );
+
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("PATH", path_with_extension_dir(temp.path()))
+        .arg("./vector")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid external command name"))
+        .stdout(predicate::str::is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn built_in_commands_shadow_external_extensions() {
+    let temp = tempfile::TempDir::new().unwrap();
+    write_test_extension(temp.path(), "lean-dup-audit", "#!/bin/sh\necho SHADOW_AUDIT\nexit 77\n");
+
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("PATH", path_with_extension_dir(temp.path()))
+        .args(["audit", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Usage: lean-dup audit"))
+        .stdout(predicate::str::contains("--workspace"))
+        .stdout(predicate::str::contains("SHADOW_AUDIT").not());
+}
+
+#[cfg(unix)]
+#[test]
+fn list_reports_installed_external_extensions_without_hardcoding_them() {
+    let temp = tempfile::TempDir::new().unwrap();
+    write_test_extension(temp.path(), "lean-dup-vector", "#!/bin/sh\nexit 0\n");
+    write_test_extension(temp.path(), "lean-dup-audit", "#!/bin/sh\nexit 0\n");
+
+    let assert = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("PATH", path_with_extension_dir(temp.path()))
+        .arg("--list")
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(stdout.contains("lean-dup commands:"));
+    assert!(stdout.contains("  audit"));
+    assert!(stdout.contains("installed extensions:"));
+    assert!(stdout.contains("  vector"));
+    assert!(!stdout.contains("lean-dup-vector"));
+    assert!(!stdout.contains("lean-dup-audit"));
 }
 
 #[test]
