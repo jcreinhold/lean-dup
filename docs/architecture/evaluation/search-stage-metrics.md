@@ -136,3 +136,44 @@ Red Flag Review:
 - Conjoined methods: search generation, label parsing, and artifact rendering remain separate.
 - Hard-to-describe API: the artifact contract is one row per unordered pair plus raw stage denominators.
 - Implementation-detail comments: comments describe artifact and metric contracts, not storage or runtime mechanics.
+
+## 35O Vector Scorer Variants
+
+Hidden vector artifacts now measure ranking separately from candidate generation. Search reports vector-generated,
+symbolic-generated, merged-generated, ranked, and visible stages as before, but hidden artifacts also include scorer
+variant metrics for `symbolic-only`, `vector-evidence-only`, and `symbolic-plus-vector`.
+
+Design Note:
+
+- Hidden knowledge: search owns the conversion from nearest-neighbor facts to scorer features; eval owns denominators
+  and variant artifact rows.
+- Smallest public interface: scorer variant id, vector evidence feature version, and raw `found/total` stage metrics.
+- Non-leaking decisions: raw backend distance semantics, model-specific normalization, tokenizer details, model input
+  prefixes, vector-cache filenames, and database storage vocabulary do not appear in metrics.
+- Preserved capability: ordinary eval still reports symbolic metrics and does not request embeddings or vector indexes.
+- Discarded behavior: treating vector score as metadata that cannot affect ranking while asking validation whether
+  vector ranking helps.
+
+Design It Twice:
+
+- *Eval re-ranks from vector scores.* Rejected because it would create an eval-only ranking pipeline.
+- *Artifacts expose raw vector distances.* Rejected because it would couple metric interpretation to backend/model
+  mechanics.
+- *Search-owned vector evidence.* Chosen because scoring already belongs to search and eval can measure variants
+  without reconstructing private search policy.
+
+Variant metrics do not replace candidate-generation denominators. `vector_top_k_recall` answers whether vector search
+found a labeled pair. Variant `ranked_recall` and `visible_precision` answer whether a scorer placed generated pairs
+above hidden ranking and visibility thresholds. A vector-generated pair that stays invisible under `symbolic-only` but
+becomes visible under `symbolic-plus-vector` is ranking evidence, not candidate-generation evidence.
+
+Red Flag Review:
+
+- Shallow module: the metric surface records scorer behavior, not command success.
+- Pass-through wrapper: search owns feature conversion; eval records the result.
+- Temporal decomposition: the split follows ownership of scoring and denominators, not execution order.
+- Information leakage: metrics carry stable variant ids and feature versions, not backend/model details.
+- Special-general mixture: hidden vector scorer variants stay out of ordinary eval metrics.
+- Conjoined methods: generation, scoring, and validation remain separate surfaces.
+- Hard-to-describe API: variant id plus raw denominators.
+- Implementation-detail comments: comments describe metric meaning, not vector storage or runtime mechanics.

@@ -172,7 +172,7 @@ mod tests {
             ],
             visible_groups_found: 1,
             visible_groups_total: 2,
-            scoring: lean_dup_search::SearchScoringSummary::new(lean_dup_search::SearchScoringVariant::AllFeatures),
+            scoring: lean_dup_search::SearchScoringSummary::new(lean_dup_search::SearchScoringVariant::SymbolicOnly),
             semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary::default(),
             semantic_obligation_yield: Vec::new(),
             retrieval: SearchRetrievalObservation::default(),
@@ -205,7 +205,9 @@ mod tests {
                 pairs: vec![observed("Tiny.same_left", "Tiny.same_right", 1)],
                 visible_groups_found: 1,
                 visible_groups_total: 1,
-                scoring: lean_dup_search::SearchScoringSummary::new(lean_dup_search::SearchScoringVariant::AllFeatures),
+                scoring: lean_dup_search::SearchScoringSummary::new(
+                    lean_dup_search::SearchScoringVariant::SymbolicOnly,
+                ),
                 semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary::default(),
                 semantic_obligation_yield: Vec::new(),
                 retrieval: SearchRetrievalObservation::default(),
@@ -267,6 +269,7 @@ mod tests {
                 retrieval_feature_families: vec!["statement_fingerprint".to_owned()],
                 declaration_kinds: vec!["theorem".to_owned()],
                 evidence_mode: SearchEvidenceMode::Local,
+                vector_evidence: None,
                 structural_fingerprint_families: vec!["statement_fingerprint".to_owned()],
                 role_overlap: Vec::new(),
                 module_relation: SearchModuleRelation::SameModule {
@@ -279,7 +282,7 @@ mod tests {
             },
             scoring: lean_dup_search::SearchPairScoring {
                 version: "lean-dup.symbolic-scorer.v1",
-                variant: lean_dup_search::SearchScoringVariant::AllFeatures,
+                variant: lean_dup_search::SearchScoringVariant::SymbolicOnly,
                 total_score: 100.0,
                 component_scores: std::collections::BTreeMap::from([("statement_fingerprint".to_owned(), 100.0)]),
             },

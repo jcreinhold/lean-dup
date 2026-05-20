@@ -185,14 +185,14 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
             workspace: &workspace_rows,
             comparison_indexes: std::slice::from_ref(external),
             tracked_pairs: &tracked_pairs,
-            scoring_variant: SearchScoringVariant::AllFeatures,
+            scoring_variant: SearchScoringVariant::SymbolicOnly,
             vector_candidates: None,
         })?,
         None => observe_search(SearchObservationRequest {
             workspace: &workspace_rows,
             comparison_indexes: &[],
             tracked_pairs: &tracked_pairs,
-            scoring_variant: SearchScoringVariant::AllFeatures,
+            scoring_variant: SearchScoringVariant::SymbolicOnly,
             vector_candidates: None,
         })?,
     };
@@ -209,14 +209,14 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
                 workspace: &workspace_rows,
                 comparison_indexes: std::slice::from_ref(external),
                 tracked_pairs: &tracked_pairs,
-                scoring_variant: SearchScoringVariant::AllFeatures,
+                scoring_variant: SearchScoringVariant::SymbolicOnly,
                 vector_candidates: Some(vector_request),
             })?,
             None => observe_search(SearchObservationRequest {
                 workspace: &workspace_rows,
                 comparison_indexes: &[],
                 tracked_pairs: &tracked_pairs,
-                scoring_variant: SearchScoringVariant::AllFeatures,
+                scoring_variant: SearchScoringVariant::SymbolicOnly,
                 vector_candidates: Some(vector_request),
             })?,
         };
@@ -321,6 +321,7 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
             symbolic_baseline: &baseline_metrics,
             vector_metrics: &metrics,
             scorer_version: &scorer_version,
+            k_values: &k_values,
         })?)
     } else {
         None
@@ -465,7 +466,7 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
         .iter()
         .find_map(|run| run.scorer_version.clone())
         .unwrap_or_else(|| {
-            lean_dup_search::SearchScoringSummary::new(SearchScoringVariant::AllFeatures)
+            lean_dup_search::SearchScoringSummary::new(SearchScoringVariant::SymbolicOnly)
                 .version
                 .to_owned()
         });

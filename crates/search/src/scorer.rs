@@ -30,6 +30,9 @@ pub(crate) const DEFAULT_SCORER_CONFIG: ScorerConfig = ScorerConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SearchScoringVariant {
+    SymbolicOnly,
+    VectorEvidenceOnly,
+    SymbolicPlusVector,
     AllFeatures,
     NoRoleFeatures,
     NoConnectiveConclusionFeatures,
@@ -39,9 +42,11 @@ pub enum SearchScoringVariant {
 }
 
 impl SearchScoringVariant {
-    pub fn all() -> [Self; 6] {
+    pub fn all() -> [Self; 8] {
         [
-            Self::AllFeatures,
+            Self::SymbolicOnly,
+            Self::VectorEvidenceOnly,
+            Self::SymbolicPlusVector,
             Self::NoRoleFeatures,
             Self::NoConnectiveConclusionFeatures,
             Self::NoSourceModuleFeatures,
@@ -52,6 +57,9 @@ impl SearchScoringVariant {
 
     pub fn label(self) -> &'static str {
         match self {
+            Self::SymbolicOnly => "symbolic-only",
+            Self::VectorEvidenceOnly => "vector-evidence-only",
+            Self::SymbolicPlusVector => "symbolic-plus-vector",
             Self::AllFeatures => "all-features",
             Self::NoRoleFeatures => "no-role-features",
             Self::NoConnectiveConclusionFeatures => "no-connective-conclusion-features",
@@ -128,7 +136,7 @@ pub(crate) struct RankingScoreFacts {
 }
 
 pub(crate) fn default_summary() -> SearchScoringSummary {
-    SearchScoringSummary::new(SearchScoringVariant::AllFeatures)
+    SearchScoringSummary::new(SearchScoringVariant::SymbolicOnly)
 }
 
 pub(crate) fn thresholds() -> &'static ScorerThresholds {
@@ -142,7 +150,10 @@ pub(crate) fn score_observation(
     default_shown: bool,
 ) -> ScoredObservation {
     let scoring = score_features(features, variant);
-    if variant == SearchScoringVariant::AllFeatures {
+    if matches!(
+        variant,
+        SearchScoringVariant::AllFeatures | SearchScoringVariant::SymbolicOnly
+    ) {
         return ScoredObservation {
             ranked: default_ranked,
             shown: default_shown,
@@ -181,7 +192,11 @@ pub(crate) fn ranking_score_facts(
 pub(crate) fn score_features(features: &SearchPairFeatures, variant: SearchScoringVariant) -> SearchPairScoring {
     let mut components = BTreeMap::new();
     let weights = &DEFAULT_SCORER_CONFIG.weights;
-    if variant != SearchScoringVariant::SemanticEvidenceOnlyRerank {
+    let includes_symbolic = !matches!(
+        variant,
+        SearchScoringVariant::SemanticEvidenceOnlyRerank | SearchScoringVariant::VectorEvidenceOnly
+    );
+    if includes_symbolic {
         for family in &features.retrieval_feature_families {
             match family.as_str() {
                 "statement_fingerprint" => {
@@ -216,6 +231,12 @@ pub(crate) fn score_features(features: &SearchPairFeatures, variant: SearchScori
             add_component(&mut components, "static_evidence", weights.static_evidence);
         }
     }
+    if matches!(
+        variant,
+        SearchScoringVariant::VectorEvidenceOnly | SearchScoringVariant::SymbolicPlusVector
+    ) {
+        add_vector_components(&mut components, features);
+    }
     if features.semantic_evidence_state == SearchSemanticEvidenceState::Verified {
         add_component(&mut components, "semantic_evidence", weights.semantic_evidence);
     }
@@ -230,6 +251,28 @@ pub(crate) fn score_features(features: &SearchPairFeatures, variant: SearchScori
 
 fn add_component(components: &mut BTreeMap<String, f64>, family: &'static str, score: f64) {
     *components.entry(family.to_owned()).or_insert(0.0) += score;
+}
+
+fn add_vector_components(components: &mut BTreeMap<String, f64>, features: &SearchPairFeatures) {
+    let Some(evidence) = &features.vector_evidence else {
+        return;
+    };
+    let rank_score = match evidence.rank_bucket.as_str() {
+        "rank-1" => 24.0,
+        "rank-2-3" => 20.0,
+        "rank-4-10" => 12.0,
+        _ => 4.0,
+    };
+    let score_bucket_score = match evidence.score_bucket.as_str() {
+        "very-high" => 12.0,
+        "high" => 8.0,
+        "medium" => 4.0,
+        _ => 0.0,
+    };
+    add_component(components, "vector_rank", rank_score);
+    if score_bucket_score > 0.0 {
+        add_component(components, "vector_score_bucket", score_bucket_score);
+    }
 }
 
 fn has_contribution(candidate: &RetrievedCandidate, kind: &str) -> bool {
@@ -303,6 +346,32 @@ mod tests {
     }
 
     #[test]
+    fn vector_evidence_only_scores_stable_vector_facts() {
+        let mut features = features();
+        features.vector_evidence = Some(crate::pair_features::vector_evidence(0.94, 1));
+
+        let scored = score_observation(&features, SearchScoringVariant::VectorEvidenceOnly, true, false);
+
+        assert!(scored.ranked);
+        assert!(scored.shown);
+        assert_eq!(scored.scoring.component_scores.get("vector_rank"), Some(&24.0));
+        assert_eq!(scored.scoring.component_scores.get("vector_score_bucket"), Some(&12.0));
+        assert!(!scored.scoring.component_scores.contains_key("statement_fingerprint"));
+    }
+
+    #[test]
+    fn symbolic_plus_vector_combines_symbolic_and_vector_components() {
+        let mut features = features();
+        features.vector_evidence = Some(crate::pair_features::vector_evidence(0.84, 3));
+
+        let scored = score_observation(&features, SearchScoringVariant::SymbolicPlusVector, true, false);
+
+        assert!(scored.scoring.component_scores.contains_key("statement_fingerprint"));
+        assert_eq!(scored.scoring.component_scores.get("vector_rank"), Some(&20.0));
+        assert_eq!(scored.scoring.component_scores.get("vector_score_bucket"), Some(&8.0));
+    }
+
+    #[test]
     fn scorer_output_uses_stable_families_not_raw_payloads() {
         let json = serde_json::to_string(&score_features(&features(), SearchScoringVariant::AllFeatures)).unwrap();
 
@@ -329,6 +398,7 @@ mod tests {
             ],
             declaration_kinds: vec!["theorem".to_owned()],
             evidence_mode: SearchEvidenceMode::Static,
+            vector_evidence: None,
             structural_fingerprint_families: vec!["statement_fingerprint".to_owned()],
             role_overlap: Vec::new(),
             module_relation: SearchModuleRelation::SameModule {

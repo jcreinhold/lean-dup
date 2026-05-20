@@ -758,7 +758,7 @@ mod tests {
             ],
             visible_groups_found: 1,
             visible_groups_total: 2,
-            scoring: SearchScoringSummary::new(SearchScoringVariant::AllFeatures),
+            scoring: SearchScoringSummary::new(SearchScoringVariant::SymbolicOnly),
             semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary::default(),
             semantic_obligation_yield: Vec::new(),
             retrieval: SearchRetrievalObservation::default(),
@@ -809,6 +809,7 @@ mod tests {
                 retrieval_feature_families: vec!["statement_fingerprint".to_owned()],
                 declaration_kinds: vec!["theorem".to_owned()],
                 evidence_mode: SearchEvidenceMode::Local,
+                vector_evidence: None,
                 structural_fingerprint_families: vec!["statement_fingerprint".to_owned()],
                 role_overlap: Vec::new(),
                 module_relation: SearchModuleRelation::SameModule {
@@ -821,7 +822,7 @@ mod tests {
             },
             scoring: lean_dup_search::SearchPairScoring {
                 version: "lean-dup.symbolic-scorer.v1",
-                variant: SearchScoringVariant::AllFeatures,
+                variant: SearchScoringVariant::SymbolicOnly,
                 total_score: 1.0,
                 component_scores: BTreeMap::new(),
             },

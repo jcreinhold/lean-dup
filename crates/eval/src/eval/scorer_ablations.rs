@@ -99,7 +99,7 @@ mod tests {
             lean_dup_search::SearchSemanticRerankingSummary::default(),
             Vec::new(),
             vec![ScorerAblationVariantReport {
-                variant: SearchScoringVariant::AllFeatures,
+                variant: SearchScoringVariant::SymbolicOnly,
                 status: "ok".to_owned(),
                 semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary::default(),
                 semantic_obligation_yield: Vec::new(),
@@ -113,7 +113,7 @@ mod tests {
         let json = std::fs::read_to_string(temp.path().join(artifact)).unwrap();
 
         assert!(json.contains(SCORER_ABLATION_SCHEMA_VERSION));
-        assert!(json.contains("all-features"));
+        assert!(json.contains("symbolic-only"));
         assert!(json.contains("lean-dup.semantic-reranking.v1"));
         assert!(!json.contains("sqlite"));
         assert!(!json.contains("posting"));

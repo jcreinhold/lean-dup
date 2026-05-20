@@ -34,6 +34,7 @@ pub use observation::{
 };
 pub use pair_features::{
     SearchEvidenceMode, SearchModuleRelation, SearchPairFeatures, SearchRoleOverlap, SearchSemanticEvidenceState,
+    SearchVectorEvidence,
 };
 pub use scorer::{SearchPairScoring, SearchScoringSummary, SearchScoringVariant};
 pub use semantic_reranking::{

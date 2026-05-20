@@ -401,7 +401,7 @@ fn eval_hidden_search_dataset_mode_writes_feature_artifact() {
     assert_eq!(dataset["schema_version"], "lean-dup.search-dataset.v1");
     assert_eq!(dataset["suite"], "default");
     assert_eq!(dataset["scoring"]["version"], "lean-dup.symbolic-scorer.v1");
-    assert_eq!(dataset["scoring"]["variant"], "all-features");
+    assert_eq!(dataset["scoring"]["variant"], "symbolic-only");
     assert_eq!(
         dataset["semantic_reranking"]["version"],
         "lean-dup.semantic-reranking.v1"
@@ -629,9 +629,11 @@ fn eval_hidden_scorer_ablation_mode_writes_variant_artifact() {
     );
     assert!(ablations["semantic_obligation_yield"].is_array());
     let variants = ablations["variants"].as_array().unwrap();
-    assert_eq!(variants.len(), 6);
+    assert_eq!(variants.len(), 8);
     for expected in [
-        "all-features",
+        "symbolic-only",
+        "vector-evidence-only",
+        "symbolic-plus-vector",
         "no-role-features",
         "no-connective-conclusion-features",
         "no-source-module-features",

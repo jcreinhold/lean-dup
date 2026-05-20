@@ -171,6 +171,49 @@ precision, top-k saturation, vector-only positives, vector-only hard negatives, 
 hard negatives, merged-generated recall, ranked recall, visible precision, and visible hard-negative count. These
 metrics are artifact-local; Prompt 35O is responsible for testing vector score as hidden ranking evidence.
 
+### 35O vector score as search evidence
+
+Vector similarity is now a search-owned pair feature for hidden experiments, not inert artifact metadata. Search
+converts nearest-neighbor facts into stable vector evidence: feature version, score bucket, rank bucket, and bounded
+reciprocal-rank fact. The scorer consumes those stable facts; eval measures the resulting variants. Eval never
+reconstructs rank order from raw vector scores.
+
+Design Note:
+
+- Hidden knowledge: search owns vector evidence construction, scorer variants, and symbolic/vector merge policy;
+  embedding owns model/runtime behavior; vector-index owns nearest-neighbor mechanics and score conversion; eval owns
+  denominators and artifacts.
+- Smallest public interface: scorer variant id, vector evidence feature version, stable vector evidence facts, and raw
+  stage denominators.
+- Non-leaking decisions: backend distance conventions, database score semantics, model-specific normalization,
+  tokenizer/runtime details, model prefixes, cache filenames, and vector database layout stay below their owning crate
+  boundaries.
+- Preserved capability: default audit and ordinary eval continue to use the symbolic scorer and remain embedding-free.
+- Discarded behavior: recording vector similarity only as metadata while asking validation to infer whether vector
+  evidence would have helped ranking.
+
+Design It Twice:
+
+- *Eval adjusts ranks from vector similarities after search.* Rejected: eval would own a second ranking pipeline and
+  would need to understand vector score semantics.
+- *Expose raw vector distances and tune thresholds in artifacts.* Rejected: backend/model semantics would leak upward
+  and validation could optimize against storage details.
+- *Search converts vector similarity into stable pair features and hidden scorer variants.* Chosen: search already owns
+  pair features and ranking policy, so vector evidence enters the same abstraction as symbolic evidence.
+
+Hidden scorer variants:
+
+| Variant | Meaning |
+| --- | --- |
+| `symbolic-only` | current symbolic baseline; vector facts may be present but do not affect score |
+| `vector-evidence-only` | ranks hidden vector candidates using only stable vector evidence facts |
+| `symbolic-plus-vector` | combines symbolic feature facts with stable vector evidence facts |
+
+Vector-generated recall remains candidate-generation evidence. Ranked recall and visible precision are reported
+separately for each scorer variant, so validation can distinguish "vector found the pair" from "vector evidence ranked
+the pair well enough to be useful." The default scorer, thresholds, report JSON, semantic-probe policy, and CLI command
+names do not change.
+
 Cache-only missing model preparation is a skipped vector experiment, not an eval failure.
 The symbolic baseline remains in the artifact, and existing suite gates are evaluated
 against the symbolic baseline, not against experimental vector output.
@@ -284,3 +327,19 @@ Backend identity is architecture evidence only. References:
   stage metrics.
 - *Implementation-detail comments:* interface comments describe artifact facts and
   privacy constraints, not database or runtime mechanics.
+
+35O Red Flag Review:
+
+- *Shallow module:* vector evidence is real scorer input, not a report-only wrapper around a stored score.
+- *Pass-through wrapper:* search converts nearest-neighbor facts into buckets and rank facts instead of forwarding
+  backend score conventions.
+- *Temporal decomposition:* ranking evidence is owned by search because search owns scoring, not because it runs after
+  vector-index queries.
+- *Information leakage:* backend distances, model prefixes, tokenizer/runtime details, cache filenames, and database
+  layout remain below their owning crates.
+- *Special-general mixture:* vector evidence variants are hidden scorer variants; the default symbolic scorer remains
+  separate.
+- *Conjoined methods:* eval measures scorer variants but does not construct their scores.
+- *Hard-to-describe public API:* variant id plus vector evidence version plus raw denominators.
+- *Implementation-detail comments:* comments describe stable evidence and artifact facts, not backend or model
+  mechanics.

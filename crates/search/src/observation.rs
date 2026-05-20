@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use lean_dup_index::{HydratedDeclaration, OpenedIndex};
 
 use crate::Result;
-use crate::pair_features::{SearchPairFeatures, feature_families, pair_features};
+use crate::pair_features::{SearchPairFeatures, feature_families, pair_features, vector_evidence};
 use crate::retrieval::{
     CandidateExplanation, GeneratedPairEvidence, RetrievalDiagnostics, generated_pair_evidence, retrieve_candidates,
 };
@@ -245,7 +245,10 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
         pairs,
         visible_groups_found,
         visible_groups_total,
-        scoring: if request.scoring_variant == SearchScoringVariant::AllFeatures {
+        scoring: if matches!(
+            request.scoring_variant,
+            SearchScoringVariant::AllFeatures | SearchScoringVariant::SymbolicOnly
+        ) {
             default_summary()
         } else {
             SearchScoringSummary::new(request.scoring_variant)
@@ -262,7 +265,7 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
     })
 }
 
-/// Re-score one search observation with a fixed symbolic variant.
+/// Re-score one search observation with a fixed scorer variant.
 ///
 /// Evaluation uses this to run ablations without re-running retrieval or
 /// exposing scorer internals. Candidate generation facts remain unchanged;
@@ -271,20 +274,25 @@ pub fn rescore_observation(observation: &SearchObservation, variant: SearchScori
     if variant == observation.scoring.variant {
         return observation.clone();
     }
-    let pairs = observation
+    let mut pairs = observation
         .pairs
         .iter()
         .map(|pair| {
-            let scored = score_observation(&pair.features, variant, pair.ranked, pair.shown);
+            let candidate_rankable = if uses_vector_evidence(variant) {
+                pair.merged_generated
+            } else {
+                pair.ranked
+            };
+            let scored = score_observation(&pair.features, variant, candidate_rankable, pair.shown);
             let mut rescored = pair.clone();
             rescored.ranked = scored.ranked;
-            rescored.rank = scored.ranked.then_some(pair.rank.unwrap_or(usize::MAX));
             rescored.shown = scored.shown;
             rescored.survived_shown_filter = scored.survived_shown_filter;
             rescored.scoring = scored.scoring;
             rescored
         })
         .collect::<Vec<_>>();
+    rerank_pairs(&mut pairs);
     let visible_groups_found = pairs.iter().filter(|pair| pair.shown).count();
     SearchObservation {
         pairs,
@@ -295,6 +303,35 @@ pub fn rescore_observation(observation: &SearchObservation, variant: SearchScori
         semantic_obligation_yield: observation.semantic_obligation_yield.clone(),
         retrieval: observation.retrieval.clone(),
         embedding_documents: observation.embedding_documents.clone(),
+    }
+}
+
+fn uses_vector_evidence(variant: SearchScoringVariant) -> bool {
+    matches!(
+        variant,
+        SearchScoringVariant::VectorEvidenceOnly | SearchScoringVariant::SymbolicPlusVector
+    )
+}
+
+fn rerank_pairs(pairs: &mut [SearchObservedPair]) {
+    pairs.sort_by(|left, right| {
+        right
+            .scoring
+            .total_score
+            .partial_cmp(&left.scoring.total_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| left.rank.unwrap_or(usize::MAX).cmp(&right.rank.unwrap_or(usize::MAX)))
+            .then_with(|| left.left.cmp(&right.left))
+            .then_with(|| left.right.cmp(&right.right))
+    });
+    let mut next_rank = 1;
+    for pair in pairs {
+        if pair.ranked {
+            pair.rank = Some(next_rank);
+            next_rank += 1;
+        } else {
+            pair.rank = None;
+        }
     }
 }
 
@@ -478,6 +515,12 @@ fn merge_vector_candidates(
                 pair.merged_generated = pair.symbolic_generated || pair.vector_generated;
                 pair.vector_score = Some(f64::from(vector.score));
                 pair.vector_rank = Some(vector.rank);
+                pair.features.vector_evidence = Some(vector_evidence(f64::from(vector.score), vector.rank));
+                if !pair.feature_families.iter().any(|family| family == "vector_similarity") {
+                    pair.feature_families.push("vector_similarity".to_owned());
+                    pair.feature_families.sort();
+                    pair.feature_families.dedup();
+                }
                 pair.left_content_hash = Some(vector.anchor_content_hash.clone());
                 pair.right_content_hash = Some(vector.declaration_content_hash.clone());
             }
@@ -489,6 +532,7 @@ fn merge_vector_candidates(
         let feature_families = vec!["vector_similarity".to_owned()];
         let mut features = pair_features(anchor, &vector.declaration, &[]);
         features.retrieval_feature_families = feature_families.clone();
+        features.vector_evidence = Some(vector_evidence(f64::from(vector.score), vector.rank));
         let scored = score_observation(&features, variant, true, false);
         let observed = SearchObservedPair {
             left: anchor.qualified_name.clone(),
@@ -759,7 +803,7 @@ mod tests {
             workspace: &rows,
             comparison_indexes: &[],
             tracked_pairs: &tracked,
-            scoring_variant: SearchScoringVariant::AllFeatures,
+            scoring_variant: SearchScoringVariant::SymbolicOnly,
             vector_candidates: None,
         })
         .unwrap();
@@ -800,7 +844,7 @@ mod tests {
                 score: 0.95,
                 rank: 1,
             }],
-            SearchScoringVariant::AllFeatures,
+            SearchScoringVariant::SymbolicOnly,
         );
 
         assert_eq!(count, 1);
@@ -825,7 +869,7 @@ mod tests {
             workspace: &rows,
             comparison_indexes: &[],
             tracked_pairs: &[],
-            scoring_variant: SearchScoringVariant::AllFeatures,
+            scoring_variant: SearchScoringVariant::SymbolicOnly,
             vector_candidates: None,
         })
         .unwrap();
@@ -850,7 +894,7 @@ mod tests {
             workspace: &rows,
             comparison_indexes: &[],
             tracked_pairs: &[],
-            scoring_variant: SearchScoringVariant::AllFeatures,
+            scoring_variant: SearchScoringVariant::SymbolicOnly,
             vector_candidates: None,
         })
         .unwrap();

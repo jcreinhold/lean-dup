@@ -3,14 +3,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use lean_dup_search::{
-    SearchEmbeddingDocumentPolicy, SearchObservation, SearchObservedPair, SearchVectorAcquisitionPolicy,
-    SearchVectorCandidateRequest, SearchVectorCandidateStatus, SearchVectorCandidateSummary,
-    SearchVectorEligibilityPolicy,
+    SearchEmbeddingDocumentPolicy, SearchObservation, SearchObservedPair, SearchScoringVariant,
+    SearchVectorAcquisitionPolicy, SearchVectorCandidateRequest, SearchVectorCandidateStatus,
+    SearchVectorCandidateSummary, SearchVectorEligibilityPolicy, rescore_observation,
 };
 use serde::Serialize;
 
 use crate::eval::labels::{GoldLabelFact, GoldLabels, LabelFactSource, LabelPolarity, TypedGoldLabel};
-use crate::eval::scoring::{CountMetric, EvaluationMetrics, GoldPair};
+use crate::eval::scoring::{
+    CountMetric, EvaluationMetrics, GoldPair, ObservedPair, ObservedRun, TimingMetrics, score_run,
+};
 use crate::{Error, Result};
 
 pub const VECTOR_SEARCH_SCHEMA_VERSION: &str = "lean-dup.vector-search.v2";
@@ -42,6 +44,7 @@ pub(crate) struct VectorSearchReportRun<'a> {
     pub symbolic_baseline: &'a EvaluationMetrics,
     pub vector_metrics: &'a EvaluationMetrics,
     pub scorer_version: &'a str,
+    pub k_values: &'a [usize],
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -57,9 +60,18 @@ pub(crate) struct VectorSearchReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vector_search: Option<EvaluationMetrics>,
     pub vector_stage_metrics: VectorStageMetrics,
+    pub scorer_variants: Vec<VectorScorerVariantReport>,
     pub pairs: Vec<VectorSearchPairReport>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<VectorSearchChildReport>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub(crate) struct VectorScorerVariantReport {
+    pub scorer_variant_id: String,
+    pub vector_feature_version: String,
+    pub metrics: EvaluationMetrics,
+    pub vector_stage_metrics: VectorStageMetrics,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -162,6 +174,7 @@ pub(crate) fn report(run: VectorSearchReportRun<'_>) -> Result<VectorSearchArtif
         symbolic_baseline: run.symbolic_baseline.clone(),
         vector_search: metrics.clone(),
         vector_stage_metrics: vector_stage_metrics(run.labels, run.observation),
+        scorer_variants: scorer_variant_reports(&run),
         pairs: pair_reports(run.labels, run.observation),
         children: Vec::new(),
     };
@@ -203,6 +216,7 @@ pub(crate) fn aggregate(
         symbolic_baseline: symbolic_baseline.clone(),
         vector_search: None,
         vector_stage_metrics: VectorStageMetrics::default(),
+        scorer_variants: Vec::new(),
         pairs: Vec::new(),
         children,
     };
@@ -228,6 +242,81 @@ pub(crate) fn child_report(
         artifact,
         metrics,
     }
+}
+
+fn scorer_variant_reports(run: &VectorSearchReportRun<'_>) -> Vec<VectorScorerVariantReport> {
+    if run.observation.retrieval.vector_candidates.status != SearchVectorCandidateStatus::Ok {
+        return Vec::new();
+    }
+    [
+        SearchScoringVariant::SymbolicOnly,
+        SearchScoringVariant::VectorEvidenceOnly,
+        SearchScoringVariant::SymbolicPlusVector,
+    ]
+    .into_iter()
+    .map(|variant| {
+        let observation = if variant == run.observation.scoring.variant {
+            run.observation.clone()
+        } else {
+            rescore_observation(run.observation, variant)
+        };
+        let observed = ObservedRun {
+            suite: run.suite.to_owned(),
+            pairs: observed_pairs(&observation),
+            visible_groups: CountMetric {
+                found: observation.visible_groups_found,
+                total: observation.visible_groups_total,
+            },
+            probe_unavailable: CountMetric { found: 0, total: 0 },
+            semantic_verification: run.vector_metrics.stage_metrics.semantic_verification.clone(),
+            timings: TimingMetrics {
+                index_load_ms: run.vector_metrics.timings.index_load_ms,
+                retrieval_ms: 0,
+                probe_ms: run.vector_metrics.timings.probe_ms,
+                total_ms: 0,
+            },
+            peak_memory_bytes: run.vector_metrics.peak_memory_bytes,
+        };
+        let metrics = score_run(run.labels, &observed, run.k_values);
+        VectorScorerVariantReport {
+            scorer_variant_id: variant.label().to_owned(),
+            vector_feature_version: vector_feature_version(&observation),
+            vector_stage_metrics: vector_stage_metrics(run.labels, &observation),
+            metrics,
+        }
+    })
+    .collect()
+}
+
+fn vector_feature_version(observation: &SearchObservation) -> String {
+    observation
+        .pairs
+        .iter()
+        .filter_map(|pair| pair.features.vector_evidence.as_ref())
+        .map(|evidence| evidence.version.clone())
+        .next()
+        .unwrap_or_else(|| "none".to_owned())
+}
+
+fn observed_pairs(output: &SearchObservation) -> Vec<ObservedPair> {
+    output
+        .pairs
+        .iter()
+        .map(|pair| ObservedPair {
+            pair: GoldPair::new(pair.left.clone(), pair.right.clone()),
+            generated: pair.generated,
+            symbolic_generated: pair.symbolic_generated,
+            vector_generated: pair.vector_generated,
+            merged_generated: pair.merged_generated,
+            ranked: pair.ranked,
+            generation_policy: pair.generation_policy.clone(),
+            rank: pair.rank,
+            shown: pair.shown,
+            origin: pair.origin.clone(),
+            feature_families: pair.feature_families.clone(),
+            survived_shown_filter: pair.survived_shown_filter,
+        })
+        .collect()
 }
 
 fn pair_reports(labels: &GoldLabels, observation: &SearchObservation) -> Vec<VectorSearchPairReport> {
@@ -615,16 +704,17 @@ pub(crate) fn write_default_artifact(repo_root: &Path, report: &VectorSearchRepo
 mod tests {
     use rustc_hash::FxHashSet;
 
-    use super::{pair_reports, vector_stage_metrics};
+    use super::{VectorSearchReportRun, pair_reports, scorer_variant_reports, vector_stage_metrics};
     use crate::eval::labels::{
         AdjudicationSource, GoldLabelFact, GoldLabels, LabelConfidence, LabelFactSource, LabelPolarity, MatchClass,
         TypedGoldLabel,
     };
     use crate::eval::scoring::GoldPair;
+    use crate::eval::scoring::{CountMetric, EvaluationMetrics, TimingMetrics};
     use lean_dup_search::{
         SearchEmbeddingDocument, SearchEmbeddingDocuments, SearchEvidenceMode, SearchModuleRelation, SearchObservation,
         SearchObservedPair, SearchPairFeatures, SearchRetrievalObservation, SearchScoringSummary, SearchScoringVariant,
-        SearchSemanticEvidenceState, SearchVectorCandidateSummary,
+        SearchSemanticEvidenceState, SearchVectorCandidateStatus, SearchVectorCandidateSummary, SearchVectorEvidence,
     };
 
     #[test]
@@ -766,6 +856,54 @@ mod tests {
         assert_eq!(metrics.visible_precision.total, 1);
     }
 
+    #[test]
+    fn scorer_variant_reports_measure_vector_evidence_separately() {
+        let labels = GoldLabels {
+            suite: "unit".to_owned(),
+            positives: FxHashSet::from_iter([GoldPair::new("A", "B")]),
+            hard_negatives: FxHashSet::default(),
+            typed_pairs: Vec::new(),
+            label_facts: Vec::new(),
+        };
+        let mut observation = observation(vec![observed(
+            "A",
+            "B",
+            Some(1),
+            false,
+            false,
+            true,
+            Some(0.94),
+            Some(1),
+            "vector",
+        )]);
+        observation.retrieval.vector_candidates.status = SearchVectorCandidateStatus::Ok;
+        let metrics = metrics();
+
+        let reports = scorer_variant_reports(&VectorSearchReportRun {
+            repo_root: std::path::Path::new("."),
+            suite: "unit",
+            labels: &labels,
+            observation: &observation,
+            symbolic_baseline: &metrics,
+            vector_metrics: &metrics,
+            scorer_version: "lean-dup.symbolic-scorer.v1",
+            k_values: &[1],
+        });
+
+        assert_eq!(reports.len(), 3);
+        let symbolic = reports
+            .iter()
+            .find(|report| report.scorer_variant_id == "symbolic-only")
+            .expect("symbolic variant");
+        let vector_only = reports
+            .iter()
+            .find(|report| report.scorer_variant_id == "vector-evidence-only")
+            .expect("vector variant");
+        assert_eq!(symbolic.metrics.shown_queue_precision.total, 0);
+        assert_eq!(vector_only.metrics.shown_queue_precision.found, 1);
+        assert_eq!(vector_only.vector_feature_version, "lean-dup.vector-evidence.v1");
+    }
+
     fn empty_labels() -> GoldLabels {
         GoldLabels {
             suite: "unit".to_owned(),
@@ -791,7 +929,7 @@ mod tests {
             pairs,
             visible_groups_found: 0,
             visible_groups_total: 0,
-            scoring: SearchScoringSummary::new(SearchScoringVariant::AllFeatures),
+            scoring: SearchScoringSummary::new(SearchScoringVariant::SymbolicOnly),
             semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary::default(),
             semantic_obligation_yield: Vec::new(),
             retrieval: SearchRetrievalObservation::default(),
@@ -851,6 +989,12 @@ mod tests {
                 retrieval_feature_families: Vec::new(),
                 declaration_kinds: vec!["theorem".to_owned()],
                 evidence_mode: SearchEvidenceMode::Local,
+                vector_evidence: vector_score.zip(vector_rank).map(|(score, rank)| SearchVectorEvidence {
+                    version: "lean-dup.vector-evidence.v1".to_owned(),
+                    score_bucket: if score >= 0.90 { "very-high" } else { "high" }.to_owned(),
+                    rank_bucket: if rank == 1 { "rank-1" } else { "rank-2-3" }.to_owned(),
+                    reciprocal_rank_micros: (1_000_000usize / rank.max(1)) as u32,
+                }),
                 structural_fingerprint_families: Vec::new(),
                 role_overlap: Vec::new(),
                 module_relation: SearchModuleRelation::SameModule {
@@ -863,7 +1007,7 @@ mod tests {
             },
             scoring: lean_dup_search::SearchPairScoring {
                 version: "lean-dup.symbolic-scorer.v1",
-                variant: SearchScoringVariant::AllFeatures,
+                variant: SearchScoringVariant::SymbolicOnly,
                 total_score: 0.0,
                 component_scores: std::collections::BTreeMap::new(),
             },
@@ -885,6 +1029,21 @@ mod tests {
             confidence: LabelConfidence::High,
             semantic_verification_required: false,
             static_evidence_acceptable: true,
+        }
+    }
+
+    fn metrics() -> EvaluationMetrics {
+        EvaluationMetrics {
+            suite: "unit".to_owned(),
+            recall: Vec::new(),
+            shown_queue_precision: CountMetric::default(),
+            hard_negative_hits: CountMetric::default(),
+            visible_groups: CountMetric::default(),
+            probe_unavailable: CountMetric::default(),
+            stage_metrics: crate::eval::stage_metrics::SearchStageMetrics::default(),
+            candidate_count: 0,
+            timings: TimingMetrics::default(),
+            peak_memory_bytes: None,
         }
     }
 }
