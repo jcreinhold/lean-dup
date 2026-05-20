@@ -149,6 +149,22 @@ MiniLM/Candle rerank artifact is kept only as historical negative evidence in
 [embedding-validation.md](embedding-validation.md). The current BGE-small/FastEmbed
 profile is what later vector-search work measures.
 
+## 35T Model and Format Selection
+
+The current model-selection decision lives in
+[embedding-model-selection.md](embedding-model-selection.md). Prompt 35U should keep
+`bge-small-en-v1.5` as the default hidden baseline, add only the same-family
+`bge-base-en-v1.5` profile, and add the role-format variants `symmetric-document` and
+`asymmetric-query-document`.
+
+That decision is deliberately narrow. It tests two concrete risks without exposing model
+runtime details outside this crate: BGE-small may be underpowered for semantic declaration
+documents, and the current query/document wrapping may be wrong for declaration-to-
+declaration retrieval. Search, eval, report, and CLI should see only stable profile ids,
+role-format ids, dimensions, model/cache/runtime facts, and validation denominators.
+FastEmbed enum names, prefix strings, ONNX/ORT details, tokenizer files, model paths, and
+feature flags remain private implementation details of `lean-dup-embedding`.
+
 ## Red-flag checklist
 
 - *Shallow module:* the public surface is a text-embedding capability with stable

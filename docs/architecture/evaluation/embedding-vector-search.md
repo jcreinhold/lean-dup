@@ -32,6 +32,14 @@ query a persisted declaration-vector corpus while reporting stable corpus/build/
 facts); search-workflow stage counters (vector-generated, symbolic-generated,
 merged-generated, ranked, visible).
 
+Model/profile experiments are selected in
+[embedding-model-selection.md](embedding-model-selection.md), not by search or eval. The
+35T decision keeps the candidate matrix small: BGE-small as the hidden baseline, BGE-base
+as the only additional local CPU profile for capacity ablation, and two profile-private
+role-format variants. Search/eval/report artifacts may record profile id, role-format id,
+dimension, model/cache/runtime facts, and denominators; they must not record FastEmbed
+enum names, model prefixes, ONNX/ORT details, tokenizer files, or model paths.
+
 Decisions that do not cross those boundaries: tokenizer mechanics, pooling, normalization,
 model-file layout, backend names, persistence format, ANN parameters, database cache
 layout, raw declaration-document text, vector-cache filenames, and vector-database query
