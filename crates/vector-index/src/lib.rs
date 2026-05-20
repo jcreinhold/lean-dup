@@ -273,7 +273,7 @@ mod tests {
             source_corpus_fingerprint: "fixture-source".to_owned(),
             embedding_model_profile_id: "bge-small-en-v1.5".to_owned(),
             embedding_model_fingerprint: "fixture-model".to_owned(),
-            document_policy_id: "name-and-formal-statement".to_owned(),
+            document_policy_id: "name-and-statement".to_owned(),
             document_policy_version: "lean-dup.embedding-document.v1".to_owned(),
             vector_dimension: 2,
             normalization: "l2".to_owned(),

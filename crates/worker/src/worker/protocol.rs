@@ -144,6 +144,8 @@ struct DeclarationPayload {
     modifiers: Vec<String>,
     source_span: Option<SourceSpan>,
     statement_text: String,
+    docstring_text: Option<String>,
+    definition_body_summary: Option<String>,
     status_flags: Vec<String>,
 }
 
@@ -434,6 +436,8 @@ impl From<DeclarationPayload> for DeclarationRow {
             modifiers: payload.modifiers,
             source_span: payload.source_span,
             statement_text: payload.statement_text,
+            docstring_text: payload.docstring_text,
+            definition_body_summary: payload.definition_body_summary,
             status_flags: payload.status_flags,
         }
     }

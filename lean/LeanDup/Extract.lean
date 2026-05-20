@@ -15,7 +15,7 @@ open Lean
 open Lean.Meta
 
 /-- Semantic algorithm marker for declaration extraction rows. -/
-def version : String := "extract.declarations.v1"
+def version : String := "extract.declarations.v2"
 
 /-- One requested Lean module and the origin label Rust wants attached to its rows. -/
 structure ModuleSpec where
@@ -237,9 +237,22 @@ def AcceptedDeclaration.declarationId (decl : AcceptedDeclaration) : String :=
 private def statementText (kind displayName typeText : String) : String :=
   s!"{kind} {displayName} : {typeText}"
 
+private def definitionBody? : ConstantInfo → Option Expr
+  | .defnInfo info => some info.value
+  | _ => none
+
+private def maxDefinitionBodyChars : Nat := 4000
+
+private def boundedSemanticText (text : String) : String :=
+  let normalized := text
+  if normalized.length <= maxDefinitionBodyChars then
+    normalized
+  else
+    (normalized.take maxDefinitionBodyChars).toString ++ " ..."
+
 private def rowPayload (options : Options) (moduleSpec : ModuleSpec) (declName : Name)
     (constInfo : ConstantInfo) (generated : Bool) (range? : Option DeclarationRanges)
-    (typeText : String) : Json :=
+    (typeText : String) (docString? : Option String) (definitionBodySummary? : Option String) : Json :=
   let kind := declarationKind constInfo
   let vis := visibility declName
   let sourceSpan? := sourceSpanJson? options moduleSpec range?
@@ -254,6 +267,8 @@ private def rowPayload (options : Options) (moduleSpec : ModuleSpec) (declName :
     , ("modifiers", modifiersJson vis)
     , ("source_span", sourceSpan?.getD Json.null)
     , ("statement_text", Json.str (statementText kind (displayName declName) typeText))
+    , ("docstring_text", docString?.map Json.str |>.getD Json.null)
+    , ("definition_body_summary", definitionBodySummary?.map Json.str |>.getD Json.null)
     , ("status_flags", statusFlagsJson generated sourceSpan?)
     ]
 
@@ -305,6 +320,13 @@ feature rows emitted by `LeanDup.Features`.
 -/
 def rowPayloadFromAccepted (options : Options) (decl : AcceptedDeclaration) : MetaM Json := do
   let typeText := (← ppExpr decl.constInfo.type).pretty
+  let docString? ← findDocString? (← getEnv) decl.declName (includeBuiltin := false)
+  let definitionBodySummary? ←
+    match definitionBody? decl.constInfo with
+    | some body =>
+        let bodyText := (← ppExpr body).pretty
+        pure <| some (boundedSemanticText bodyText)
+    | none => pure none
   pure <|
     rowPayload
       options
@@ -314,6 +336,8 @@ def rowPayloadFromAccepted (options : Options) (decl : AcceptedDeclaration) : Me
       decl.generated
       decl.range?
       typeText
+      (docString?.map boundedSemanticText)
+      definitionBodySummary?
 
 private def collectRows (options : Options) (declarations : Array AcceptedDeclaration) :
     MetaM (Array Json) := do

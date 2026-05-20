@@ -278,6 +278,8 @@ pub struct DeclarationRow {
     pub modifiers: Vec<String>,
     pub source_span: Option<SourceSpan>,
     pub statement_text: String,
+    pub docstring_text: Option<String>,
+    pub definition_body_summary: Option<String>,
     pub status_flags: Vec<String>,
 }
 

@@ -1048,16 +1048,22 @@ mod tests {
             semantic_obligation_yield: Vec::new(),
             retrieval: SearchRetrievalObservation::default(),
             embedding_documents: SearchEmbeddingDocuments {
-                policy_id: "name-and-formal-statement".to_owned(),
+                policy_id: "name-and-statement".to_owned(),
                 policy_version: "test".to_owned(),
+                content_availability: lean_dup_search::SearchEmbeddingContentAvailability {
+                    total: 12,
+                    with_docstring: 0,
+                    with_definition_body_summary: 0,
+                },
                 documents: ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"]
                     .into_iter()
                     .map(|name| SearchEmbeddingDocument {
                         declaration_name: name.to_owned(),
                         module_name: "Test".to_owned(),
                         declaration_kind: "theorem".to_owned(),
-                        normalized_formal_statement: "hidden".to_owned(),
-                        informal_text: None,
+                        normalized_statement: "hidden".to_owned(),
+                        docstring_text: None,
+                        definition_body_summary: None,
                         content_hash: format!("hash-{name}"),
                     })
                     .collect(),

@@ -40,10 +40,53 @@ or vector-index work. A `broad` policy may include normally excluded declaration
 named experiment, but artifacts must record that choice.
 
 Eligibility is not document policy. Eligibility decides whether a declaration can be a
-query or corpus row. Document policy decides whether the embedded text is a formal
-statement, name plus formal statement, or another named text selection. Embedding still
-owns model-specific wrapping such as query/document prefixes; vector-index still owns
-persistence and nearest-neighbor mechanics.
+query or corpus row. Document policy decides which stable declaration facts are selected
+for embedding. Embedding still owns model-specific wrapping such as query/document
+prefixes; vector-index still owns persistence and nearest-neighbor mechanics.
+
+## Semantic document policy
+
+Search owns semantic document construction for hidden vector experiments. Lean worker and
+index expose stable declaration facts: name, module, kind, statement/signature text,
+optional docstring text, optional definition body summary, visibility/generated facts,
+and content hashes. Search selects text from those facts and sends plain text plus an
+embedding role to `lean-dup-embedding`. Embedding must not learn Lean actionability,
+definition-body policy, proof-body exclusions, retrieval keys, or worker/index row shape.
+
+Design Note: this document owns the candidate-generation observation vocabulary and the
+search-owned semantic-document policy. The smallest public interface is policy ids,
+policy versions, availability counters, content hashes, and stage denominators. Backend
+names, model prefixes, tokenizer/runtime details, raw declaration text, final model input
+strings, source snippets, worker rows, retrieval keys, and database vocabulary must not
+leak into eval/report artifacts. The default symbolic audit remains unchanged. The
+discarded behavior is embedding a weak ad hoc string while preserving policy names that
+claim unavailable informal content.
+
+Design It Twice: keeping name plus statement is too weak for definitions; letting
+embedding assemble Lean-aware inputs leaks duplicate-search policy into the model runtime
+crate; search-owned policies over worker/index declaration facts are deeper because each
+volatile decision has one owner.
+
+Current policies:
+
+| Policy | Search-selected content |
+| --- | --- |
+| `statement` | statement/signature only |
+| `name-and-statement` | declaration name plus statement/signature |
+| `definition-aware` | name plus statement/signature plus definition body summary when available |
+| `docstring-augmented` | docstring when available, then name plus statement/signature, plus definition body summary when available |
+
+The worker/index boundary supplies real optional docstring and definition-summary facts.
+Search records content availability counters in hidden vector facts. Theorem proof bodies
+are not embedded by default. A future proof-body experiment must be a named non-default
+policy with its own privacy and quality checks.
+
+Red Flag Review: the document policy surface is not a pass-through wrapper because it
+selects content, hashes it, and records availability counters. It avoids temporal
+decomposition by assigning content facts to worker/index, policy to search, and role
+wrapping to embedding. It avoids information leakage by keeping raw content and model
+formatting out of serialized artifacts. The API is describable as policy, counters,
+hashes, and stage facts.
 
 Hidden vector artifacts record:
 

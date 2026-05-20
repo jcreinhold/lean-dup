@@ -91,16 +91,17 @@ snapshot hashes, blob paths, or individual model filenames.
 `lean-dup-search` constructs declaration documents from search-owned facts. It must not
 download models, read model environment variables, know tokenizer metadata or model
 prefixes, or write embedding artifacts. The default vector-search policy is
-`name-and-formal-statement`. Other stable policies: `formal-statement`,
-`informal-or-formal`. The default excludes retrieval feature families,
-ranking facts, semantic obligations, SQLite details, and worker protocol fields.
+`name-and-statement`. Other stable policies are `statement`, `definition-aware`, and
+`docstring-augmented`. The default excludes retrieval feature families, ranking facts,
+semantic obligations, SQLite details, proof bodies, and worker protocol fields.
 
 A search-owned declaration document carries: declaration name, module name, declaration
-kind, normalized formal statement text, optional informal/docstring text (when a future
-worker/index surface provides it), stable document-policy id and version, and a
+kind, normalized statement/signature text, optional docstring text, optional definition
+body summary, stable document-policy id and version, content availability counters, and a
 privacy-safe content hash. Search keeps these out of normal JSON. Hidden eval may ask
-search for plain document text; artifacts record policy ids and content hashes rather than
-raw formal statements or final model-formatted input.
+search for plain document text; artifacts record policy ids, availability counters, and
+content hashes rather than raw statements, body text, docstrings, or final model-formatted
+input.
 
 `lean-dup-embedding` owns role wrapping. Its public request names `document` or `query`;
 the profile decides whether the role requires a prefix or instruction. Search, eval,

@@ -210,7 +210,7 @@ pub struct EvalArgs {
     #[arg(long = "vector-corpus-cache-root", hide = true)]
     pub vector_corpus_cache_root: Option<PathBuf>,
 
-    #[arg(long = "vector-document-policy", hide = true, value_enum, default_value_t = CliVectorDocumentPolicy::NameAndFormalStatement)]
+    #[arg(long = "vector-document-policy", hide = true, value_enum, default_value_t = CliVectorDocumentPolicy::NameAndStatement)]
     pub vector_document_policy: CliVectorDocumentPolicy,
 
     #[arg(long = "vector-eligibility", hide = true, value_enum, default_value_t = CliVectorEligibilityPolicy::ActionablePublicStatement)]
@@ -319,9 +319,10 @@ pub enum CliEmbeddingAcquisitionPolicy {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum CliVectorDocumentPolicy {
-    FormalStatement,
-    NameAndFormalStatement,
-    InformalOrFormal,
+    Statement,
+    NameAndStatement,
+    DefinitionAware,
+    DocstringAugmented,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -333,9 +334,10 @@ pub enum CliVectorEligibilityPolicy {
 impl From<CliVectorDocumentPolicy> for SearchEmbeddingDocumentPolicy {
     fn from(value: CliVectorDocumentPolicy) -> Self {
         match value {
-            CliVectorDocumentPolicy::FormalStatement => Self::FormalStatement,
-            CliVectorDocumentPolicy::NameAndFormalStatement => Self::NameAndFormalStatement,
-            CliVectorDocumentPolicy::InformalOrFormal => Self::InformalOrFormal,
+            CliVectorDocumentPolicy::Statement => Self::Statement,
+            CliVectorDocumentPolicy::NameAndStatement => Self::NameAndStatement,
+            CliVectorDocumentPolicy::DefinitionAware => Self::DefinitionAware,
+            CliVectorDocumentPolicy::DocstringAugmented => Self::DocstringAugmented,
         }
     }
 }

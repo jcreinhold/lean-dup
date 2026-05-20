@@ -77,6 +77,7 @@ pub struct SearchRetrievalObservation {
 pub struct SearchEmbeddingDocuments {
     pub policy_id: String,
     pub policy_version: String,
+    pub content_availability: SearchEmbeddingContentAvailability,
     pub documents: Vec<SearchEmbeddingDocument>,
 }
 
@@ -86,9 +87,17 @@ impl Default for SearchEmbeddingDocuments {
         Self {
             policy_id: policy.id().to_owned(),
             policy_version: SEARCH_EMBEDDING_DOCUMENT_POLICY_VERSION.to_owned(),
+            content_availability: SearchEmbeddingContentAvailability::default(),
             documents: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct SearchEmbeddingContentAvailability {
+    pub total: usize,
+    pub with_docstring: usize,
+    pub with_definition_body_summary: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,8 +105,9 @@ pub struct SearchEmbeddingDocument {
     pub declaration_name: String,
     pub module_name: String,
     pub declaration_kind: String,
-    pub normalized_formal_statement: String,
-    pub informal_text: Option<String>,
+    pub normalized_statement: String,
+    pub docstring_text: Option<String>,
+    pub definition_body_summary: Option<String>,
     pub content_hash: String,
 }
 
@@ -110,18 +120,20 @@ pub struct SearchEmbeddingDocumentInput {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SearchEmbeddingDocumentPolicy {
-    FormalStatement,
+    Statement,
     #[default]
-    NameAndFormalStatement,
-    InformalOrFormal,
+    NameAndStatement,
+    DefinitionAware,
+    DocstringAugmented,
 }
 
 impl SearchEmbeddingDocumentPolicy {
     pub fn id(self) -> &'static str {
         match self {
-            Self::FormalStatement => "formal-statement",
-            Self::NameAndFormalStatement => "name-and-formal-statement",
-            Self::InformalOrFormal => "informal-or-formal",
+            Self::Statement => "statement",
+            Self::NameAndStatement => "name-and-statement",
+            Self::DefinitionAware => "definition-aware",
+            Self::DocstringAugmented => "docstring-augmented",
         }
     }
 }
@@ -129,7 +141,7 @@ impl SearchEmbeddingDocumentPolicy {
 impl SearchEmbeddingDocuments {
     pub fn text_inputs(&self) -> Vec<SearchEmbeddingDocumentInput> {
         let policy = SearchEmbeddingDocumentPolicy::from_id(&self.policy_id)
-            .unwrap_or(SearchEmbeddingDocumentPolicy::NameAndFormalStatement);
+            .unwrap_or(SearchEmbeddingDocumentPolicy::NameAndStatement);
         self.documents
             .iter()
             .map(|document| SearchEmbeddingDocumentInput {
@@ -351,6 +363,7 @@ fn embedding_documents(candidate_sets: &[crate::retrieval::CandidateSet]) -> Sea
     SearchEmbeddingDocuments {
         policy_id: policy.id().to_owned(),
         policy_version: SEARCH_EMBEDDING_DOCUMENT_POLICY_VERSION.to_owned(),
+        content_availability: content_availability(by_name.values()),
         documents: by_name.into_values().collect(),
     }
 }
@@ -366,6 +379,7 @@ pub(crate) fn embedding_documents_for_declarations_with_policy(
     SearchEmbeddingDocuments {
         policy_id: policy.id().to_owned(),
         policy_version: SEARCH_EMBEDDING_DOCUMENT_POLICY_VERSION.to_owned(),
+        content_availability: content_availability(documents.iter()),
         documents,
     }
 }
@@ -374,17 +388,42 @@ fn embedding_document_for(
     declaration: &HydratedDeclaration,
     policy: SearchEmbeddingDocumentPolicy,
 ) -> SearchEmbeddingDocument {
-    let normalized_formal_statement = normalize_statement(&declaration.statement_text);
+    let normalized_statement = normalize_statement(&declaration.statement_text);
     let mut document = SearchEmbeddingDocument {
         declaration_name: declaration.qualified_name.clone(),
         module_name: declaration.module.clone(),
         declaration_kind: declaration.kind.clone(),
-        normalized_formal_statement,
-        informal_text: None,
+        normalized_statement,
+        docstring_text: declaration.docstring_text.as_deref().map(normalize_statement),
+        definition_body_summary: declaration.definition_body_summary.as_deref().map(normalize_statement),
         content_hash: String::new(),
     };
     document.content_hash = content_hash_for(&document, policy);
     document
+}
+
+fn content_availability<'a>(
+    documents: impl IntoIterator<Item = &'a SearchEmbeddingDocument>,
+) -> SearchEmbeddingContentAvailability {
+    let mut availability = SearchEmbeddingContentAvailability::default();
+    for document in documents {
+        availability.total += 1;
+        if document
+            .docstring_text
+            .as_deref()
+            .is_some_and(|text| !text.trim().is_empty())
+        {
+            availability.with_docstring += 1;
+        }
+        if document
+            .definition_body_summary
+            .as_deref()
+            .is_some_and(|text| !text.trim().is_empty())
+        {
+            availability.with_definition_body_summary += 1;
+        }
+    }
+    availability
 }
 
 fn normalize_statement(statement: &str) -> String {
@@ -393,19 +432,44 @@ fn normalize_statement(statement: &str) -> String {
 
 fn document_text(document: &SearchEmbeddingDocument, policy: SearchEmbeddingDocumentPolicy) -> String {
     match policy {
-        SearchEmbeddingDocumentPolicy::FormalStatement => document.normalized_formal_statement.clone(),
-        SearchEmbeddingDocumentPolicy::NameAndFormalStatement => {
-            format!(
-                "{}\n{}",
-                document.declaration_name, document.normalized_formal_statement
-            )
+        SearchEmbeddingDocumentPolicy::Statement => document.normalized_statement.clone(),
+        SearchEmbeddingDocumentPolicy::NameAndStatement => {
+            format!("{}\n{}", document.declaration_name, document.normalized_statement)
         }
-        SearchEmbeddingDocumentPolicy::InformalOrFormal => document
-            .informal_text
-            .as_deref()
-            .filter(|text| !text.trim().is_empty())
-            .unwrap_or(&document.normalized_formal_statement)
-            .to_owned(),
+        SearchEmbeddingDocumentPolicy::DefinitionAware => {
+            let mut parts = vec![
+                document.declaration_name.as_str(),
+                document.normalized_statement.as_str(),
+            ];
+            if let Some(body) = document
+                .definition_body_summary
+                .as_deref()
+                .filter(|text| !text.trim().is_empty())
+            {
+                parts.push(body);
+            }
+            parts.join("\n")
+        }
+        SearchEmbeddingDocumentPolicy::DocstringAugmented => {
+            let mut parts = Vec::new();
+            if let Some(docstring) = document
+                .docstring_text
+                .as_deref()
+                .filter(|text| !text.trim().is_empty())
+            {
+                parts.push(docstring);
+            }
+            parts.push(document.declaration_name.as_str());
+            parts.push(document.normalized_statement.as_str());
+            if let Some(body) = document
+                .definition_body_summary
+                .as_deref()
+                .filter(|text| !text.trim().is_empty())
+            {
+                parts.push(body);
+            }
+            parts.join("\n")
+        }
     }
 }
 
@@ -432,9 +496,10 @@ fn hex_bytes(bytes: &[u8]) -> String {
 impl SearchEmbeddingDocumentPolicy {
     fn from_id(id: &str) -> Option<Self> {
         match id {
-            "formal-statement" => Some(Self::FormalStatement),
-            "name-and-formal-statement" => Some(Self::NameAndFormalStatement),
-            "informal-or-formal" => Some(Self::InformalOrFormal),
+            "statement" => Some(Self::Statement),
+            "name-and-statement" => Some(Self::NameAndStatement),
+            "definition-aware" => Some(Self::DefinitionAware),
+            "docstring-augmented" => Some(Self::DocstringAugmented),
             _ => None,
         }
     }
@@ -889,7 +954,7 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(observation.embedding_documents.policy_id, "name-and-formal-statement");
+        assert_eq!(observation.embedding_documents.policy_id, "name-and-statement");
         assert_eq!(
             observation.embedding_documents.policy_version,
             "lean-dup.embedding-document.v1"
@@ -915,14 +980,14 @@ mod tests {
             first_hash,
             &content_hash_for(
                 &observation.embedding_documents.documents[0],
-                SearchEmbeddingDocumentPolicy::FormalStatement,
+                SearchEmbeddingDocumentPolicy::Statement,
             )
         );
         let mut changed = observation.embedding_documents.documents[0].clone();
-        changed.normalized_formal_statement.push_str(" changed");
+        changed.normalized_statement.push_str(" changed");
         assert_ne!(
             first_hash,
-            &content_hash_for(&changed, SearchEmbeddingDocumentPolicy::NameAndFormalStatement)
+            &content_hash_for(&changed, SearchEmbeddingDocumentPolicy::NameAndStatement)
         );
 
         let json = serde_json::to_string(&observation).unwrap();
@@ -946,6 +1011,8 @@ mod tests {
                 modifiers: Vec::new(),
                 source_span: None,
                 statement_text: "raw statement text must not serialize".to_owned(),
+                docstring_text: None,
+                definition_body_summary: None,
                 status_flags: Vec::new(),
                 feature_version: "test".to_owned(),
                 fingerprints: Fingerprints {

@@ -406,6 +406,8 @@ mod tests {
             modifiers: Vec::new(),
             source_span: None,
             statement_text: "raw statement text must not serialize".to_owned(),
+            docstring_text: None,
+            definition_body_summary: None,
             status_flags: Vec::new(),
             feature_version: "test".to_owned(),
             fingerprints: Fingerprints {

@@ -331,6 +331,77 @@ Backend identity is architecture evidence only. References:
   into search. Search provides structured declaration documents; embedding owns model-
   specific query/document wrapping.
 
+## 35S Semantic Declaration Documents
+
+Design Note:
+
+- Hidden knowledge: search owns which declaration content is useful for duplicate-audit
+  candidate generation; Lean worker/index own stable declaration facts; embedding owns
+  only model-profile role wrapping.
+- Smallest public interface: a document policy id/version, content availability counters,
+  privacy-safe content hashes, and in-memory document text for hidden embedding calls.
+- Non-leaking decisions: raw statements, docstrings, definition bodies, final model input
+  strings, model prefixes, tokenizer/runtime details, worker rows, source snippets,
+  retrieval keys, database paths, and vector storage vocabulary stay out of public
+  search/eval/report artifacts.
+- Preserved capability: ordinary symbolic audit and ordinary eval remain unchanged,
+  embedding-free, and vector-index-free.
+- Discarded behavior: the retired name/module/kind/features input string, policies that
+  claim informal text without supplying it, and compatibility aliases for removed document
+  policies.
+
+Design It Twice:
+
+- *Keep name plus formal statement only.* Rejected: it omits definition bodies and
+  docstrings, so many definition-like declarations are embedded with too little
+  distinguishing content.
+- *Let embedding build final model input from Lean internals.* Rejected: embedding would
+  learn Lean declaration kinds, proof-body exclusions, docstring availability, and
+  duplicate-audit actionability.
+- *Search owns semantic document policies over stable declaration facts.* Chosen:
+  worker/index expose declaration facts; search chooses which facts are useful for the
+  hidden semantic-search policy; embedding applies only profile-specific role formatting.
+
+Current semantic document policies:
+
+| Policy | Embedded text selected by search |
+| --- | --- |
+| `statement` | theorem/lemma/axiom statements and definition signatures only |
+| `name-and-statement` | declaration name plus statement/signature; default hidden policy |
+| `definition-aware` | name plus statement/signature plus definition body summary when available |
+| `docstring-augmented` | docstring when available, then name plus statement/signature, plus definition body summary when available |
+
+The worker/index boundary now supplies optional `docstring_text` and
+`definition_body_summary` declaration facts. Search records availability counters for
+those facts before embedding, and artifacts receive policy ids, versions, counters, and
+content hashes. A theorem proof body is not a declaration-document source for the default
+hidden semantic-search path. If future experiments need proof text, they must introduce a
+named non-default policy and separate leak checks.
+
+Search may fall back within `docstring-augmented` for declarations without docstrings
+because the field is genuinely supplied by the worker/index boundary and availability is
+counted. A policy that claims informal text while the worker never supplies informal facts
+is not allowed.
+
+35S Red Flag Review:
+
+- *Shallow module:* the search document policy now hides meaningful content selection
+  rather than forwarding a hardcoded string shape.
+- *Pass-through wrapper:* worker/index expose stable facts; search transforms them into
+  policy-specific document text and hashes.
+- *Temporal decomposition:* the split follows ownership of declaration facts, document
+  policy, and model wrapping, not worker/index/search execution order.
+- *Information leakage:* Lean content policy stays in search; model prefixes stay in
+  embedding; raw content and worker rows stay out of artifacts.
+- *Special-general mixture:* model runtime remains general text embedding; Lean-specific
+  duplicate-search semantics stay in search.
+- *Conjoined methods:* docstring extraction, definition body summary, document selection,
+  embedding, and vector-index query remain separately owned.
+- *Hard-to-describe public API:* policy id/version, counters, and hashes describe the
+  artifact surface.
+- *Implementation-detail comments:* comments should describe semantic-document facts and
+  privacy constraints, not Lean expression internals or model runtime details.
+
 ## Red-flag checklist
 
 - *Shallow module:* the vector-index crate hides persistence, ANN, and invalidation

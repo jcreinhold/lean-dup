@@ -156,18 +156,20 @@ pub struct EmbeddingInputPolicy {
     pub policy_id: String,
     pub version: String,
     pub includes_declaration_name: bool,
-    pub includes_normalized_statement: bool,
-    pub uses_informal_text_when_available: bool,
+    pub includes_statement: bool,
+    pub includes_definition_body_summary: bool,
+    pub includes_docstring: bool,
 }
 
 impl Default for EmbeddingInputPolicy {
     fn default() -> Self {
         Self {
-            policy_id: "name-and-formal-statement".to_owned(),
+            policy_id: "name-and-statement".to_owned(),
             version: EMBEDDING_INPUT_POLICY_VERSION.to_owned(),
             includes_declaration_name: true,
-            includes_normalized_statement: true,
-            uses_informal_text_when_available: false,
+            includes_statement: true,
+            includes_definition_body_summary: false,
+            includes_docstring: false,
         }
     }
 }
@@ -354,11 +356,12 @@ mod tests {
     #[test]
     fn input_policy_names_stable_contract() {
         let policy = EmbeddingInputPolicy::default();
-        assert_eq!(policy.policy_id, "name-and-formal-statement");
+        assert_eq!(policy.policy_id, "name-and-statement");
         assert_eq!(policy.version, "lean-dup.embedding-document.v1");
         assert!(policy.includes_declaration_name);
-        assert!(policy.includes_normalized_statement);
-        assert!(!policy.uses_informal_text_when_available);
+        assert!(policy.includes_statement);
+        assert!(!policy.includes_definition_body_summary);
+        assert!(!policy.includes_docstring);
     }
 
     #[test]

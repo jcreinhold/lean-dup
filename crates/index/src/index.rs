@@ -19,7 +19,7 @@ use lean_dup_worker::{
 
 use crate::{Error, Result};
 
-pub const INDEX_SCHEMA_VERSION: &str = "lean-dup.index.sqlite.v1";
+pub const INDEX_SCHEMA_VERSION: &str = "lean-dup.index.sqlite.v2";
 const INDEX_PROVENANCE_VERSION: &str = "lean-dup.index.provenance.v1";
 const MATHLIB_DECLARATION_CHUNK_SIZE: usize = 32;
 const MAX_MATHLIB_INDEX_THREADS: usize = 2;
@@ -337,6 +337,8 @@ pub struct HydratedDeclaration {
     pub modifiers: Vec<String>,
     pub source_span: Option<SourceSpan>,
     pub statement_text: String,
+    pub docstring_text: Option<String>,
+    pub definition_body_summary: Option<String>,
     pub status_flags: Vec<String>,
     pub feature_version: String,
     pub fingerprints: Fingerprints,
@@ -1148,6 +1150,8 @@ fn initialize_schema(connection: &Connection) -> Result<()> {
             modifiers_json TEXT NOT NULL,
             source_span_json TEXT,
             statement_text TEXT NOT NULL,
+            docstring_text TEXT,
+            definition_body_summary TEXT,
             status_flags_json TEXT NOT NULL
         );
 
@@ -1232,7 +1236,7 @@ fn index_provenance(request: &IndexBuildRequest, version: &WorkerVersion) -> Res
 fn insert_declaration(connection: &Connection, declaration: &DeclarationRow, feature: &FeatureRow) -> Result<()> {
     let handle = DeclarationHandle(handle_for(&declaration.declaration_id));
     connection.execute(
-        "INSERT INTO declarations VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        "INSERT INTO declarations VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             handle.0,
             declaration.declaration_id,
@@ -1245,6 +1249,8 @@ fn insert_declaration(connection: &Connection, declaration: &DeclarationRow, fea
             serde_json::to_string(&declaration.modifiers)?,
             optional_json(&declaration.source_span)?,
             declaration.statement_text,
+            declaration.docstring_text,
+            declaration.definition_body_summary,
             serde_json::to_string(&declaration.status_flags)?,
         ],
     )?;
@@ -1418,6 +1424,8 @@ fn load_declaration(connection: &Connection, handle: &DeclarationHandle) -> Resu
               d.modifiers_json,
               d.source_span_json,
               d.statement_text,
+              d.docstring_text,
+              d.definition_body_summary,
               d.status_flags_json,
               f.feature_version,
               f.fingerprints_json,
@@ -1441,12 +1449,14 @@ fn load_declaration(connection: &Connection, handle: &DeclarationHandle) -> Resu
                     row.get::<_, String>(7)?,
                     row.get::<_, Option<String>>(8)?,
                     row.get::<_, String>(9)?,
-                    row.get::<_, String>(10)?,
-                    row.get::<_, String>(11)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, Option<String>>(11)?,
                     row.get::<_, String>(12)?,
                     row.get::<_, String>(13)?,
-                    row.get::<_, i64>(14)?,
+                    row.get::<_, String>(14)?,
                     row.get::<_, String>(15)?,
+                    row.get::<_, i64>(16)?,
+                    row.get::<_, String>(17)?,
                 ))
             },
         )
@@ -1470,12 +1480,14 @@ fn load_declaration(connection: &Connection, handle: &DeclarationHandle) -> Resu
             None => None,
         },
         statement_text: row.9,
-        status_flags: serde_json::from_str(&row.10)?,
-        feature_version: row.11,
-        fingerprints: serde_json::from_str(&row.12)?,
-        role_features: serde_json::from_str(&row.13)?,
-        binder_count: row.14 as u64,
-        low_signal_markers: serde_json::from_str(&row.15)?,
+        docstring_text: row.10,
+        definition_body_summary: row.11,
+        status_flags: serde_json::from_str(&row.12)?,
+        feature_version: row.13,
+        fingerprints: serde_json::from_str(&row.14)?,
+        role_features: serde_json::from_str(&row.15)?,
+        binder_count: row.16 as u64,
+        low_signal_markers: serde_json::from_str(&row.17)?,
     })
 }
 

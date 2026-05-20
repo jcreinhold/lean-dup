@@ -15,7 +15,8 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::observation::{
-    SearchEmbeddingDocumentPolicy, SearchEmbeddingDocuments, embedding_documents_for_declarations_with_policy,
+    SearchEmbeddingContentAvailability, SearchEmbeddingDocumentPolicy, SearchEmbeddingDocuments,
+    embedding_documents_for_declarations_with_policy,
 };
 
 const VECTOR_CANDIDATE_POLICY_VERSION: &str = "lean-dup.vector-candidate.v1";
@@ -109,6 +110,8 @@ pub struct SearchVectorCandidateSummary {
     pub corpus_declaration_count: usize,
     pub query_eligibility: SearchVectorEligibilitySummary,
     pub corpus_eligibility: SearchVectorEligibilitySummary,
+    pub query_document_content: SearchEmbeddingContentAvailability,
+    pub corpus_document_content: SearchEmbeddingContentAvailability,
     pub top_k: usize,
     pub eligible_corpus_size: usize,
     pub top_k_saturated: bool,
@@ -134,6 +137,8 @@ impl Default for SearchVectorCandidateSummary {
             corpus_declaration_count: 0,
             query_eligibility: SearchVectorEligibilitySummary::default(),
             corpus_eligibility: SearchVectorEligibilitySummary::default(),
+            query_document_content: SearchEmbeddingContentAvailability::default(),
+            corpus_document_content: SearchEmbeddingContentAvailability::default(),
             top_k: VECTOR_CANDIDATE_TOP_K,
             eligible_corpus_size: 0,
             top_k_saturated: false,
@@ -200,6 +205,8 @@ pub(crate) fn generate_vector_candidates(
         corpus_declaration_count: corpus_documents.documents.len(),
         query_eligibility: query_eligibility.summary,
         corpus_eligibility: corpus_eligibility.summary,
+        query_document_content: query_documents.content_availability.clone(),
+        corpus_document_content: corpus_documents.content_availability.clone(),
         top_k: VECTOR_CANDIDATE_TOP_K,
         eligible_corpus_size: corpus_documents.documents.len(),
         top_k_saturated: VECTOR_CANDIDATE_TOP_K >= corpus_documents.documents.len(),
@@ -523,9 +530,16 @@ fn embed_documents(
         input_policy: EmbeddingInputPolicy {
             policy_id: documents.policy_id.clone(),
             version: documents.policy_version.clone(),
-            includes_declaration_name: documents.policy_id == "name-and-formal-statement",
-            includes_normalized_statement: documents.policy_id != "informal-or-formal",
-            uses_informal_text_when_available: documents.policy_id == "informal-or-formal",
+            includes_declaration_name: matches!(
+                documents.policy_id.as_str(),
+                "name-and-statement" | "definition-aware" | "docstring-augmented"
+            ),
+            includes_statement: true,
+            includes_definition_body_summary: matches!(
+                documents.policy_id.as_str(),
+                "definition-aware" | "docstring-augmented"
+            ),
+            includes_docstring: documents.policy_id == "docstring-augmented",
         },
         inputs: documents
             .text_inputs()
@@ -810,7 +824,7 @@ mod tests {
             model_cache_root: None,
             text_vector_cache_root: None,
             corpus_cache_root,
-            document_policy: SearchEmbeddingDocumentPolicy::NameAndFormalStatement,
+            document_policy: SearchEmbeddingDocumentPolicy::NameAndStatement,
             eligibility_policy,
         }
     }
@@ -828,6 +842,8 @@ mod tests {
             modifiers: Vec::new(),
             source_span: None,
             statement_text: "example statement".to_owned(),
+            docstring_text: None,
+            definition_body_summary: None,
             status_flags: Vec::new(),
             feature_version: "test".to_owned(),
             fingerprints: Fingerprints {

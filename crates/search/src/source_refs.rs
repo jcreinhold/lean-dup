@@ -532,6 +532,8 @@ end Tiny
                 end: SourcePoint { line: end, column: 20 },
             }),
             statement_text: "theorem target : True".to_owned(),
+            docstring_text: None,
+            definition_body_summary: None,
             status_flags: Vec::new(),
             feature_version: "features.roles.v1".to_owned(),
             fingerprints: Fingerprints {
