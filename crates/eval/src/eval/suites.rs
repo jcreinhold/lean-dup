@@ -15,13 +15,15 @@ use crate::eval::stage_metrics::SemanticVerificationStageMetrics;
 use crate::eval::vector_search::{self, VectorSearchRequest};
 use lean_dup_diagnostics::perf;
 use lean_dup_diagnostics::progress::Reporter;
-use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
+use lean_dup_index::{
+    DeclarationHandle, HydratedDeclaration, IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex,
+};
 use lean_dup_project::{WorkspaceRequest, resolve, resolve_project_mathlib};
 use lean_dup_search::{
     SearchObservation, SearchObservationRequest, SearchScoringVariant, SearchTrackedPair, observe_search,
     rescore_observation,
 };
-use lean_dup_worker::WorkerClient;
+use lean_dup_worker::{Fingerprints, WorkerClient};
 
 use crate::{Error, Result};
 
@@ -117,6 +119,10 @@ pub fn run(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutput> 
 }
 
 fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutput> {
+    if request.suite == EvalSuite::VectorFixture {
+        return run_vector_fixture(request, reporter);
+    }
+
     let total_started = Instant::now();
     let write_search_dataset = request.write_search_dataset;
     let write_scorer_ablations = request.write_scorer_ablations;
@@ -266,6 +272,145 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
     };
     let scorer_ablations = if write_scorer_ablations {
         scorer_ablation_variants(&labels, &output, &k_values, index_load_ms, reporter)
+    } else {
+        Vec::new()
+    };
+    let scorer_ablation_artifact = if write_scorer_ablations {
+        let report = scorer_ablations::report(
+            &labels.suite,
+            &scorer_version,
+            output.semantic_reranking.clone(),
+            output.semantic_obligation_yield.clone(),
+            scorer_ablations.clone(),
+            Vec::new(),
+        );
+        Some(scorer_ablations::write_default_artifact(&repo_root(), &report)?)
+    } else {
+        None
+    };
+    let vector_search = if request.vector_search.is_some() {
+        let root = repo_root();
+        Some(vector_search::report(vector_search::VectorSearchReportRun {
+            repo_root: &root,
+            suite: &labels.suite,
+            labels: &labels,
+            observation: &output,
+            symbolic_baseline: &baseline_metrics,
+            vector_metrics: &metrics,
+            scorer_version: &scorer_version,
+            k_values: &k_values,
+        })?)
+    } else {
+        None
+    };
+
+    Ok(EvalOutput {
+        status: "ok".to_owned(),
+        suite: labels.suite,
+        scorer_version,
+        metrics,
+        search_dataset_artifact,
+        scorer_ablation_artifact,
+        vector_search_status: vector_search.as_ref().map(|outcome| outcome.status.clone()),
+        vector_search_artifact: vector_search.as_ref().map(|outcome| outcome.artifact.clone()),
+        scorer_ablations,
+        vector_search_metrics: vector_search.and_then(|outcome| outcome.metrics),
+        runs: Vec::new(),
+    })
+}
+
+fn run_vector_fixture(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutput> {
+    let total_started = Instant::now();
+    let write_search_dataset = request.write_search_dataset;
+    let write_scorer_ablations = request.write_scorer_ablations;
+    let labels = load_builtin(EvalSuite::VectorFixture)?;
+    let k_values = suite_k_values(EvalSuite::VectorFixture, &request.k_values);
+    let workspace_rows = vector_fixture_declarations();
+    let tracked_pairs = tracked_pairs(&labels);
+
+    let retrieval_started = Instant::now();
+    let base_output = observe_search(SearchObservationRequest {
+        workspace: &workspace_rows,
+        comparison_indexes: &[],
+        tracked_pairs: &tracked_pairs,
+        scoring_variant: SearchScoringVariant::SymbolicOnly,
+        vector_candidates: None,
+    })?;
+    let base_retrieval_ms = retrieval_started.elapsed().as_millis();
+
+    let vector_search_request = request
+        .vector_search
+        .as_ref()
+        .map(|request| request.to_search_request(&labels.suite));
+    let (output, retrieval_ms) = if let Some(vector_request) = vector_search_request.as_ref() {
+        let started = Instant::now();
+        let output = observe_search(SearchObservationRequest {
+            workspace: &workspace_rows,
+            comparison_indexes: &[],
+            tracked_pairs: &tracked_pairs,
+            scoring_variant: SearchScoringVariant::SymbolicOnly,
+            vector_candidates: Some(vector_request),
+        })?;
+        (output, started.elapsed().as_millis())
+    } else {
+        (base_output.clone(), base_retrieval_ms)
+    };
+    let scorer_version = output.scoring.version.to_owned();
+
+    let base_observed = ObservedRun {
+        suite: labels.suite.clone(),
+        pairs: observed_pairs(&base_output),
+        visible_groups: CountMetric {
+            found: base_output.visible_groups_found,
+            total: base_output.visible_groups_total,
+        },
+        probe_unavailable: CountMetric { found: 0, total: 0 },
+        semantic_verification: SemanticVerificationStageMetrics {
+            semantic_reranking: base_output.semantic_reranking.clone(),
+            obligation_yield: base_output.semantic_obligation_yield.clone(),
+            ..SemanticVerificationStageMetrics::default()
+        },
+        timings: TimingMetrics {
+            index_load_ms: 0,
+            retrieval_ms: base_retrieval_ms,
+            probe_ms: 0,
+            total_ms: total_started.elapsed().as_millis(),
+        },
+        peak_memory_bytes: perf::peak_rss_bytes(),
+    };
+    let baseline_metrics = score_run(&labels, &base_observed, &k_values);
+
+    let observed = ObservedRun {
+        suite: labels.suite.clone(),
+        pairs: observed_pairs(&output),
+        visible_groups: CountMetric {
+            found: output.visible_groups_found,
+            total: output.visible_groups_total,
+        },
+        probe_unavailable: CountMetric { found: 0, total: 0 },
+        semantic_verification: SemanticVerificationStageMetrics {
+            semantic_reranking: output.semantic_reranking.clone(),
+            obligation_yield: output.semantic_obligation_yield.clone(),
+            ..SemanticVerificationStageMetrics::default()
+        },
+        timings: TimingMetrics {
+            index_load_ms: 0,
+            retrieval_ms,
+            probe_ms: 0,
+            total_ms: total_started.elapsed().as_millis(),
+        },
+        peak_memory_bytes: perf::peak_rss_bytes(),
+    };
+    let metrics = score_run(&labels, &observed, &k_values);
+
+    let search_dataset_artifact = if write_search_dataset {
+        let dataset = search_dataset::build(&labels.suite, &labels, &output);
+        Some(search_dataset::write_default_artifact(&repo_root(), &dataset)?)
+    } else {
+        None
+    };
+    let scorer_ablations = if write_scorer_ablations {
+        scorer_ablation_variants(&labels, &output, &k_values, 0, reporter)
     } else {
         Vec::new()
     };
@@ -674,6 +819,155 @@ fn suite_k_values(suite: EvalSuite, requested: &[usize]) -> Vec<usize> {
     values
 }
 
+fn vector_fixture_declarations() -> Vec<HydratedDeclaration> {
+    let mut declarations = vec![
+        fixture_declaration(
+            "VectorFixture.vector_only_query",
+            "theorem",
+            "semantic source has additive identity on the right",
+            "vector-only-query",
+        ),
+        fixture_declaration(
+            "VectorFixture.vector_only_match",
+            "theorem",
+            "semantic target has additive identity on the right",
+            "vector-only-match",
+        ),
+        fixture_declaration(
+            "VectorFixture.symbolic_only_query",
+            "theorem",
+            "symbolic duplicate proposition",
+            "symbolic-only-shared",
+        ),
+        fixture_declaration(
+            "VectorFixture.symbolic_only_document",
+            "theorem",
+            "symbolic duplicate proposition",
+            "symbolic-only-shared",
+        ),
+        fixture_declaration(
+            "LexicalTrap.height",
+            "theorem",
+            "height statement over arithmetic objects",
+            "lexical-height-left",
+        ),
+        fixture_declaration(
+            "LexicalTrap.height_not_duplicate",
+            "theorem",
+            "height statement over topological objects",
+            "lexical-height-right",
+        ),
+    ];
+    declarations.extend((0..66).map(|index| {
+        fixture_declaration(
+            &format!("VectorFixture.filler_{index:02}"),
+            "theorem",
+            &format!("filler theorem statement {index}"),
+            &format!("filler-{index:02}"),
+        )
+    }));
+    declarations.extend([
+        fixture_declaration(
+            "VectorFixture.generated_noise.rec",
+            "theorem",
+            "generated declaration should not enter the default vector corpus",
+            "skip-generated",
+        )
+        .with_status_flag("generated"),
+        fixture_declaration(
+            "VectorFixture.private_noise",
+            "theorem",
+            "private declaration should not enter the default vector corpus",
+            "skip-private",
+        )
+        .with_visibility("private"),
+        fixture_declaration(
+            "Synthetic.fixture_noise",
+            "theorem",
+            "synthetic declaration should not enter the default vector corpus",
+            "skip-synthetic",
+        ),
+        fixture_declaration(
+            "VectorFixture.low_signal_noise",
+            "theorem",
+            "low signal equality should not enter the default vector corpus",
+            "skip-low-signal",
+        )
+        .with_low_signal("broad_head:Eq"),
+        fixture_declaration(
+            "VectorFixture.missing_statement_noise",
+            "theorem",
+            "",
+            "skip-missing-statement",
+        ),
+        fixture_declaration(
+            "VectorFixture.instNoise",
+            "instance",
+            "non-actionable instance should not enter the default vector corpus",
+            "skip-not-actionable",
+        ),
+        fixture_declaration(
+            "VectorFixture.structure_noise",
+            "structure",
+            "unsupported declaration kind should not enter the default vector corpus",
+            "skip-unsupported-kind",
+        ),
+    ]);
+    declarations
+}
+
+fn fixture_declaration(name: &str, kind: &str, statement: &str, statement_fingerprint: &str) -> HydratedDeclaration {
+    HydratedDeclaration {
+        handle: DeclarationHandle::for_test(name),
+        declaration_id: format!("fixture:{name}"),
+        origin: "workspace".to_owned(),
+        module: name.split('.').next().unwrap_or("VectorFixture").to_owned(),
+        qualified_name: name.to_owned(),
+        display_name: name.rsplit('.').next().unwrap_or(name).to_owned(),
+        kind: kind.to_owned(),
+        visibility: "public".to_owned(),
+        modifiers: Vec::new(),
+        source_span: None,
+        statement_text: statement.to_owned(),
+        docstring_text: None,
+        definition_body_summary: None,
+        status_flags: Vec::new(),
+        feature_version: "fixture".to_owned(),
+        fingerprints: Fingerprints {
+            statement: statement_fingerprint.to_owned(),
+            safe_binder_permutation: String::new(),
+            connective_shape: String::new(),
+            conclusion_shape: String::new(),
+        },
+        role_features: Vec::new(),
+        binder_count: 0,
+        low_signal_markers: Vec::new(),
+    }
+}
+
+trait VectorFixtureDeclarationExt {
+    fn with_status_flag(self, flag: &str) -> Self;
+    fn with_visibility(self, visibility: &str) -> Self;
+    fn with_low_signal(self, marker: &str) -> Self;
+}
+
+impl VectorFixtureDeclarationExt for HydratedDeclaration {
+    fn with_status_flag(mut self, flag: &str) -> Self {
+        self.status_flags.push(flag.to_owned());
+        self
+    }
+
+    fn with_visibility(mut self, visibility: &str) -> Self {
+        self.visibility = visibility.to_owned();
+        self
+    }
+
+    fn with_low_signal(mut self, marker: &str) -> Self {
+        self.low_signal_markers.push(marker.to_owned());
+        self
+    }
+}
+
 fn suite_definition(request: &EvalRequest) -> SuiteDefinition {
     let repo = repo_root();
     match request.suite {
@@ -715,6 +1009,7 @@ fn suite_definition(request: &EvalRequest) -> SuiteDefinition {
             build_before_index: true,
             require_oleans: false,
         },
+        EvalSuite::VectorFixture => unreachable!("vector-fixture uses in-memory command-level fixture declarations"),
         EvalSuite::ManualInternal => SuiteDefinition {
             suite: request.suite,
             workspace: request.workspace.clone().unwrap_or_default(),

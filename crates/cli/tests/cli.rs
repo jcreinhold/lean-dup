@@ -375,6 +375,7 @@ fn eval_hidden_search_dataset_mode_writes_feature_artifact() {
     assert!(!help_stdout.contains("--vector-input-format"));
     assert!(!help_stdout.contains("--vector-document-policy"));
     assert!(!help_stdout.contains("--vector-eligibility"));
+    assert!(!help_stdout.contains("vector-fixture"));
 
     let assert = Command::cargo_bin("lean-dup")
         .unwrap()
@@ -542,6 +543,181 @@ fn eval_hidden_vector_search_mode_writes_skipped_artifact_without_model() {
         .chain([["query", ":"].concat(), ["passage", ":"].concat()])
     {
         assert!(!raw.contains(&forbidden), "vector search artifact leaked {forbidden}");
+    }
+}
+
+#[test]
+fn eval_hidden_vector_fixture_writes_non_saturated_artifact_and_reuses_corpus() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let model_cache = tempfile::TempDir::new().unwrap();
+    let text_cache = tempfile::TempDir::new().unwrap();
+    let corpus_cache = tempfile::TempDir::new().unwrap();
+    let artifact = repo_root().join("target/search-quality/vector-fixture-vector-search.json");
+    let _ = fs::remove_file(&artifact);
+
+    for expected_corpus_status in ["built", "reused"] {
+        let assert = Command::cargo_bin("lean-dup")
+            .unwrap()
+            .env("LEAN_DUP_CACHE_DIR", cache.path())
+            .args([
+                "eval",
+                "--suite",
+                "vector-fixture",
+                "--format",
+                "json",
+                "--write-vector-search",
+                "--vector-acquisition",
+                "cache-only",
+                "--vector-eligibility",
+                "actionable-public-statement",
+                "--vector-profile-id",
+                "fixture-deterministic-v1",
+                "--vector-input-format",
+                "symmetric-document",
+                "--vector-model-cache-root",
+            ])
+            .arg(model_cache.path())
+            .arg("--vector-text-cache-root")
+            .arg(text_cache.path())
+            .arg("--vector-corpus-cache-root")
+            .arg(corpus_cache.path())
+            .assert()
+            .success();
+
+        let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+        let payload: Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(payload["suite"], "vector-fixture");
+        assert_eq!(payload["vector_search_status"], "ok");
+        assert_eq!(
+            payload["vector_search_artifact"],
+            "target/search-quality/vector-fixture-vector-search.json"
+        );
+
+        let vector: Value = serde_json::from_str(&fs::read_to_string(&artifact).unwrap()).unwrap();
+        assert_eq!(vector["schema_version"], "lean-dup.vector-search.v2");
+        assert_eq!(vector["suite"], "vector-fixture");
+        assert_eq!(vector["status"], "ok");
+        assert_eq!(vector["vector_candidates"]["status"], "ok");
+        assert_eq!(vector["vector_candidates"]["corpus_status"], expected_corpus_status);
+        assert_eq!(vector["vector_candidates"]["top_k"], 32);
+        assert_eq!(vector["vector_candidates"]["eligible_corpus_size"], 72);
+        assert_eq!(vector["vector_candidates"]["query_declaration_count"], 72);
+        assert_eq!(vector["vector_candidates"]["top_k_saturated"], false);
+        assert_eq!(
+            vector["vector_candidates"]["query_eligibility"]["skipped_by_reason"]["generated"],
+            1
+        );
+        assert_eq!(
+            vector["vector_candidates"]["query_eligibility"]["skipped_by_reason"]["private"],
+            1
+        );
+        assert_eq!(
+            vector["vector_candidates"]["query_eligibility"]["skipped_by_reason"]["synthetic"],
+            1
+        );
+        assert_eq!(
+            vector["vector_candidates"]["query_eligibility"]["skipped_by_reason"]["low-signal"],
+            1
+        );
+        assert_eq!(
+            vector["vector_candidates"]["query_eligibility"]["skipped_by_reason"]["missing-statement"],
+            1
+        );
+        assert_eq!(
+            vector["vector_candidates"]["query_eligibility"]["skipped_by_reason"]["not-actionable"],
+            1
+        );
+        assert_eq!(
+            vector["vector_candidates"]["query_eligibility"]["skipped_by_reason"]["unsupported-kind"],
+            1
+        );
+        assert_eq!(vector["vector_stage_metrics"]["top_k_saturation"]["found"], 0);
+        assert_eq!(vector["vector_stage_metrics"]["top_k_saturation"]["total"], 72);
+        assert_eq!(vector["vector_stage_metrics"]["vector_only_positives"]["found"], 1);
+        assert_eq!(vector["vector_stage_metrics"]["symbolic_only_positives"]["found"], 1);
+        assert_eq!(vector["vector_stage_metrics"]["vector_only_hard_negatives"]["found"], 1);
+        assert!(vector["vector_stage_metrics"]["vector_top_k_recall"]["total"].is_number());
+        assert!(vector["vector_stage_metrics"]["vector_top_k_precision"]["total"].is_number());
+
+        let pairs = vector["pairs"].as_array().unwrap();
+        let unique_pairs = pairs
+            .iter()
+            .map(|pair| {
+                let mut names = [
+                    pair["left"].as_str().unwrap().to_owned(),
+                    pair["right"].as_str().unwrap().to_owned(),
+                ];
+                names.sort();
+                names
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            pairs.len(),
+            unique_pairs.len(),
+            "artifact pair rows are not deduplicated"
+        );
+        assert!(pairs.iter().any(|pair| {
+            pair["label_status"] == "positive"
+                && pair["vector_generated"] == true
+                && pair["symbolic_generated"] == false
+        }));
+        assert!(pairs.iter().any(|pair| {
+            pair["label_status"] == "positive"
+                && pair["symbolic_generated"] == true
+                && pair["vector_generated"] == false
+        }));
+        assert!(
+            pairs
+                .iter()
+                .any(|pair| { pair["label_status"] == "hard-negative" && pair["vector_generated"] == true })
+        );
+        assert!(
+            pairs
+                .iter()
+                .flat_map(|pair| pair["label_facts"].as_array().unwrap())
+                .any(|fact| fact["status"] == "expanded-positive")
+        );
+        assert!(
+            pairs
+                .iter()
+                .flat_map(|pair| pair["label_facts"].as_array().unwrap())
+                .any(|fact| fact["status"] == "expanded-hard-negative")
+        );
+
+        let raw = fs::read_to_string(&artifact).unwrap();
+        let forbidden_artifact_text = [
+            "/Users/",
+            "statement_text",
+            "model.safetensors",
+            "snapshot",
+            "sqlite",
+            "posting",
+            "worker JSONL",
+            "tensor",
+            "FastEmbed",
+            "LanceDB",
+            "Qdrant",
+            "sqlite-vec",
+            "HNSW",
+            "ANN",
+            "\"table\"",
+            "\"row\"",
+            "graph",
+            "layer",
+            "neighbor",
+            "lancedb",
+            "table_name",
+            "FeatureMatch",
+            "IndexQuery",
+        ];
+        for forbidden in forbidden_artifact_text
+            .into_iter()
+            .map(str::to_owned)
+            .chain([["query", ":"].concat(), ["passage", ":"].concat()])
+        {
+            assert!(!raw.contains(&forbidden), "vector fixture artifact leaked {forbidden}");
+        }
     }
 }
 

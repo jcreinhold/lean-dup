@@ -17,10 +17,17 @@ pub use eval::{
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum EvalSuite {
+    /// Small checked-in corpus used by ordinary eval.
     Default,
+    /// Checked-in labels that guard against known false-positive patterns.
     HardNegatives,
+    /// Hidden command-level fixture for semantic/vector-search validation plumbing.
+    VectorFixture,
+    /// Private operator suite over the local KanProofs corpus.
     ManualInternal,
+    /// Private operator suite comparing local declarations against mathlib.
     ManualMathlib,
+    /// Aggregate quality gate over the non-manual suites and available manual children.
     ProductionGate,
 }
 
@@ -29,6 +36,7 @@ impl EvalSuite {
         match self {
             Self::Default => "default",
             Self::HardNegatives => "hard-negatives",
+            Self::VectorFixture => "vector-fixture",
             Self::ManualInternal => "manual-internal",
             Self::ManualMathlib => "manual-mathlib",
             Self::ProductionGate => "production-gate",

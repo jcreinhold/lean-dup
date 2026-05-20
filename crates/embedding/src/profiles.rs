@@ -6,6 +6,23 @@ pub(crate) const BGE_SMALL_PROFILE_ID: &str = "bge-small-en-v1.5";
 pub(crate) const BGE_SMALL_MODEL_ID: &str = "BAAI/bge-small-en-v1.5";
 pub(crate) const BGE_BASE_PROFILE_ID: &str = "bge-base-en-v1.5";
 pub(crate) const BGE_BASE_MODEL_ID: &str = "BAAI/bge-base-en-v1.5";
+pub(crate) const FIXTURE_PROFILE_ID: &str = "fixture-deterministic-v1";
+pub(crate) const FIXTURE_MODEL_ID: &str = "lean-dup/fixture-deterministic-v1";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BackendFamily {
+    FastEmbed,
+    DeterministicFixture,
+}
+
+impl BackendFamily {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::FastEmbed => "fastembed",
+            Self::DeterministicFixture => "deterministic-fixture",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InputRole {
@@ -26,6 +43,7 @@ impl InputRole {
 pub(crate) struct ModelProfile {
     pub(crate) profile_id: &'static str,
     pub(crate) model_id: &'static str,
+    pub(crate) backend_family: BackendFamily,
     pub(crate) dimension: usize,
     pub(crate) max_length: usize,
     pub(crate) input_roles: &'static [InputRole],
@@ -39,7 +57,7 @@ impl ModelProfile {
             revision: requested.revision.clone(),
             fingerprint,
             profile_id: self.profile_id.to_owned(),
-            backend_family: "fastembed".to_owned(),
+            backend_family: self.backend_family.label().to_owned(),
             dimension: self.dimension,
             input_roles: self.input_roles.iter().map(|role| role.label().to_owned()).collect(),
         }
@@ -52,7 +70,7 @@ impl ModelProfile {
             self.model_id,
             requested.id,
             requested.revision.as_deref().unwrap_or("default"),
-            "fastembed",
+            self.backend_family.label(),
             self.dimension,
             self.max_length,
             self.normalized_output
@@ -83,6 +101,7 @@ pub(crate) fn resolve_profile(model: &EmbeddingModelSpec) -> Result<ModelProfile
     match model.id.as_str() {
         BGE_SMALL_MODEL_ID => Ok(BGE_SMALL_PROFILE),
         BGE_BASE_MODEL_ID => Ok(BGE_BASE_PROFILE),
+        FIXTURE_MODEL_ID => Ok(FIXTURE_PROFILE),
         _ => Err(Error::UnsupportedModel {
             reason: "unsupported-model-profile".to_owned(),
         }),
@@ -93,6 +112,7 @@ pub(crate) fn resolve_profile_id(profile_id: &str) -> Result<ModelProfile> {
     match profile_id {
         BGE_SMALL_PROFILE_ID => Ok(BGE_SMALL_PROFILE),
         BGE_BASE_PROFILE_ID => Ok(BGE_BASE_PROFILE),
+        FIXTURE_PROFILE_ID => Ok(FIXTURE_PROFILE),
         _ => Err(Error::UnsupportedModel {
             reason: "unsupported-model-profile".to_owned(),
         }),
@@ -104,6 +124,7 @@ const DOCUMENT_AND_QUERY: &[InputRole] = &[InputRole::Document, InputRole::Query
 const BGE_SMALL_PROFILE: ModelProfile = ModelProfile {
     profile_id: BGE_SMALL_PROFILE_ID,
     model_id: BGE_SMALL_MODEL_ID,
+    backend_family: BackendFamily::FastEmbed,
     dimension: 384,
     max_length: 512,
     input_roles: DOCUMENT_AND_QUERY,
@@ -113,8 +134,19 @@ const BGE_SMALL_PROFILE: ModelProfile = ModelProfile {
 const BGE_BASE_PROFILE: ModelProfile = ModelProfile {
     profile_id: BGE_BASE_PROFILE_ID,
     model_id: BGE_BASE_MODEL_ID,
+    backend_family: BackendFamily::FastEmbed,
     dimension: 768,
     max_length: 512,
+    input_roles: DOCUMENT_AND_QUERY,
+    normalized_output: true,
+};
+
+const FIXTURE_PROFILE: ModelProfile = ModelProfile {
+    profile_id: FIXTURE_PROFILE_ID,
+    model_id: FIXTURE_MODEL_ID,
+    backend_family: BackendFamily::DeterministicFixture,
+    dimension: 8,
+    max_length: 4096,
     input_roles: DOCUMENT_AND_QUERY,
     normalized_output: true,
 };

@@ -8,6 +8,7 @@
 
 mod error;
 mod fastembed_backend;
+mod fixture_backend;
 mod profiles;
 mod vector_cache;
 
@@ -15,7 +16,7 @@ pub use error::{Error, Result};
 use std::path::PathBuf;
 
 use hf_hub::Cache;
-use profiles::{BGE_SMALL_MODEL_ID, resolve_profile, resolve_profile_id};
+use profiles::{BGE_SMALL_MODEL_ID, BackendFamily, resolve_profile, resolve_profile_id};
 use serde::{Deserialize, Serialize};
 
 /// Version of the declaration-document input contract consumed by embeddings.
@@ -295,7 +296,10 @@ pub struct TextEmbeddingBatchResult {
 /// pooling, or vector-cache layout.
 pub fn embed_text_batch(request: TextEmbeddingBatchRequest) -> Result<TextEmbeddingBatchResult> {
     let profile = resolve_profile(&request.model)?;
-    fastembed_backend::embed_text_batch(request, profile)
+    match profile.backend_family {
+        BackendFamily::FastEmbed => fastembed_backend::embed_text_batch(request, profile),
+        BackendFamily::DeterministicFixture => fixture_backend::embed_text_batch(request, profile),
+    }
 }
 
 /// Validate or prepare an embedding model in the local Hugging Face cache.
@@ -306,7 +310,10 @@ pub fn embed_text_batch(request: TextEmbeddingBatchRequest) -> Result<TextEmbedd
 pub fn prepare_embedding_model(request: EmbeddingPrepareRequest) -> Result<EmbeddingPrepareResult> {
     validate_prepare_request(&request)?;
     let profile = resolve_profile(&request.model)?;
-    fastembed_backend::prepare_embedding_model(request, profile)
+    match profile.backend_family {
+        BackendFamily::FastEmbed => fastembed_backend::prepare_embedding_model(request, profile),
+        BackendFamily::DeterministicFixture => fixture_backend::prepare_embedding_model(request, profile),
+    }
 }
 
 impl EmbeddingModelFileRole {

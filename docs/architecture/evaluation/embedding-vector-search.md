@@ -569,3 +569,60 @@ with generated pairs.
   id, stable vector evidence facts, raw denominators, and label truth.
 - *Implementation-detail comments:* public comments describe caller-visible
   facts, not vector storage, model files, or temporary migration details.
+
+## 35W command-level non-saturated fixture
+
+Prompt 35W adds a deterministic command-level fixture for hidden vector validation. The fixture exists because earlier
+quality claims were too easy to overread: a unit test can prove that a helper returns a candidate, but it cannot prove
+that the command path records eligibility, top-k saturation, cache reuse, scorer variants, artifact truth, and leak
+checks together.
+
+Design Note:
+
+- Hidden knowledge: search owns corpus/query eligibility, vector top-k, vector evidence, symbolic/vector merging, and
+  scorer stage facts. Eval owns workload labels, denominator truth, artifact writing, and leak checks. Embedding owns
+  model/profile/input wrapping, and vector-index owns persistent corpus reuse.
+- Smallest public interface: a hidden suite and stable artifact facts: model/profile/input-format ids, document and
+  eligibility policy ids, top-k, eligible corpus size, saturation status, skip counts, vector-only and symbolic-only
+  denominators, scorer variant ids, and privacy-safe hashes.
+- Non-leaking decisions: deterministic fixture vectors, model prefixes, tokenizer/runtime details, vector-cache
+  layout, corpus storage, backend names, raw statements, worker rows, retrieval keys, and absolute private paths do not
+  appear in search/eval/report public facts or artifacts.
+- Preserved capability: default audit and ordinary eval remain symbolic; vector fixtures require hidden vector flags.
+- Discarded behavior: treating saturated command runs or unit-only vector cases as semantic-search quality evidence.
+
+Design It Twice:
+
+- *Keep realistic vector cases as eval unit tests.* Rejected because they would not exercise hidden CLI flags, artifact
+  paths, text-vector cache behavior, persistent corpus reuse, or command-level leak checks.
+- *Wait for KanProofs/mathlib manual runs.* Rejected as the only validation surface because long manual workloads need
+  separate operational controls and cannot provide cheap deterministic regression coverage.
+- *Add a deterministic command-level fixture and keep manual workloads for scale evidence.* Chosen because it is deeper:
+  the command path exposes only stable workload and artifact facts while each crate keeps its hidden mechanics.
+
+The `vector-fixture` suite is a validation fixture, not a production retrieval source. Its eligible corpus is larger
+than the private search top-k, so `top_k < eligible_corpus_size` and the artifact records a non-saturated run. It
+contains one vector-only positive, one symbolic-only positive, lexical/name hard negatives, and declarations that
+exercise every default eligibility skip reason without entering the vector corpus.
+
+The fixture proves machinery, not mathlib-scale quality. Prompt 35Y may use it as evidence that the repaired command
+surface is truthful and non-saturated, but any mathlib-scale claim still requires a completed non-saturated
+KanProofs/mathlib workload.
+
+35W Red Flag Review:
+
+- *Shallow module:* the fixture runs through CLI/eval/search/embedding/vector-index rather than wrapping a unit helper.
+- *Pass-through wrapper:* eval joins labels to search stage facts; it does not reconstruct candidates from embedding or
+  vector-index internals.
+- *Temporal decomposition:* command fixture evidence and manual scale evidence are separate because they answer
+  different validation questions.
+- *Information leakage:* raw text, model prefixes, backend names, storage vocabulary, worker rows, retrieval keys, and
+  private paths are forbidden in artifacts.
+- *Special-general mixture:* deterministic fixture behavior is hidden validation infrastructure, not a general model
+  profile for quality claims.
+- *Conjoined methods:* eligibility, document policy, embedding, persistence, scoring, and artifact truth remain separate
+  ownership boundaries.
+- *Hard-to-describe public API:* hidden validation exposes suite id, policy ids, top-k facts, denominators, label
+  classes, and cache reuse status.
+- *Implementation-detail comments:* public comments describe validation facts and privacy rules, not backend or runtime
+  layout.

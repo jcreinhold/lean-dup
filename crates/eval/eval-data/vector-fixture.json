@@ -1,0 +1,54 @@
+{
+  "suite": "vector-fixture",
+  "positive_clusters": [
+    {
+      "id": "vector-only-positive",
+      "members": ["VectorFixture.vector_only_query", "VectorFixture.vector_only_match"]
+    },
+    {
+      "id": "symbolic-only-positive",
+      "members": ["VectorFixture.symbolic_only_query", "VectorFixture.symbolic_only_document"]
+    }
+  ],
+  "hard_negative_clusters": [
+    {
+      "id": "lexical-name-trap",
+      "members": ["LexicalTrap.height", "LexicalTrap.height_not_duplicate"]
+    }
+  ],
+  "typed_pairs": [
+    {
+      "left": "VectorFixture.vector_only_query",
+      "right": "VectorFixture.vector_only_match",
+      "polarity": "positive",
+      "match_class": "local-cleanup-duplicate",
+      "expected_stage_visibility": "ranked",
+      "adjudication_source": "fixture-intent",
+      "confidence": "high",
+      "semantic_verification_required": false,
+      "static_evidence_acceptable": false
+    },
+    {
+      "left": "VectorFixture.symbolic_only_query",
+      "right": "VectorFixture.symbolic_only_document",
+      "polarity": "positive",
+      "match_class": "exact-theorem-duplicate",
+      "expected_stage_visibility": "visible",
+      "adjudication_source": "fixture-intent",
+      "confidence": "high",
+      "semantic_verification_required": false,
+      "static_evidence_acceptable": true
+    },
+    {
+      "left": "LexicalTrap.height",
+      "right": "LexicalTrap.height_not_duplicate",
+      "polarity": "hard-negative",
+      "match_class": "hard-negative",
+      "expected_stage_visibility": "hidden",
+      "adjudication_source": "fixture-intent",
+      "confidence": "high",
+      "semantic_verification_required": false,
+      "static_evidence_acceptable": false
+    }
+  ]
+}

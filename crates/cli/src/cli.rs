@@ -392,6 +392,8 @@ impl From<CliEmbeddingAcquisitionPolicy> for SearchVectorAcquisitionPolicy {
 pub enum CliEvalSuite {
     Default,
     HardNegatives,
+    #[value(hide = true)]
+    VectorFixture,
     ManualInternal,
     ManualMathlib,
     ProductionGate,
@@ -402,6 +404,7 @@ impl From<CliEvalSuite> for EvalSuite {
         match value {
             CliEvalSuite::Default => Self::Default,
             CliEvalSuite::HardNegatives => Self::HardNegatives,
+            CliEvalSuite::VectorFixture => Self::VectorFixture,
             CliEvalSuite::ManualInternal => Self::ManualInternal,
             CliEvalSuite::ManualMathlib => Self::ManualMathlib,
             CliEvalSuite::ProductionGate => Self::ProductionGate,
