@@ -74,3 +74,72 @@ test -f target/search-quality/default-dataset.json
 rg -n 'sqlite|posting|IndexQuery|FeatureMatch|/Users/|statement_text|raw' \
   target/search-quality/default-dataset.json
 ```
+
+## 35P realistic vector validation corpora
+
+Prompt 35P adds a workload contract for vector-search validation. The earlier vector
+fixtures were too small: `top_k` covered the whole eligible corpus, and symbolic
+retrieval already found every positive. Those fixtures remain useful plumbing checks, but
+they cannot prove or disprove vector candidate generation.
+
+Design Note:
+
+- Hidden knowledge: eval owns workload denominators, label classes, manual-suite blocker
+  reporting, and the distinction between fixture evidence and mathlib-scale evidence.
+  Search owns corpus/query eligibility and top-k policy. Embedding owns model wrapping;
+  vector-index owns persistence and nearest-neighbor mechanics.
+- Smallest public interface: dataset and vector artifacts record workload id, model
+  profile id, declaration-document policy id, eligibility policy id, eligible corpus
+  size, query count, `top_k`, saturation status, raw label denominators, and cache reuse
+  status.
+- Non-leaking decisions: raw formal statements, source snippets, final model input,
+  model prefixes, worker rows, backend names, table or row vocabulary, vector-cache paths,
+  and absolute private paths stay out of artifacts.
+- Preserved capability: ordinary eval and audit remain symbolic, embedding-free, and
+  vector-index-free unless hidden vector flags are explicitly supplied.
+- Discarded behavior: treating tiny saturated corpora or manual-suite skips as quality
+  evidence.
+
+Design It Twice:
+
+- *Keep the tiny fixtures and interpret saturation carefully.* Rejected: careful prose
+  cannot turn `top_k >= eligible_corpus_size` into nearest-neighbor evidence.
+- *Rely only on KanProofs/mathlib manual runs.* Rejected: manual prerequisites are
+  operator-local, so they cannot provide deterministic regression coverage.
+- *Add a realistic deterministic fixture and still run manual suites when available.*
+  Chosen: fixtures protect the evaluation contract; manual suites provide scale evidence
+  when the local environment can run them.
+
+The deterministic vector workload must include:
+
+| Requirement | Contract |
+| --- | --- |
+| Non-saturated corpus | `top_k < eligible_corpus_size`; the fixture target is at least 2x top-k |
+| Vector-only positive | at least one labeled positive where symbolic generation is absent and vector generation is present |
+| Symbolic-only positive | at least one labeled positive where symbolic generation is present and vector generation is absent |
+| Lexical/name hard negative | at least one labeled hard negative likely to be retrieved by semantic similarity |
+| Eligibility skips | generated, private, synthetic, low-signal, missing-statement, non-actionable, and unsupported-kind rows exercise stable skip reasons |
+| Manual blockers | KanProofs/mathlib prerequisites are checked, and any missing `.olean`, workspace, or mathlib artifact is recorded as a blocker, not a pass |
+
+As of this prompt, the local KanProofs workspace, build library directory, and mathlib
+package directory are present. Prompt 35Q must still run the manual suites and record the
+actual command result; presence of directories is not validation evidence.
+
+Red Flag Review:
+
+- Shallow module: the workload contract carries denominators and label classes, not just a
+  command name.
+- Pass-through wrapper: eval does not replay search internals; it records the facts search
+  exposes.
+- Temporal decomposition: fixture and manual evidence are separated by evidence role, not
+  by command order.
+- Information leakage: raw text, worker rows, model prefixes, and vector storage details
+  stay out of artifacts.
+- Special-general mixture: fixture design stays in eval documentation and tests; model and
+  persistence mechanics stay in their crates.
+- Conjoined methods: corpus eligibility, document policy, vector search, and label joining
+  remain separate surfaces with explicit joining facts.
+- Hard-to-describe public API: workload facts are corpus size, query count, top-k,
+  saturation, labels, and cache provenance.
+- Implementation-detail comments: this section describes validation obligations, not
+  backend layout or runtime algorithms.

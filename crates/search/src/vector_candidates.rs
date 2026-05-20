@@ -752,6 +752,53 @@ mod tests {
         assert!(!large_output.summary.top_k_saturated);
     }
 
+    #[test]
+    fn realistic_validation_fixture_records_non_saturated_eligibility_contract() {
+        let mut rows = (0..72)
+            .map(|index| declaration(&format!("VectorFixture.useful_{index:02}"), "theorem", "public"))
+            .collect::<Vec<_>>();
+        rows.extend([
+            declaration("VectorFixture.generated", "theorem", "public").with_flag("generated"),
+            declaration("VectorFixture.private_item", "theorem", "private"),
+            declaration("Synthetic.fixture_noise", "theorem", "public"),
+            declaration("VectorFixture.low_signal", "theorem", "public").with_low_signal("broad_head:Eq"),
+            declaration("VectorFixture.missing_statement", "theorem", "public").with_statement(""),
+            declaration("VectorFixture.instance_noise", "instance", "public"),
+            declaration("VectorFixture.structure_noise", "structure", "public"),
+        ]);
+        let cache = TempDir::new().unwrap();
+
+        let output = generate_vector_candidates(
+            &request(
+                cache.path().join("realistic"),
+                SearchVectorEligibilityPolicy::ActionablePublicStatement,
+            ),
+            &rows,
+            &[],
+        );
+
+        assert_eq!(output.summary.query_eligibility.total, 79);
+        assert_eq!(output.summary.query_eligibility.eligible, 72);
+        assert_eq!(output.summary.corpus_eligibility.eligible, 72);
+        assert_eq!(output.summary.top_k, 32);
+        assert_eq!(output.summary.eligible_corpus_size, 72);
+        assert!(!output.summary.top_k_saturated);
+        assert_eq!(
+            output.summary.query_eligibility.skipped_by_reason,
+            std::collections::BTreeMap::from([
+                ("generated".to_owned(), 1),
+                ("private".to_owned(), 1),
+                ("synthetic".to_owned(), 1),
+                ("low-signal".to_owned(), 1),
+                ("missing-statement".to_owned(), 1),
+                ("not-actionable".to_owned(), 1),
+                ("unsupported-kind".to_owned(), 1),
+            ])
+        );
+        assert_eq!(output.summary.reason.as_deref(), Some("unsupported-model-profile"));
+        assert!(output.candidates.is_empty());
+    }
+
     fn request(
         corpus_cache_root: std::path::PathBuf,
         eligibility_policy: SearchVectorEligibilityPolicy,

@@ -214,6 +214,66 @@ separately for each scorer variant, so validation can distinguish "vector found 
 the pair well enough to be useful." The default scorer, thresholds, report JSON, semantic-probe policy, and CLI command
 names do not change.
 
+### 35P realistic validation corpora
+
+Vector-search validation now requires workloads that can actually distinguish candidate-generation behavior. A tiny
+fixture where `top_k` covers the entire corpus remains a smoke test only. A validation workload counts as vector-search
+quality evidence only when `top_k < eligible_corpus_size` for the relevant queries and the labels include vector-only
+positives, symbolic-only positives, and lexical/name hard negatives.
+
+Design Note:
+
+- Hidden knowledge: eval owns workload suitability, label denominators, manual-suite blocker reporting, and the final
+  validation decision; search owns top-k, eligibility, and candidate-policy facts; embedding and vector-index keep model
+  and storage mechanics private.
+- Smallest public interface: workload id, model profile id, declaration-document policy id, eligibility policy id,
+  query count, eligible corpus size, top-k, saturation status, vector-only/symbolic-only label counts, runtime/cache
+  facts, and manual-suite blocker status.
+- Non-leaking decisions: raw statements, source snippets, final model input strings, model prefixes, backend names,
+  table or row vocabulary, worker rows, cache paths, and ANN parameters stay out of artifacts.
+- Preserved capability: default symbolic audit/eval still do not build models, build vector corpora, or change
+  visibility.
+- Discarded behavior: treating saturated fixture runs, manual-suite skips, or successful vector-index build/query as
+  quality evidence.
+
+Design It Twice:
+
+- *Keep using current tiny fixtures.* Rejected: they cannot show vector-only recall because symbolic retrieval already
+  finds the positives and the vector top-k is saturated.
+- *Use only KanProofs/mathlib manual suites.* Rejected: they provide scale evidence when present but are not reliable
+  regression fixtures.
+- *Use a deterministic realistic fixture plus optional manual validation.* Chosen: the fixture pins non-saturated
+  denominators and label classes; manual suites supply mathlib-scale evidence when local prerequisites exist.
+
+Required workload facts for Prompt 35Q:
+
+| Fact | Why it matters |
+| --- | --- |
+| `eligible_corpus_size` and `top_k` | proves whether nearest-neighbor selection is non-saturated |
+| `top_k_saturated` | prevents smoke tests from being promoted as quality evidence |
+| query count | prevents one lucky query from looking like corpus-level evidence |
+| vector-only positives | measures candidate-generation value unavailable to symbolic retrieval |
+| symbolic-only positives | prevents vector-only tunnel vision |
+| lexical/name hard negatives | measures semantic-neighbor false-positive risk |
+| eligibility skip reasons | verifies noisy declarations do not enter the default vector corpus |
+| corpus/cache reuse facts | separates cold-build cost from warm search behavior |
+
+Prompt 35Q may not claim mathlib-scale quality from fixture-only evidence, and skipped manual suites do not count as
+passes. On this machine the KanProofs workspace, compiled library directory, and mathlib package directory are present;
+35Q must still record the actual manual command result and exact blocker if a suite fails.
+
+Red Flag Review:
+
+- Shallow module: the workload contract records the facts needed to judge vector search, not just the fact that a
+  command ran.
+- Pass-through wrapper: eval measures search-produced facts instead of reconstructing vector retrieval.
+- Temporal decomposition: fixture, manual, cold-build, and warm-reuse evidence are separated by validation meaning.
+- Information leakage: workload artifacts carry stable policy ids and hashes, not raw text or backend/runtime details.
+- Special-general mixture: hidden vector validation stays out of ordinary eval and report semantics.
+- Conjoined methods: candidate generation, ranking variants, labels, and validation decisions remain separate.
+- Hard-to-describe public API: the evidence is corpus/query size, top-k saturation, label classes, and raw denominators.
+- Implementation-detail comments: backend names appear only as architecture evidence, not artifact schema.
+
 Cache-only missing model preparation is a skipped vector experiment, not an eval failure.
 The symbolic baseline remains in the artifact, and existing suite gates are evaluated
 against the symbolic baseline, not against experimental vector output.

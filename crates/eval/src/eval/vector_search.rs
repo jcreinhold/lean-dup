@@ -714,7 +714,8 @@ mod tests {
     use lean_dup_search::{
         SearchEmbeddingDocument, SearchEmbeddingDocuments, SearchEvidenceMode, SearchModuleRelation, SearchObservation,
         SearchObservedPair, SearchPairFeatures, SearchRetrievalObservation, SearchScoringSummary, SearchScoringVariant,
-        SearchSemanticEvidenceState, SearchVectorCandidateStatus, SearchVectorCandidateSummary, SearchVectorEvidence,
+        SearchSemanticEvidenceState, SearchVectorCandidateStatus, SearchVectorCandidateSummary,
+        SearchVectorEligibilitySummary, SearchVectorEvidence,
     };
 
     #[test]
@@ -854,6 +855,119 @@ mod tests {
         assert_eq!(metrics.ranked_recall.found, 3);
         assert_eq!(metrics.visible_precision.found, 1);
         assert_eq!(metrics.visible_precision.total, 1);
+    }
+
+    #[test]
+    fn realistic_vector_validation_fixture_is_non_saturated_and_has_required_label_classes() {
+        let labels = GoldLabels {
+            suite: "realistic-vector-fixture".to_owned(),
+            positives: FxHashSet::from_iter([
+                GoldPair::new("VectorOnly.query", "VectorOnly.document"),
+                GoldPair::new("SymbolicOnly.query", "SymbolicOnly.document"),
+            ]),
+            hard_negatives: FxHashSet::from_iter([GoldPair::new(
+                "LexicalTrap.height",
+                "LexicalTrap.height_not_duplicate",
+            )]),
+            typed_pairs: Vec::new(),
+            label_facts: Vec::new(),
+        };
+        let mut observation = observation(vec![
+            observed(
+                "VectorOnly.query",
+                "VectorOnly.document",
+                Some(1),
+                false,
+                false,
+                true,
+                Some(0.93),
+                Some(1),
+                "vector_source_backed_external_comparison",
+            ),
+            observed(
+                "SymbolicOnly.query",
+                "SymbolicOnly.document",
+                Some(2),
+                true,
+                true,
+                false,
+                None,
+                None,
+                "source_backed_external_comparison",
+            ),
+            observed(
+                "LexicalTrap.height",
+                "LexicalTrap.height_not_duplicate",
+                Some(3),
+                false,
+                false,
+                true,
+                Some(0.88),
+                Some(2),
+                "vector_source_backed_external_comparison",
+            ),
+        ]);
+        observation.retrieval.vector_candidates = SearchVectorCandidateSummary {
+            status: SearchVectorCandidateStatus::Ok,
+            query_eligibility: SearchVectorEligibilitySummary {
+                policy_id: "actionable-public-statement".to_owned(),
+                policy_version: "lean-dup.vector-candidate.v1",
+                total: 80,
+                eligible: 72,
+                skipped_by_reason: std::collections::BTreeMap::from([
+                    ("generated".to_owned(), 1),
+                    ("private".to_owned(), 1),
+                    ("synthetic".to_owned(), 1),
+                    ("low-signal".to_owned(), 2),
+                    ("missing-statement".to_owned(), 1),
+                    ("not-actionable".to_owned(), 1),
+                    ("unsupported-kind".to_owned(), 1),
+                ]),
+            },
+            corpus_eligibility: SearchVectorEligibilitySummary {
+                policy_id: "actionable-public-statement".to_owned(),
+                policy_version: "lean-dup.vector-candidate.v1",
+                total: 80,
+                eligible: 72,
+                skipped_by_reason: std::collections::BTreeMap::new(),
+            },
+            top_k: 32,
+            eligible_corpus_size: 72,
+            query_declaration_count: 72,
+            corpus_declaration_count: 72,
+            top_k_saturated: false,
+            ..SearchVectorCandidateSummary::default()
+        };
+
+        let metrics = vector_stage_metrics(&labels, &observation);
+        let rows = pair_reports(&labels, &observation);
+
+        assert_eq!(observation.retrieval.vector_candidates.top_k, 32);
+        assert_eq!(observation.retrieval.vector_candidates.eligible_corpus_size, 72);
+        assert!(!observation.retrieval.vector_candidates.top_k_saturated);
+        assert_eq!(metrics.top_k_saturation.found, 0);
+        assert_eq!(metrics.top_k_saturation.total, 72);
+        assert_eq!(metrics.vector_only_positives.found, 1);
+        assert_eq!(metrics.vector_only_positives.total, 2);
+        assert_eq!(metrics.symbolic_only_positives.found, 1);
+        assert_eq!(metrics.symbolic_only_positives.total, 2);
+        assert_eq!(metrics.vector_only_hard_negatives.found, 1);
+        assert_eq!(metrics.vector_only_hard_negatives.total, 1);
+        assert_eq!(metrics.vector_top_k_recall.found, 1);
+        assert_eq!(metrics.vector_top_k_recall.total, 2);
+        assert_eq!(rows.len(), 3);
+        assert!(
+            rows.iter()
+                .any(|row| row.label_status == "positive" && row.vector_generated)
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.label_status == "positive" && row.symbolic_generated)
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.label_status == "hard-negative" && row.vector_generated)
+        );
     }
 
     #[test]
