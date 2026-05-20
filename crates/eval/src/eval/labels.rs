@@ -151,7 +151,6 @@ pub fn load_builtin(suite: EvalSuite) -> Result<GoldLabels> {
     let json = match suite {
         EvalSuite::Default => include_str!("../../eval-data/default.json"),
         EvalSuite::HardNegatives => include_str!("../../eval-data/hard-negatives.json"),
-        EvalSuite::VectorFixture => include_str!("../../eval-data/vector-fixture.json"),
         EvalSuite::ManualInternal => include_str!("../../eval-data/manual-internal.json"),
         EvalSuite::ManualMathlib => include_str!("../../eval-data/manual-mathlib.json"),
         EvalSuite::ProductionGate => {

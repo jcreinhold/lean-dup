@@ -11,9 +11,6 @@ pub enum AppError {
     Eval(#[from] lean_dup_eval::Error),
 
     #[error("{0}")]
-    Embedding(#[from] lean_dup_embedding::Error),
-
-    #[error("{0}")]
     Index(#[from] lean_dup_index::Error),
 
     #[error("{0}")]

@@ -1,18 +1,18 @@
 [package]
 edition = { workspace = true }
 license = { workspace = true }
-name = "lean-dup-search"
+name = "lean-dup-vector-search"
 version = { workspace = true }
 
 [dependencies]
 lean-dup-diagnostics = { workspace = true }
+lean-dup-embedding = { workspace = true }
+lean-dup-eval = { workspace = true }
 lean-dup-index = { workspace = true }
-lean-dup-project = { workspace = true }
-lean-dup-worker = { workspace = true }
-rustc-hash = { workspace = true }
+lean-dup-search = { workspace = true }
+lean-dup-vector-index = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

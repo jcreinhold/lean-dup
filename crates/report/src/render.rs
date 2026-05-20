@@ -2,8 +2,8 @@ use lean_dup_search::ReviewProfile;
 
 use crate::report_contract::GroupExplanation;
 use crate::reports::{
-    AuditReport, CacheCleanupReportDto, DiffReport, DoctorReport, EmbeddingPrepareReportDto, EvalReportDto,
-    IndexReport, PerfReport, Report, ReviewGroupReport, ShowReport,
+    AuditReport, CacheCleanupReportDto, DiffReport, DoctorReport, EvalReportDto, IndexReport, PerfReport, Report,
+    ReviewGroupReport, ShowReport,
 };
 
 pub fn render_text(report: &Report) -> String {
@@ -16,54 +16,8 @@ pub fn render_text(report: &Report) -> String {
         Report::Diff(report) => render_diff(report),
         Report::Audit(report) => render_audit(report),
         Report::Eval(report) => render_eval(report),
-        Report::EmbeddingPrepare(report) => render_embedding_prepare(report),
         Report::Perf(report) => render_perf(report),
     }
-}
-
-fn render_embedding_prepare(report: &EmbeddingPrepareReportDto) -> String {
-    let mut lines = vec![
-        "command: embedding prepare".to_owned(),
-        format!("status: {}", report.status),
-        format!("model: {}", report.model_id),
-        format!("revision: {}", report.revision.as_deref().unwrap_or("default")),
-        format!("profile: {}", report.profile_id),
-        format!("backend: {}", report.backend_family),
-        format!("dimension: {}", report.dimension),
-        format!("input roles: {}", report.input_roles.join(",")),
-        format!("policy: {}", report.acquisition_policy),
-        format!("cache status: {}", report.cache_status),
-        format!(
-            "cache root: {}",
-            report
-                .cache_root
-                .as_ref()
-                .map_or_else(|| "default".to_owned(), |path| path.display().to_string())
-        ),
-        format!("elapsed ms: {}", report.elapsed_ms),
-        format!(
-            "bytes: {}",
-            report
-                .total_bytes
-                .map(|bytes| bytes.to_string())
-                .unwrap_or_else(|| "unknown".to_owned())
-        ),
-    ];
-    for file in &report.required_files {
-        let bytes = file
-            .bytes
-            .map(|bytes| bytes.to_string())
-            .unwrap_or_else(|| "unknown".to_owned());
-        let reason = file
-            .reason
-            .as_ref()
-            .map_or_else(String::new, |reason| format!(" ({reason})"));
-        lines.push(format!("{}: {} {} bytes{}", file.role, file.state, bytes, reason));
-    }
-    if !report.reasons.is_empty() {
-        lines.push(format!("reasons: {}", report.reasons.join(", ")));
-    }
-    lines.join("\n")
 }
 
 fn render_eval(report: &EvalReportDto) -> String {

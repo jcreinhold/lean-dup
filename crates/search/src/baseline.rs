@@ -194,7 +194,7 @@ fn safe_name(name: &str) -> Result<String> {
 }
 
 fn digest(parts: &[String]) -> String {
-    let encoded = serde_json::to_vec(parts).expect("string vectors serialize");
+    let encoded = serde_json::to_vec(parts).expect("string lists serialize");
     let digest = Sha256::digest(&encoded);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }

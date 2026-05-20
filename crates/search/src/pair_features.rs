@@ -19,7 +19,6 @@ pub struct SearchPairFeatures {
     pub retrieval_feature_families: Vec<String>,
     pub declaration_kinds: Vec<String>,
     pub evidence_mode: SearchEvidenceMode,
-    pub vector_evidence: Option<SearchVectorEvidence>,
     pub structural_fingerprint_families: Vec<String>,
     pub role_overlap: Vec<SearchRoleOverlap>,
     pub module_relation: SearchModuleRelation,
@@ -28,21 +27,6 @@ pub struct SearchPairFeatures {
     pub semantic_obligations: Vec<SearchSemanticObligationFact>,
     pub cheap_blockers: Vec<String>,
 }
-
-/// Stable vector evidence derived by search for hidden scorer variants.
-///
-/// Callers may use these facts to explain hidden vector experiments. They do
-/// not expose backend distance conventions or model-specific score calibration.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct SearchVectorEvidence {
-    pub version: String,
-    pub score_bucket: String,
-    pub rank_bucket: String,
-    pub reciprocal_rank_micros: u32,
-    pub top_k_member: bool,
-}
-
-pub(crate) const VECTOR_EVIDENCE_FEATURE_VERSION: &str = "lean-dup.vector-evidence.v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -92,7 +76,6 @@ pub(crate) fn pair_features_with_semantic(
         retrieval_feature_families: feature_families(contributions),
         declaration_kinds: declaration_kinds(left, right),
         evidence_mode: evidence_mode(left, right),
-        vector_evidence: None,
         structural_fingerprint_families: structural_fingerprint_families(left, right),
         role_overlap: role_overlap(left, right),
         module_relation: module_relation(left, right),
@@ -102,41 +85,6 @@ pub(crate) fn pair_features_with_semantic(
             .map(|evidence| vec![evidence.semantic_obligation_fact()])
             .unwrap_or_default(),
         cheap_blockers: cheap_blockers(left, right, contributions),
-    }
-}
-
-pub(crate) fn vector_evidence(score: f64, rank: usize) -> SearchVectorEvidence {
-    let reciprocal_rank_micros = 1_000_000usize
-        .checked_div(rank)
-        .unwrap_or_default()
-        .min(u32::MAX as usize) as u32;
-    SearchVectorEvidence {
-        version: VECTOR_EVIDENCE_FEATURE_VERSION.to_owned(),
-        score_bucket: score_bucket(score).to_owned(),
-        rank_bucket: rank_bucket(rank).to_owned(),
-        reciprocal_rank_micros,
-        top_k_member: true,
-    }
-}
-
-fn score_bucket(score: f64) -> &'static str {
-    if score >= 0.90 {
-        "very-high"
-    } else if score >= 0.80 {
-        "high"
-    } else if score >= 0.70 {
-        "medium"
-    } else {
-        "low"
-    }
-}
-
-fn rank_bucket(rank: usize) -> &'static str {
-    match rank {
-        1 => "rank-1",
-        2 | 3 => "rank-2-3",
-        4..=10 => "rank-4-10",
-        _ => "rank-11-plus",
     }
 }
 

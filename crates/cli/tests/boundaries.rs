@@ -124,6 +124,17 @@ fn dependency_direction_keeps_lower_crates_out_of_report_and_cli() {
                 );
             }
         }
+        if matches!(
+            name.as_str(),
+            "lean-dup-search" | "lean-dup-eval" | "lean-dup-report" | "lean-dup-cli"
+        ) {
+            for forbidden in ["lean-dup-embedding", "lean-dup-vector-index", "lean-dup-vector-search"] {
+                assert!(
+                    !dependencies.iter().any(|dependency| dependency == forbidden),
+                    "{name} must not depend on detachable vector experiment crate {forbidden}"
+                );
+            }
+        }
     }
 }
 
@@ -196,6 +207,23 @@ fn vector_database_dependency_stays_inside_vector_index_crate() {
 }
 
 #[test]
+fn vector_experiment_is_the_only_embedding_and_vector_index_consumer() {
+    let manifests = crate_manifests();
+    for (name, manifest) in manifests {
+        let dependencies = dependency_names(&manifest);
+        for detachable_dependency in ["lean-dup-embedding", "lean-dup-vector-index"] {
+            assert!(
+                !dependencies
+                    .iter()
+                    .any(|dependency| dependency == detachable_dependency)
+                    || name == "lean-dup-vector-search",
+                "{name} must not depend on {detachable_dependency}; vector search must stay deletable"
+            );
+        }
+    }
+}
+
+#[test]
 fn old_file_shaped_modules_are_not_public_api() {
     let root = repo_root();
     let search_lib = fs::read_to_string(root.join("crates/search/src/lib.rs")).expect("read search lib");
@@ -218,6 +246,9 @@ fn old_file_shaped_modules_are_not_public_api() {
         "ScorerConfig",
         "ScorerWeights",
         "ScorerThresholds",
+        "SearchVector",
+        "VectorSearch",
+        "SearchEmbedding",
     ] {
         assert!(!search_lib.contains(forbidden), "search exposes {forbidden}");
     }
@@ -272,6 +303,9 @@ fn old_file_shaped_modules_are_not_public_api() {
         !eval_lib.contains("peak_rss_bytes"),
         "eval exposes runtime memory measurement"
     );
+    for forbidden in ["VectorSearch", "SearchVector", "SearchEmbedding"] {
+        assert!(!eval_lib.contains(forbidden), "eval exposes {forbidden}");
+    }
 
     let worker_lib = fs::read_to_string(root.join("crates/worker/src/lib.rs")).expect("read worker lib");
     assert!(
@@ -314,6 +348,9 @@ fn old_file_shaped_modules_are_not_public_api() {
         "pub cache: CacheDiagnostics,",
         "CacheCleanup(CacheCleanupReport)",
         "Eval(EvalOutput)",
+        "vector_search",
+        "VectorSearch",
+        "EmbeddingPrepare",
     ] {
         assert!(!reports.contains(forbidden), "report DTO exposes {forbidden}");
     }
@@ -353,13 +390,10 @@ fn old_file_shaped_modules_are_not_public_api() {
                 assert!(!contents.contains(forbidden), "{display} imports {forbidden}");
             }
         }
-        if !path.starts_with(root.join("crates/embedding"))
-            && !path.starts_with(root.join("crates/cli"))
-            && !path.starts_with(root.join("crates/search"))
-        {
+        if !path.starts_with(root.join("crates/embedding")) && !path.starts_with(root.join("crates/vector-search")) {
             assert!(
                 !contents.contains("lean_dup_embedding::"),
-                "{display} imports lean_dup_embedding outside hidden CLI prepare or search vector experiment boundaries"
+                "{display} imports lean_dup_embedding outside vector experiment boundaries"
             );
         }
         if !path.starts_with(root.join("crates/embedding")) {
@@ -379,7 +413,7 @@ fn old_file_shaped_modules_are_not_public_api() {
                 );
             }
         }
-        if !path.starts_with(root.join("crates/vector-index")) {
+        if !path.starts_with(root.join("crates/vector-index")) && !path.starts_with(root.join("crates/vector-search")) {
             for forbidden in ["lancedb::", "qdrant_client::", "sqlite_vec::", "hnsw_rs::"] {
                 assert!(
                     !contents.contains(forbidden),
@@ -387,13 +421,10 @@ fn old_file_shaped_modules_are_not_public_api() {
                 );
             }
         }
-        if !path.starts_with(root.join("crates/vector-index"))
-            && !path.starts_with(root.join("crates/search"))
-            && !path.starts_with(root.join("crates/cli/tests"))
-        {
+        if !path.starts_with(root.join("crates/vector-search")) && !path.starts_with(root.join("crates/cli/tests")) {
             assert!(
                 !contents.contains("lean_dup_vector_index::"),
-                "{display} imports lean_dup_vector_index outside hidden search vector candidate generation"
+                "{display} imports lean_dup_vector_index outside vector experiment crate"
             );
         }
     }

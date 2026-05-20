@@ -30,7 +30,6 @@ pub struct SearchStageMetrics {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct CandidateStageSurvival {
-    pub vector_generated: CountMetric,
     pub symbolic_generated: CountMetric,
     pub merged_generated: CountMetric,
     pub ranked: CountMetric,
@@ -67,12 +66,6 @@ pub fn score(labels: &GoldLabels, observed: &ObservedRun, k_values: &[usize]) ->
         .pairs
         .iter()
         .filter(|pair| pair.generated)
-        .map(|pair| pair.pair.clone())
-        .collect::<FxHashSet<_>>();
-    let vector_generated_pairs = observed
-        .pairs
-        .iter()
-        .filter(|pair| pair.vector_generated)
         .map(|pair| pair.pair.clone())
         .collect::<FxHashSet<_>>();
     let symbolic_generated_pairs = observed
@@ -137,7 +130,6 @@ pub fn score(labels: &GoldLabels, observed: &ObservedRun, k_values: &[usize]) ->
             total: labels.positives.len(),
         },
         candidate_stage_recall: CandidateStageSurvival {
-            vector_generated: count_labeled(&labels.positives, &vector_generated_pairs),
             symbolic_generated: count_labeled(&labels.positives, &symbolic_generated_pairs),
             merged_generated: count_labeled(&labels.positives, &merged_generated_pairs),
             ranked: count_labeled(&labels.positives, &ranked_pairs),
@@ -165,7 +157,6 @@ pub fn score(labels: &GoldLabels, observed: &ObservedRun, k_values: &[usize]) ->
             },
         },
         hard_negative_stage_survival: CandidateStageSurvival {
-            vector_generated: count_labeled(&labels.hard_negatives, &vector_generated_pairs),
             symbolic_generated: count_labeled(&labels.hard_negatives, &symbolic_generated_pairs),
             merged_generated: count_labeled(&labels.hard_negatives, &merged_generated_pairs),
             ranked: count_labeled(&labels.hard_negatives, &ranked_pairs),
@@ -200,7 +191,6 @@ pub fn aggregate(_suite: &str, runs: &[&SearchStageMetrics]) -> SearchStageMetri
     SearchStageMetrics {
         candidate_generation_recall: sum_count(runs, |metrics| &metrics.candidate_generation_recall),
         candidate_stage_recall: CandidateStageSurvival {
-            vector_generated: sum_count(runs, |metrics| &metrics.candidate_stage_recall.vector_generated),
             symbolic_generated: sum_count(runs, |metrics| &metrics.candidate_stage_recall.symbolic_generated),
             merged_generated: sum_count(runs, |metrics| &metrics.candidate_stage_recall.merged_generated),
             ranked: sum_count(runs, |metrics| &metrics.candidate_stage_recall.ranked),
@@ -217,7 +207,6 @@ pub fn aggregate(_suite: &str, runs: &[&SearchStageMetrics]) -> SearchStageMetri
             visible_queue: sum_count(runs, |metrics| &metrics.hard_negative_survival.visible_queue),
         },
         hard_negative_stage_survival: CandidateStageSurvival {
-            vector_generated: sum_count(runs, |metrics| &metrics.hard_negative_stage_survival.vector_generated),
             symbolic_generated: sum_count(runs, |metrics| &metrics.hard_negative_stage_survival.symbolic_generated),
             merged_generated: sum_count(runs, |metrics| &metrics.hard_negative_stage_survival.merged_generated),
             ranked: sum_count(runs, |metrics| &metrics.hard_negative_stage_survival.ranked),
@@ -567,7 +556,6 @@ mod tests {
             pair: GoldPair::new(left, right),
             generated: true,
             symbolic_generated: true,
-            vector_generated: false,
             merged_generated: true,
             ranked: true,
             generation_policy: "local_duplicate_audit".to_owned(),
@@ -584,7 +572,6 @@ mod tests {
             pair: GoldPair::new(left, right),
             generated: true,
             symbolic_generated: true,
-            vector_generated: false,
             merged_generated: true,
             ranked: false,
             generation_policy: "local_duplicate_audit".to_owned(),

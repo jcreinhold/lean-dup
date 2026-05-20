@@ -176,7 +176,6 @@ mod tests {
             semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary::default(),
             semantic_obligation_yield: Vec::new(),
             retrieval: SearchRetrievalObservation::default(),
-            embedding_documents: lean_dup_search::SearchEmbeddingDocuments::default(),
         };
 
         let dataset = build("unit", &labels, &observation);
@@ -211,7 +210,6 @@ mod tests {
                 semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary::default(),
                 semantic_obligation_yield: Vec::new(),
                 retrieval: SearchRetrievalObservation::default(),
-                embedding_documents: lean_dup_search::SearchEmbeddingDocuments::default(),
             },
         );
 
@@ -252,15 +250,11 @@ mod tests {
             right: right.to_owned(),
             generated: true,
             symbolic_generated: true,
-            vector_generated: false,
             merged_generated: true,
             ranked: true,
             generation_policy: "local_duplicate_audit".to_owned(),
             rank: Some(rank),
             shown: rank == 1,
-            left_content_hash: None,
-            right_content_hash: None,
-            vector_rank: None,
             origin: "workspace".to_owned(),
             feature_families: vec!["statement_fingerprint".to_owned()],
             survived_shown_filter: rank == 1,
@@ -268,7 +262,6 @@ mod tests {
                 retrieval_feature_families: vec!["statement_fingerprint".to_owned()],
                 declaration_kinds: vec!["theorem".to_owned()],
                 evidence_mode: SearchEvidenceMode::Local,
-                vector_evidence: None,
                 structural_fingerprint_families: vec!["statement_fingerprint".to_owned()],
                 role_overlap: Vec::new(),
                 module_relation: SearchModuleRelation::SameModule {

@@ -3498,7 +3498,6 @@ dependencies = [
  "assert_cmd",
  "clap",
  "lean-dup-diagnostics",
- "lean-dup-embedding",
  "lean-dup-eval",
  "lean-dup-index",
  "lean-dup-project",
@@ -3602,10 +3601,8 @@ name = "lean-dup-search"
 version = "0.1.0"
 dependencies = [
  "lean-dup-diagnostics",
- "lean-dup-embedding",
  "lean-dup-index",
  "lean-dup-project",
- "lean-dup-vector-index",
  "lean-dup-worker",
  "rustc-hash",
  "serde",
@@ -3630,6 +3627,22 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "lean-dup-vector-search"
+version = "0.1.0"
+dependencies = [
+ "lean-dup-diagnostics",
+ "lean-dup-embedding",
+ "lean-dup-eval",
+ "lean-dup-index",
+ "lean-dup-search",
+ "lean-dup-vector-index",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

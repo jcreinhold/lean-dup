@@ -1,10 +1,11 @@
 # Embedding-backed vector search
 
-Hidden architecture: a persisted declaration-vector corpus built once and reused across
-audits, queried as a candidate-generation stage that runs alongside symbolic retrieval.
-The default audit path stays read-only, deterministic, embedding-free, and authoritative.
-Vector candidate facts may enter threshold calibration only after a labeled validation
-shows recall gain (see [vector-search-validation.md](vector-search-validation.md)).
+Hidden architecture: an optional experiment slice that owns persisted declaration-vector
+corpora, embedding model use, vector candidate generation, vector scorer variants, and
+vector validation artifacts. The default audit path stays read-only, deterministic,
+embedding-free, vector-index-free, and authoritative. Vector candidate facts may enter
+threshold calibration only after a labeled validation shows recall gain (see
+[semantic-search-validation-decision.md](semantic-search-validation-decision.md)).
 
 The prior rerank-only implementation over the symbolic candidate pool has been removed.
 It was a useful negative probe, but it did not test candidate-generation recall and is
@@ -18,19 +19,35 @@ not part of the supported architecture.
 - *`lean-dup-vector-index`* owns persisted declaration-vector corpora, backend choice,
   corpus identity, index/cache invalidation, nearest-neighbor lookup, and corpus
   diagnostics.
-- *`lean-dup-search`* owns declaration-document construction, vector candidate-generation
-  policy, and merging vector candidates with symbolic candidates before scoring.
-- *`lean-dup-eval`* owns labels, experiment lifecycle, vector-stage metrics, artifacts,
-  and go/no-go decisions.
-- *`lean-dup-report`* projects stable status and artifact facts without depending on
-  model runtime or vector-index internals.
-- *`lean-dup-cli`* owns hidden flags, explicit preparation commands, and I/O behavior.
+- *`lean-dup-vector-search`* owns declaration-document construction for vector runs,
+  vector candidate-generation policy, vector evidence/scorer variants, vector-stage
+  metrics, hidden validation artifacts, validation bounds, progress, and cache/corpus
+  cost accounting.
+- *`lean-dup-search`* owns symbolic retrieval, symbolic pair facts, review ranking,
+  semantic probes, and source/replacement facts. It does not depend on embedding,
+  vector-index, or vector-search.
+- *`lean-dup-eval`* owns ordinary labels, symbolic metrics, and quality gates. Vector-
+  specific truth joins and artifact rows belong to `lean-dup-vector-search`.
+- *`lean-dup-report`* projects ordinary eval/audit reports only; vector artifacts are
+  written by the vector experiment crate.
+- *`lean-dup-cli`* owns ordinary symbolic command dispatch. Hidden vector command wiring
+  belongs to `lean-dup-vector-search`.
 
 Public surfaces are three small facades: model-profile (prepare a supported model, embed
 a batch, report stable model/input/runtime facts); vector-corpus (build, open, reuse,
 query a persisted declaration-vector corpus while reporting stable corpus/build/query
-facts); search-workflow stage counters (vector-generated, symbolic-generated,
-merged-generated, ranked, visible).
+facts); vector-validation workflow (`VectorValidationRequest`, `VectorValidationOutcome`,
+`run_vector_validation`). Ordinary search/eval/report APIs expose none of these vector
+facts.
+
+### Deletion contract
+
+The vector experiment is removable as a vertical slice. Deleting `crates/vector-search`,
+`crates/embedding`, and `crates/vector-index` must not require edits to `crates/search`,
+`crates/eval`, or `crates/report`. Core crates must not re-export `SearchVector*`,
+`VectorSearch*`, embedding-document DTOs, vector scorer variants, vector generated
+counters, or vector artifact paths. Boundary tests enforce that only `lean-dup-vector-search`
+depends on `lean-dup-embedding` and `lean-dup-vector-index`.
 
 Model/profile experiments are selected in
 [embedding-model-selection.md](embedding-model-selection.md), not by search or eval. The
@@ -84,14 +101,15 @@ comparison indexes are present, the corpus is built from those comparison declar
 otherwise it is built from the local workspace so fixture and local experiments can run.
 Provenance controls reuse: a valid corpus is reopened, not rebuilt.
 
-Vector candidates merge with symbolic candidates before scoring. Existing symbolic pairs
-gain vector facts when the nearest-neighbor query also finds them. Vector-only pairs are
-generated and ranked so eval can measure recall, but they are not shown by default; vector
-score is not a production visibility threshold.
+Inside `lean-dup-vector-search`, vector candidates merge with symbolic observations before
+hidden scorer variants run. Existing symbolic pairs may gain vector facts when the
+nearest-neighbor query also finds them. Vector-only pairs are generated and ranked for
+experiment measurement, but they are not part of production visibility.
 
 ### 35M design note: eligibility and top-k
 
-`lean-dup-search` owns vector corpus and query eligibility. The hidden knowledge is Lean
+Historically this policy sat in `lean-dup-search`; after the deletability refactor it
+belongs to `lean-dup-vector-search`. The hidden knowledge is Lean
 actionability: generated declarations, private declarations, synthetic fixtures,
 low-signal declarations, missing statements, non-actionable declarations, and unsupported
 kinds. Embedding must not learn those concepts, and vector-index must not learn them
@@ -118,10 +136,11 @@ Design It Twice:
   runtime and vector persistence crates to know Lean actionability policy.
 - *Eval filters rows after the observation.* Rejected: eval would reconstruct candidate
   generation and could not report what search actually queried.
-- *Search owns named corpus/query eligibility policies.* Chosen: search already owns
-  candidate policy, generated/private facts, actionability, and merge semantics. This
-  keeps the public surface small and prevents temporal decomposition across search,
-  embedding, vector-index, and eval.
+- *A vector experiment slice owns named corpus/query eligibility policies.* Chosen:
+  vector validation needs Lean actionability facts and vector-specific cost/provenance
+  rules, but symbolic search should not expose vector-shaped branches. This keeps the
+  public surface small and prevents temporal decomposition across search, embedding,
+  vector-index, and eval.
 
 The default hidden policy is `actionable-public-statement`. It excludes declarations with
 stable reasons: `generated`, `private`, `synthetic`, `low-signal`, `missing-statement`,
@@ -130,13 +149,12 @@ excluded declarations for experiments, but the artifact must record that policy 
 Saturated runs (`top_k >= eligible_corpus_size`) are smoke evidence only; they cannot
 support vector-search quality claims.
 
-Search controls declaration-document selection, per-query top-k, symbolic/vector merge
-ordering, and the rule that vector-only candidates are ranked for measurement but not
-shown by vector score alone. Eval passes a search-owned vector request; search returns
-stable observation facts: vector summary, the five stage counters above, optional vector
-score, optional vector rank. Model profile internals, FastEmbed runtime mechanics, final
-model input strings, LanceDB storage, ANN parameters, vector database paths, table names,
-and vector-cache filenames stay out of search, eval, and report artifacts.
+`lean-dup-vector-search` controls declaration-document selection, per-query top-k,
+symbolic/vector merge ordering for hidden variants, and the rule that vector-only
+candidates are ranked for measurement but not shown by vector score alone. Model profile
+internals, FastEmbed runtime mechanics, final model input strings, LanceDB storage, ANN
+parameters, vector database paths, table names, and vector-cache filenames stay out of
+search, eval, and report artifacts.
 
 Stage counters in hidden artifacts:
 

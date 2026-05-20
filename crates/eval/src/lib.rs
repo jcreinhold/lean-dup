@@ -10,11 +10,7 @@ mod error;
 mod eval;
 
 pub use error::{Error, Result};
-pub use eval::{
-    CountMetric, DEFAULT_VECTOR_MAX_DECLARATIONS, DEFAULT_VECTOR_MAX_QUERIES, DEFAULT_VECTOR_MAX_RSS_BYTES,
-    DEFAULT_VECTOR_MAX_RUNTIME_MS, EvalOutput, EvalRequest, EvaluationMetrics, EvaluationRunReport,
-    VectorSearchRequest, VectorValidationBounds, run,
-};
+pub use eval::{CountMetric, EvalOutput, EvalRequest, EvaluationMetrics, EvaluationRunReport, run};
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -23,8 +19,6 @@ pub enum EvalSuite {
     Default,
     /// Checked-in labels that guard against known false-positive patterns.
     HardNegatives,
-    /// Hidden command-level fixture for semantic/vector-search validation plumbing.
-    VectorFixture,
     /// Private operator suite over the local KanProofs corpus.
     ManualInternal,
     /// Private operator suite comparing local declarations against mathlib.
@@ -38,7 +32,6 @@ impl EvalSuite {
         match self {
             Self::Default => "default",
             Self::HardNegatives => "hard-negatives",
-            Self::VectorFixture => "vector-fixture",
             Self::ManualInternal => "manual-internal",
             Self::ManualMathlib => "manual-mathlib",
             Self::ProductionGate => "production-gate",

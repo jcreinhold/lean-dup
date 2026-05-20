@@ -1,9 +1,9 @@
 # Crate Factoring
 
-Ten Rust crates, each owning one kind of hidden knowledge. The split is functional: a crate exists to localize a
+Eleven Rust crates, each owning one kind of hidden knowledge. The split is functional: a crate exists to localize a
 class of change (Lean protocol mechanics, Lake project resolution, persisted storage, search and review policy,
-embedding model acquisition/runtime policy, vector-corpus persistence, report projection, quality measurement,
-terminal I/O), not to mirror one old source file.
+embedding model acquisition/runtime policy, vector-corpus persistence, detachable vector experiments, report
+projection, quality measurement, terminal I/O), not to mirror one old source file.
 
 For the pipeline the crates implement, see [end-to-end-architecture.md](end-to-end-architecture.md).
 
@@ -16,8 +16,9 @@ For the pipeline the crates implement, see [end-to-end-architecture.md](end-to-e
 | `lean-dup-project` | Lake workspace discovery, module roots, mathlib source/execution roots, toolchain facts. | index, search, eval, cli |
 | `lean-dup-index` | SQLite indexes, cache keys, provenance metadata, latest pointers, cache diagnostics, cleanup. | search, eval, cli |
 | `lean-dup-vector-index` | Persisted declaration-vector corpora, vector database backend policy, corpus provenance, nearest-declaration lookup. | search, eval, report, cli |
-| `lean-dup-search` | Audit workflow, candidate generation, semantic evidence planning, ranking, source facts, replacement hints. | eval, report, cli |
+| `lean-dup-search` | Symbolic audit workflow, symbolic candidate generation, semantic evidence planning, ranking, source facts, replacement hints. | embedding, vector-index, vector-search, eval, report, cli |
 | `lean-dup-embedding` | Embedding model acquisition, local text embedding runtime, vector-cache policy, stable embedding facts. | search, eval, report, cli |
+| `lean-dup-vector-search` | Hidden semantic/vector experiment workflow, vector validation artifacts, vector scorer variants, progress/cost accounting. | lower crates may not depend on it |
 | `lean-dup-report` | Stable JSON DTOs, explanations, text rendering, report-owned cache/show/diff/eval projections, wording. | cli |
 | `lean-dup-eval` | Labels, suites, stage metrics, quality gates, hidden perf workload artifacts. | cli |
 | `lean-dup-cli` | clap parsing, command dispatch, stdout/stderr routing, output file writes, binary compatibility. | top layer; depends on the others |
@@ -45,13 +46,18 @@ Each crate root is the supported public facade. Submodules and internals stay pr
 - **`lean-dup-search`**: `ReviewProfile`, `ProbePolicy`, `AuditRequest`, `AuditOutput`,
   `ShowOutput`, `DiffOutput`, `run_audit`, `run_show`, `run_diff`, `observe_search`. Retrieval
   keys, ranking constants, probe obligations, source-scan policy, and replacement-hint internals
-  stay private.
+  stay private. Search does not expose vector candidate DTOs, embedding-document DTOs, vector
+  scorer variants, or vector artifact fields.
 - **`lean-dup-embedding`**: `EmbeddingModelSpec`, `EmbeddingAcquisitionPolicy`,
   `EmbeddingPrepareRequest`, `EmbeddingPrepareResult`, stable input-format ids,
   `prepare_embedding_model`, and batch text embedding request/result DTOs. Model profiles,
   FastEmbed backend selection, Hugging Face cache
   layout, model filenames, tokenizer/runtime internals, normalization, vector-cache format, and
   download mechanics stay private. Normal audit/eval paths do not depend on this crate.
+- **`lean-dup-vector-search`**: `VectorValidationRequest`, `VectorValidationOutcome`, and
+  `run_vector_validation`. This is the only public entry point for hidden semantic/vector
+  experiments. It may depend on `lean-dup-search`, `lean-dup-eval`, `lean-dup-embedding`, and
+  `lean-dup-vector-index`; no lower crate may depend on it.
 - **`lean-dup-report`**: report DTOs, projection functions, explanation facts, `render_text`.
 - **`lean-dup-eval`**: `EvalSuite`, `EvalRequest`, `EvalOutput`, stage metrics, quality
   denominators. Text rendering belongs to report; runtime/memory measurement belongs to
@@ -78,3 +84,12 @@ change with the local ML runtime, not with retrieval, labels, report wording, or
 The vector index is separate from both `lean-dup-index` and `lean-dup-search` because vector
 database persistence, ANN tuning, corpus provenance, and backend replacement change for different
 reasons than SQLite feature storage or search candidate policy.
+
+## Vector Deletion Contract
+
+Vector search is a detachable experiment slice, not part of core symbolic audit/eval/report. Removing
+`crates/vector-search`, `crates/embedding`, and `crates/vector-index` should not require edits to
+`crates/search`, `crates/eval`, or `crates/report`. The core crates must not depend on those crates,
+re-export vector DTOs, include vector fields in ordinary report JSON, or mention backend/model runtime
+vocabulary in public interfaces. Hidden vector command wiring belongs in `lean-dup-vector-search`, not
+in the ordinary `lean-dup` CLI.

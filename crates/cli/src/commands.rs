@@ -2,23 +2,16 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::cli::{
-    AuditArgs, CacheCleanupArgs, Cli, Command, DiffArgs, DoctorArgs, EmbeddingCommand, EmbeddingPrepareArgs, EvalArgs,
-    EvalFormat, IndexArgs, IndexMathlibArgs, OutputFormat, ShowArgs,
+    AuditArgs, CacheCleanupArgs, Cli, Command, DiffArgs, DoctorArgs, EvalArgs, EvalFormat, IndexArgs, IndexMathlibArgs,
+    OutputFormat, ShowArgs,
 };
 use lean_dup_diagnostics::progress::Reporter;
-use lean_dup_embedding::{
-    EmbeddingAcquisitionPolicy, EmbeddingCacheStatus, EmbeddingModelFileRole, EmbeddingModelFileState,
-    EmbeddingModelSpec, EmbeddingPrepareRequest, EmbeddingPrepareResult, prepare_embedding_model,
-};
-use lean_dup_eval::{EvalRequest, VectorSearchRequest, VectorValidationBounds};
+use lean_dup_eval::EvalRequest;
 use lean_dup_index::CleanupPolicy;
 use lean_dup_index::{self, CacheFacts};
 use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexStore, IndexSummary};
 use lean_dup_project::{ResolvedWorkspace, WorkspaceRequest, resolve, resolve_project_mathlib};
-use lean_dup_report::{
-    AuditReport, CacheCleanupReportDto, DiffReport, DoctorReport, EmbeddingPrepareReportDto,
-    EmbeddingRequiredFileReportDto, IndexReport, Report, ShowReport,
-};
+use lean_dup_report::{AuditReport, CacheCleanupReportDto, DiffReport, DoctorReport, IndexReport, Report, ShowReport};
 use lean_dup_search::{AuditRequest, run_audit, run_diff, run_show};
 use lean_dup_worker::WorkerClient;
 
@@ -71,16 +64,6 @@ pub fn run(cli: Cli) -> Result<Outcome> {
             let _format = args.format;
             (Report::Perf(crate::perf::run(args)?), OutputFormat::Json, None)
         }
-        Command::Embedding(args) => match args.command {
-            EmbeddingCommand::Prepare(prepare_args) => {
-                let format = prepare_args.format;
-                (
-                    Report::EmbeddingPrepare(embedding_prepare(prepare_args, &mut reporter)?),
-                    format,
-                    None,
-                )
-            }
-        },
         Command::Show(args) => (
             Report::Show(Box::new(show(args, &mut reporter)?)),
             OutputFormat::Text,
@@ -282,7 +265,6 @@ fn audit_request(args: AuditArgs) -> AuditRequest {
 }
 
 fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<lean_dup_report::EvalReportDto> {
-    let vector_search = vector_search_request(&args);
     Ok(lean_dup_report::eval_report(lean_dup_eval::run(
         EvalRequest {
             suite: args.suite.into(),
@@ -292,113 +274,9 @@ fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<lean_dup_report::Eval
             k_values: args.k_values,
             write_search_dataset: args.write_search_dataset,
             write_scorer_ablations: args.write_scorer_ablations,
-            vector_search,
         },
         reporter,
     )?))
-}
-
-fn vector_search_request(args: &EvalArgs) -> Option<VectorSearchRequest> {
-    args.write_vector_search.then(|| VectorSearchRequest {
-        profile_id: args.vector_profile_id.clone(),
-        revision: args.vector_revision.clone(),
-        input_format: args.vector_input_format.into(),
-        acquisition_policy: args.vector_acquisition.into(),
-        model_cache_root: args.vector_model_cache_root.clone(),
-        text_vector_cache_root: args.vector_text_cache_root.clone(),
-        corpus_cache_root: args.vector_corpus_cache_root.clone(),
-        document_policy: args.vector_document_policy.into(),
-        eligibility_policy: args.vector_eligibility.into(),
-        bounds: VectorValidationBounds {
-            max_declarations: args.vector_max_declarations,
-            max_queries: args.vector_max_queries,
-            max_runtime_ms: args.vector_max_runtime_ms,
-            max_rss_bytes: args.vector_max_rss_bytes,
-        },
-    })
-}
-
-fn embedding_prepare(args: EmbeddingPrepareArgs, reporter: &mut Reporter) -> Result<EmbeddingPrepareReportDto> {
-    let model = EmbeddingModelSpec {
-        id: args.model_id,
-        revision: args.revision,
-    };
-    let acquisition_policy = args.policy.into();
-    let result = reporter.measure("embedding.prepare", |_| {
-        prepare_embedding_model(EmbeddingPrepareRequest {
-            model,
-            acquisition_policy,
-            cache_root: args.cache_root,
-        })
-    })?;
-    Ok(embedding_prepare_report(result))
-}
-
-fn embedding_prepare_report(result: EmbeddingPrepareResult) -> EmbeddingPrepareReportDto {
-    EmbeddingPrepareReportDto {
-        status: if result.cache.status == EmbeddingCacheStatus::Prepared {
-            "ok".to_owned()
-        } else {
-            "warning".to_owned()
-        },
-        model_id: result.model.id,
-        revision: result.model.revision,
-        profile_id: result.model.profile_id,
-        backend_family: result.model.backend_family,
-        dimension: result.model.dimension,
-        input_roles: result.model.input_roles,
-        acquisition_policy: acquisition_policy_name(result.acquisition_policy).to_owned(),
-        cache_status: cache_status_name(result.cache.status).to_owned(),
-        cache_root: result.cache.cache_label.map(PathBuf::from),
-        elapsed_ms: result.elapsed_ms,
-        total_bytes: result.total_bytes,
-        required_files: result
-            .required_files
-            .into_iter()
-            .map(|file| EmbeddingRequiredFileReportDto {
-                role: file_role_name(file.role).to_owned(),
-                state: file_state_name(file.state).to_owned(),
-                bytes: file.bytes,
-                reason: file.reason,
-            })
-            .collect(),
-        reasons: result.reasons,
-    }
-}
-
-fn acquisition_policy_name(policy: EmbeddingAcquisitionPolicy) -> &'static str {
-    match policy {
-        EmbeddingAcquisitionPolicy::CacheOnly => "cache-only",
-        EmbeddingAcquisitionPolicy::DownloadIfMissing => "download-if-missing",
-    }
-}
-
-fn cache_status_name(status: EmbeddingCacheStatus) -> &'static str {
-    match status {
-        EmbeddingCacheStatus::NotPrepared => "not-prepared",
-        EmbeddingCacheStatus::Prepared => "prepared",
-        EmbeddingCacheStatus::Unusable => "unusable",
-        EmbeddingCacheStatus::Skipped => "skipped",
-    }
-}
-
-fn file_role_name(role: EmbeddingModelFileRole) -> &'static str {
-    match role {
-        EmbeddingModelFileRole::Config => "config",
-        EmbeddingModelFileRole::Tokenizer => "tokenizer",
-        EmbeddingModelFileRole::TokenizerConfig => "tokenizer-config",
-        EmbeddingModelFileRole::SpecialTokens => "special-tokens",
-        EmbeddingModelFileRole::RuntimeModel => "runtime-model",
-    }
-}
-
-fn file_state_name(state: EmbeddingModelFileState) -> &'static str {
-    match state {
-        EmbeddingModelFileState::Present => "present",
-        EmbeddingModelFileState::Downloaded => "downloaded",
-        EmbeddingModelFileState::Missing => "missing",
-        EmbeddingModelFileState::Unavailable => "unavailable",
-    }
 }
 
 fn show(args: ShowArgs, reporter: &mut Reporter) -> Result<ShowReport> {

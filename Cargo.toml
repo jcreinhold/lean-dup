@@ -6,6 +6,7 @@ members = [
     "crates/project",
     "crates/index",
     "crates/search",
+    "crates/vector-search",
     "crates/embedding",
     "crates/vector-index",
     "crates/report",
@@ -27,6 +28,7 @@ lean-dup-index = { path = "crates/index" }
 lean-dup-project = { path = "crates/project" }
 lean-dup-report = { path = "crates/report" }
 lean-dup-search = { path = "crates/search" }
+lean-dup-vector-search = { path = "crates/vector-search" }
 lean-dup-vector-index = { path = "crates/vector-index" }
 lean-dup-worker = { path = "crates/worker" }
 rusqlite = { version = "0.39", features = ["bundled"] }

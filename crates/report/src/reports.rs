@@ -21,36 +21,9 @@ pub enum Report {
     IndexMathlib(IndexReport),
     Audit(Box<AuditReport>),
     Eval(Box<EvalReportDto>),
-    EmbeddingPrepare(EmbeddingPrepareReportDto),
     Perf(PerfReport),
     Show(Box<ShowReport>),
     Diff(DiffReport),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct EmbeddingPrepareReportDto {
-    pub status: String,
-    pub model_id: String,
-    pub revision: Option<String>,
-    pub profile_id: String,
-    pub backend_family: String,
-    pub dimension: usize,
-    pub input_roles: Vec<String>,
-    pub acquisition_policy: String,
-    pub cache_status: String,
-    pub cache_root: Option<PathBuf>,
-    pub elapsed_ms: u128,
-    pub total_bytes: Option<u64>,
-    pub required_files: Vec<EmbeddingRequiredFileReportDto>,
-    pub reasons: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct EmbeddingRequiredFileReportDto {
-    pub role: String,
-    pub state: String,
-    pub bytes: Option<u64>,
-    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -63,10 +36,6 @@ pub struct EvalReportDto {
     pub search_dataset_artifact: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scorer_ablation_artifact: Option<PathBuf>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub vector_search_status: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub vector_search_artifact: Option<PathBuf>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub runs: Vec<EvalRunReportDto>,
 }
@@ -81,10 +50,6 @@ pub struct EvalRunReportDto {
     pub metrics: Option<EvalMetricsDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub vector_search_status: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub vector_search_artifact: Option<PathBuf>,
     pub manual: bool,
 }
 
@@ -142,7 +107,6 @@ pub struct EvalStageMetricsDto {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct EvalCandidateStageSurvivalDto {
-    pub vector_generated: EvalCountMetricDto,
     pub symbolic_generated: EvalCountMetricDto,
     pub merged_generated: EvalCountMetricDto,
     pub ranked: EvalCountMetricDto,
@@ -511,8 +475,6 @@ pub fn eval_report(report: EvalOutput) -> EvalReportDto {
         metrics: eval_metrics_dto(report.metrics),
         search_dataset_artifact: report.search_dataset_artifact,
         scorer_ablation_artifact: report.scorer_ablation_artifact,
-        vector_search_status: report.vector_search_status,
-        vector_search_artifact: report.vector_search_artifact,
         runs: report
             .runs
             .into_iter()
@@ -522,8 +484,6 @@ pub fn eval_report(report: EvalOutput) -> EvalReportDto {
                 scorer_version: run.scorer_version,
                 metrics: run.metrics.map(eval_metrics_dto),
                 reason: run.reason,
-                vector_search_status: run.vector_search_status,
-                vector_search_artifact: run.vector_search_artifact,
                 manual: run.manual,
             })
             .collect(),
@@ -549,7 +509,6 @@ fn eval_metrics_dto(metrics: lean_dup_eval::EvaluationMetrics) -> EvalMetricsDto
         stage_metrics: EvalStageMetricsDto {
             candidate_generation_recall: eval_count_metric_dto(metrics.stage_metrics.candidate_generation_recall),
             candidate_stage_recall: EvalCandidateStageSurvivalDto {
-                vector_generated: eval_count_metric_dto(metrics.stage_metrics.candidate_stage_recall.vector_generated),
                 symbolic_generated: eval_count_metric_dto(
                     metrics.stage_metrics.candidate_stage_recall.symbolic_generated,
                 ),
@@ -596,9 +555,6 @@ fn eval_metrics_dto(metrics: lean_dup_eval::EvaluationMetrics) -> EvalMetricsDto
                 visible_queue: eval_count_metric_dto(metrics.stage_metrics.hard_negative_survival.visible_queue),
             },
             hard_negative_stage_survival: EvalCandidateStageSurvivalDto {
-                vector_generated: eval_count_metric_dto(
-                    metrics.stage_metrics.hard_negative_stage_survival.vector_generated,
-                ),
                 symbolic_generated: eval_count_metric_dto(
                     metrics.stage_metrics.hard_negative_stage_survival.symbolic_generated,
                 ),

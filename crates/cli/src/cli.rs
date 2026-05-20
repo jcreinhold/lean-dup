@@ -1,15 +1,8 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use lean_dup_embedding::EmbeddingAcquisitionPolicy;
-use lean_dup_eval::{
-    DEFAULT_VECTOR_MAX_DECLARATIONS, DEFAULT_VECTOR_MAX_QUERIES, DEFAULT_VECTOR_MAX_RSS_BYTES,
-    DEFAULT_VECTOR_MAX_RUNTIME_MS, EvalSuite,
-};
-use lean_dup_search::{
-    ProbePolicy, ReviewProfile, SearchEmbeddingDocumentPolicy, SearchVectorAcquisitionPolicy,
-    SearchVectorEligibilityPolicy, SearchVectorInputFormat,
-};
+use lean_dup_eval::EvalSuite;
+use lean_dup_search::{ProbePolicy, ReviewProfile};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
@@ -38,8 +31,6 @@ pub enum Command {
     Eval(EvalArgs),
     Show(ShowArgs),
     Diff(DiffArgs),
-    #[command(hide = true)]
-    Embedding(EmbeddingArgs),
     #[command(hide = true)]
     Perf(PerfArgs),
 }
@@ -191,77 +182,6 @@ pub struct EvalArgs {
 
     #[arg(long, hide = true)]
     pub write_scorer_ablations: bool,
-
-    #[arg(long, hide = true)]
-    pub write_vector_search: bool,
-
-    #[arg(long = "vector-acquisition", hide = true, value_enum, default_value_t = CliEmbeddingAcquisitionPolicy::CacheOnly)]
-    pub vector_acquisition: CliEmbeddingAcquisitionPolicy,
-
-    #[arg(long = "vector-profile-id", hide = true, default_value = "bge-small-en-v1.5")]
-    pub vector_profile_id: String,
-
-    #[arg(long = "vector-input-format", hide = true, value_enum, default_value_t = CliVectorInputFormat::AsymmetricQueryDocument)]
-    pub vector_input_format: CliVectorInputFormat,
-
-    #[arg(long = "vector-revision", hide = true)]
-    pub vector_revision: Option<String>,
-
-    #[arg(long = "vector-model-cache-root", hide = true)]
-    pub vector_model_cache_root: Option<PathBuf>,
-
-    #[arg(long = "vector-text-cache-root", hide = true)]
-    pub vector_text_cache_root: Option<PathBuf>,
-
-    #[arg(long = "vector-corpus-cache-root", hide = true)]
-    pub vector_corpus_cache_root: Option<PathBuf>,
-
-    #[arg(long = "vector-document-policy", hide = true, value_enum, default_value_t = CliVectorDocumentPolicy::NameAndStatement)]
-    pub vector_document_policy: CliVectorDocumentPolicy,
-
-    #[arg(long = "vector-eligibility", hide = true, value_enum, default_value_t = CliVectorEligibilityPolicy::ActionablePublicStatement)]
-    pub vector_eligibility: CliVectorEligibilityPolicy,
-
-    #[arg(long = "vector-max-declarations", hide = true, default_value_t = DEFAULT_VECTOR_MAX_DECLARATIONS)]
-    pub vector_max_declarations: usize,
-
-    #[arg(long = "vector-max-queries", hide = true, default_value_t = DEFAULT_VECTOR_MAX_QUERIES)]
-    pub vector_max_queries: usize,
-
-    #[arg(long = "vector-max-runtime-ms", hide = true, default_value_t = DEFAULT_VECTOR_MAX_RUNTIME_MS)]
-    pub vector_max_runtime_ms: u128,
-
-    #[arg(long = "vector-max-rss-bytes", hide = true, default_value_t = DEFAULT_VECTOR_MAX_RSS_BYTES)]
-    pub vector_max_rss_bytes: u64,
-}
-
-#[derive(Debug, Clone, clap::Args)]
-pub struct EmbeddingArgs {
-    #[command(subcommand)]
-    pub command: EmbeddingCommand,
-}
-
-#[derive(Debug, Clone, Subcommand)]
-pub enum EmbeddingCommand {
-    Prepare(EmbeddingPrepareArgs),
-}
-
-#[derive(Debug, Clone, clap::Args)]
-pub struct EmbeddingPrepareArgs {
-    #[arg(long, value_enum, default_value_t = CliEmbeddingAcquisitionPolicy::DownloadIfMissing)]
-    pub policy: CliEmbeddingAcquisitionPolicy,
-
-    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
-    pub format: OutputFormat,
-
-    #[arg(long = "model-id", default_value = "BAAI/bge-small-en-v1.5")]
-    pub model_id: String,
-
-    #[arg(long)]
-    pub revision: Option<String>,
-
-    #[arg(long = "cache-root", hide = true)]
-    pub cache_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, clap::Args)]
@@ -330,85 +250,9 @@ pub enum EvalFormat {
 
 #[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum CliEmbeddingAcquisitionPolicy {
-    CacheOnly,
-    DownloadIfMissing,
-}
-
-#[derive(Debug, Clone, Copy, ValueEnum)]
-pub enum CliVectorDocumentPolicy {
-    Statement,
-    NameAndStatement,
-    DefinitionAware,
-    DocstringAugmented,
-}
-
-#[derive(Debug, Clone, Copy, ValueEnum)]
-pub enum CliVectorEligibilityPolicy {
-    ActionablePublicStatement,
-    Broad,
-}
-
-#[derive(Debug, Clone, Copy, ValueEnum)]
-pub enum CliVectorInputFormat {
-    SymmetricDocument,
-    AsymmetricQueryDocument,
-}
-
-impl From<CliVectorDocumentPolicy> for SearchEmbeddingDocumentPolicy {
-    fn from(value: CliVectorDocumentPolicy) -> Self {
-        match value {
-            CliVectorDocumentPolicy::Statement => Self::Statement,
-            CliVectorDocumentPolicy::NameAndStatement => Self::NameAndStatement,
-            CliVectorDocumentPolicy::DefinitionAware => Self::DefinitionAware,
-            CliVectorDocumentPolicy::DocstringAugmented => Self::DocstringAugmented,
-        }
-    }
-}
-
-impl From<CliVectorEligibilityPolicy> for SearchVectorEligibilityPolicy {
-    fn from(value: CliVectorEligibilityPolicy) -> Self {
-        match value {
-            CliVectorEligibilityPolicy::ActionablePublicStatement => Self::ActionablePublicStatement,
-            CliVectorEligibilityPolicy::Broad => Self::Broad,
-        }
-    }
-}
-
-impl From<CliVectorInputFormat> for SearchVectorInputFormat {
-    fn from(value: CliVectorInputFormat) -> Self {
-        match value {
-            CliVectorInputFormat::SymmetricDocument => Self::SymmetricDocument,
-            CliVectorInputFormat::AsymmetricQueryDocument => Self::AsymmetricQueryDocument,
-        }
-    }
-}
-
-impl From<CliEmbeddingAcquisitionPolicy> for EmbeddingAcquisitionPolicy {
-    fn from(value: CliEmbeddingAcquisitionPolicy) -> Self {
-        match value {
-            CliEmbeddingAcquisitionPolicy::CacheOnly => Self::CacheOnly,
-            CliEmbeddingAcquisitionPolicy::DownloadIfMissing => Self::DownloadIfMissing,
-        }
-    }
-}
-
-impl From<CliEmbeddingAcquisitionPolicy> for SearchVectorAcquisitionPolicy {
-    fn from(value: CliEmbeddingAcquisitionPolicy) -> Self {
-        match value {
-            CliEmbeddingAcquisitionPolicy::CacheOnly => Self::CacheOnly,
-            CliEmbeddingAcquisitionPolicy::DownloadIfMissing => Self::DownloadIfMissing,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
 pub enum CliEvalSuite {
     Default,
     HardNegatives,
-    #[value(hide = true)]
-    VectorFixture,
     ManualInternal,
     ManualMathlib,
     ProductionGate,
@@ -419,7 +263,6 @@ impl From<CliEvalSuite> for EvalSuite {
         match value {
             CliEvalSuite::Default => Self::Default,
             CliEvalSuite::HardNegatives => Self::HardNegatives,
-            CliEvalSuite::VectorFixture => Self::VectorFixture,
             CliEvalSuite::ManualInternal => Self::ManualInternal,
             CliEvalSuite::ManualMathlib => Self::ManualMathlib,
             CliEvalSuite::ProductionGate => Self::ProductionGate,

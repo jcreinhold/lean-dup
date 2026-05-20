@@ -18,7 +18,6 @@ mod scorer;
 mod semantic_reranking;
 mod semantic_verification;
 mod source_refs;
-mod vector_candidates;
 
 pub use audit::{
     AuditEvidence, AuditGroup, AuditHiddenGroupCounts, AuditHiddenReason, AuditMember, AuditOutput, AuditProbeSummary,
@@ -28,24 +27,16 @@ pub use audit::{
 };
 pub use error::{Error, Result};
 pub use observation::{
-    SearchEmbeddingContentAvailability, SearchEmbeddingDocument, SearchEmbeddingDocumentInput,
-    SearchEmbeddingDocumentPolicy, SearchEmbeddingDocuments, SearchObservation, SearchObservationRequest,
-    SearchObservedPair, SearchPrunedFeatureFanout, SearchRetrievalObservation, SearchTrackedPair, observe_search,
-    observe_search_with_progress, rescore_observation,
+    SearchObservation, SearchObservationRequest, SearchObservedPair, SearchPrunedFeatureFanout,
+    SearchRetrievalObservation, SearchTrackedPair, observe_search, rescore_observation,
 };
 pub use pair_features::{
     SearchEvidenceMode, SearchModuleRelation, SearchPairFeatures, SearchRoleOverlap, SearchSemanticEvidenceState,
-    SearchVectorEvidence,
 };
 pub use scorer::{SearchPairScoring, SearchScoringSummary, SearchScoringVariant};
 pub use semantic_reranking::{
     SearchSemanticObligationFact, SearchSemanticObligationKind, SearchSemanticObligationStatus,
     SearchSemanticObligationYield, SearchSemanticRerankingSummary, SearchSemanticUnavailableReason,
-};
-pub use vector_candidates::{
-    SearchVectorAcquisitionPolicy, SearchVectorCandidateRequest, SearchVectorCandidateStatus,
-    SearchVectorCandidateSummary, SearchVectorCorpusStatus, SearchVectorEligibilityPolicy,
-    SearchVectorEligibilitySummary, SearchVectorInputFormat, VECTOR_CANDIDATE_TOP_K,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
