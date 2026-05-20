@@ -35,6 +35,7 @@ pub struct SearchVectorCandidateRequest {
     pub text_vector_cache_root: Option<PathBuf>,
     pub corpus_cache_root: PathBuf,
     pub document_policy: SearchEmbeddingDocumentPolicy,
+    pub eligibility_policy: SearchVectorEligibilityPolicy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -63,6 +64,32 @@ pub enum SearchVectorCorpusStatus {
     Unusable,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SearchVectorEligibilityPolicy {
+    #[default]
+    ActionablePublicStatement,
+    Broad,
+}
+
+impl SearchVectorEligibilityPolicy {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::ActionablePublicStatement => "actionable-public-statement",
+            Self::Broad => "broad",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct SearchVectorEligibilitySummary {
+    pub policy_id: String,
+    pub policy_version: &'static str,
+    pub total: usize,
+    pub eligible: usize,
+    pub skipped_by_reason: BTreeMap<String, usize>,
+}
+
 /// Stable vector candidate-generation facts exposed to eval artifacts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SearchVectorCandidateSummary {
@@ -80,6 +107,11 @@ pub struct SearchVectorCandidateSummary {
     pub corpus_status: Option<SearchVectorCorpusStatus>,
     pub query_declaration_count: usize,
     pub corpus_declaration_count: usize,
+    pub query_eligibility: SearchVectorEligibilitySummary,
+    pub corpus_eligibility: SearchVectorEligibilitySummary,
+    pub top_k: usize,
+    pub eligible_corpus_size: usize,
+    pub top_k_saturated: bool,
     pub vector_generated_candidate_count: usize,
     pub corpus_build_ms: u128,
     pub query_ms: u128,
@@ -100,6 +132,11 @@ impl Default for SearchVectorCandidateSummary {
             corpus_status: None,
             query_declaration_count: 0,
             corpus_declaration_count: 0,
+            query_eligibility: SearchVectorEligibilitySummary::default(),
+            corpus_eligibility: SearchVectorEligibilitySummary::default(),
+            top_k: VECTOR_CANDIDATE_TOP_K,
+            eligible_corpus_size: 0,
+            top_k_saturated: false,
             vector_generated_candidate_count: 0,
             corpus_build_ms: 0,
             query_ms: 0,
@@ -122,19 +159,27 @@ pub(crate) struct VectorCandidate {
     pub(crate) rank: usize,
 }
 
+struct EligibleDeclarations {
+    summary: SearchVectorEligibilitySummary,
+    declarations: Vec<HydratedDeclaration>,
+}
+
 pub(crate) fn generate_vector_candidates(
     request: &SearchVectorCandidateRequest,
     workspace: &[HydratedDeclaration],
     comparison_declarations: &[HydratedDeclaration],
 ) -> VectorCandidateOutput {
-    let query_documents = embedding_documents_for_declarations_with_policy(workspace, request.document_policy);
     let corpus_declarations = if comparison_declarations.is_empty() {
         workspace
     } else {
         comparison_declarations
     };
+    let query_eligibility = eligible_declarations(workspace, request.eligibility_policy);
+    let corpus_eligibility = eligible_declarations(corpus_declarations, request.eligibility_policy);
+    let query_documents =
+        embedding_documents_for_declarations_with_policy(&query_eligibility.declarations, request.document_policy);
     let corpus_documents =
-        embedding_documents_for_declarations_with_policy(corpus_declarations, request.document_policy);
+        embedding_documents_for_declarations_with_policy(&corpus_eligibility.declarations, request.document_policy);
     let model = EmbeddingModelSpec {
         id: request.model_id.clone(),
         revision: request.revision.clone(),
@@ -151,13 +196,32 @@ pub(crate) fn generate_vector_candidates(
         corpus_status: None,
         query_declaration_count: query_documents.documents.len(),
         corpus_declaration_count: corpus_documents.documents.len(),
+        query_eligibility: query_eligibility.summary,
+        corpus_eligibility: corpus_eligibility.summary,
+        top_k: VECTOR_CANDIDATE_TOP_K,
+        eligible_corpus_size: corpus_documents.documents.len(),
+        top_k_saturated: VECTOR_CANDIDATE_TOP_K >= corpus_documents.documents.len(),
         vector_generated_candidate_count: 0,
         corpus_build_ms: 0,
         query_ms: 0,
         embedding_ms: 0,
     };
     if workspace.is_empty() || corpus_declarations.is_empty() {
-        summary.reason = Some("empty-vector-corpus".to_owned());
+        summary.reason = Some("empty-vector-input".to_owned());
+        return VectorCandidateOutput {
+            summary,
+            candidates: Vec::new(),
+        };
+    }
+    if query_documents.documents.is_empty() {
+        summary.reason = Some("no-eligible-vector-queries".to_owned());
+        return VectorCandidateOutput {
+            summary,
+            candidates: Vec::new(),
+        };
+    }
+    if corpus_documents.documents.is_empty() {
+        summary.reason = Some("no-eligible-vector-corpus".to_owned());
         return VectorCandidateOutput {
             summary,
             candidates: Vec::new(),
@@ -236,7 +300,8 @@ pub(crate) fn generate_vector_candidates(
         .iter()
         .map(|vector| (vector.input_id.clone(), vector.values.clone()))
         .collect::<BTreeMap<_, _>>();
-    let corpus_by_name = corpus_declarations
+    let corpus_by_name = corpus_eligibility
+        .declarations
         .iter()
         .map(|declaration| (declaration.qualified_name.clone(), declaration.clone()))
         .collect::<BTreeMap<_, _>>();
@@ -312,7 +377,7 @@ pub(crate) fn generate_vector_candidates(
             &corpus,
             &VectorCorpusQueryRequest {
                 query_vector: query_vector.clone(),
-                limit: VECTOR_CANDIDATE_TOP_K.saturating_add(1),
+                limit: summary.top_k.saturating_add(1),
             },
         ) {
             Ok(output) => output,
@@ -336,7 +401,7 @@ pub(crate) fn generate_vector_candidates(
                 continue;
             };
             rank += 1;
-            if rank > VECTOR_CANDIDATE_TOP_K {
+            if rank > summary.top_k {
                 break;
             }
             let key = pair_key(&query_document.declaration_name, &candidate.declaration_name);
@@ -360,6 +425,86 @@ pub(crate) fn generate_vector_candidates(
     summary.reason = None;
     summary.vector_generated_candidate_count = candidates.len();
     VectorCandidateOutput { summary, candidates }
+}
+
+fn eligible_declarations(
+    declarations: &[HydratedDeclaration],
+    policy: SearchVectorEligibilityPolicy,
+) -> EligibleDeclarations {
+    let mut summary = SearchVectorEligibilitySummary {
+        policy_id: policy.id().to_owned(),
+        policy_version: VECTOR_CANDIDATE_POLICY_VERSION,
+        total: declarations.len(),
+        eligible: 0,
+        skipped_by_reason: BTreeMap::new(),
+    };
+    let mut eligible = Vec::new();
+    for declaration in declarations {
+        match vector_skip_reason(declaration, policy) {
+            Some(reason) => {
+                *summary.skipped_by_reason.entry(reason.to_owned()).or_default() += 1;
+            }
+            None => {
+                summary.eligible += 1;
+                eligible.push(declaration.clone());
+            }
+        }
+    }
+    EligibleDeclarations {
+        summary,
+        declarations: eligible,
+    }
+}
+
+fn vector_skip_reason(
+    declaration: &HydratedDeclaration,
+    policy: SearchVectorEligibilityPolicy,
+) -> Option<&'static str> {
+    let missing_statement = declaration.statement_text.split_whitespace().next().is_none();
+    match policy {
+        SearchVectorEligibilityPolicy::Broad => missing_statement.then_some("missing-statement"),
+        SearchVectorEligibilityPolicy::ActionablePublicStatement => {
+            if declaration.status_flags.iter().any(|flag| flag == "generated") {
+                return Some("generated");
+            }
+            if declaration.visibility != "public" {
+                return Some("private");
+            }
+            if is_synthetic_declaration(declaration) {
+                return Some("synthetic");
+            }
+            if !declaration.low_signal_markers.is_empty() {
+                return Some("low-signal");
+            }
+            if missing_statement {
+                return Some("missing-statement");
+            }
+            if is_not_actionable_declaration(declaration) {
+                return Some("not-actionable");
+            }
+            if !is_supported_vector_kind(declaration) {
+                return Some("unsupported-kind");
+            }
+            None
+        }
+    }
+}
+
+fn is_synthetic_declaration(declaration: &HydratedDeclaration) -> bool {
+    declaration.declaration_id.starts_with("synthetic:")
+        || declaration.module == "Synthetic"
+        || declaration.qualified_name.starts_with("Synthetic.")
+}
+
+fn is_not_actionable_declaration(declaration: &HydratedDeclaration) -> bool {
+    declaration.kind == "instance" || declaration.display_name.starts_with("inst")
+}
+
+fn is_supported_vector_kind(declaration: &HydratedDeclaration) -> bool {
+    matches!(
+        declaration.kind.as_str(),
+        "theorem" | "lemma" | "axiom" | "def" | "definition" | "abbrev"
+    )
 }
 
 fn embed_documents(
@@ -482,6 +627,190 @@ impl From<VectorCorpusStatus> for SearchVectorCorpusStatus {
             VectorCorpusStatus::Missing => Self::Missing,
             VectorCorpusStatus::Stale => Self::Stale,
             VectorCorpusStatus::Unusable => Self::Unusable,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lean_dup_index::{DeclarationHandle, HydratedDeclaration};
+    use lean_dup_worker::Fingerprints;
+    use tempfile::TempDir;
+
+    use super::{
+        SearchVectorAcquisitionPolicy, SearchVectorCandidateRequest, SearchVectorCandidateStatus,
+        SearchVectorEligibilityPolicy, eligible_declarations, generate_vector_candidates,
+    };
+    use crate::SearchEmbeddingDocumentPolicy;
+
+    #[test]
+    fn actionable_public_statement_policy_records_stable_skip_reasons() {
+        let rows = vec![
+            declaration("Generated.item", "theorem", "public").with_flag("generated"),
+            declaration("Private.item", "theorem", "private"),
+            declaration("Synthetic.item", "theorem", "public"),
+            declaration("LowSignal.item", "theorem", "public").with_low_signal("broad_head:Eq"),
+            declaration("Missing.item", "theorem", "public").with_statement(""),
+            declaration("Instance.item", "instance", "public"),
+            declaration("Struct.item", "structure", "public"),
+            declaration("Useful.item", "theorem", "public"),
+        ];
+
+        let eligible = eligible_declarations(&rows, SearchVectorEligibilityPolicy::ActionablePublicStatement);
+
+        assert_eq!(eligible.summary.policy_id, "actionable-public-statement");
+        assert_eq!(eligible.summary.total, 8);
+        assert_eq!(eligible.summary.eligible, 1);
+        assert_eq!(
+            eligible.summary.skipped_by_reason,
+            std::collections::BTreeMap::from([
+                ("generated".to_owned(), 1),
+                ("private".to_owned(), 1),
+                ("synthetic".to_owned(), 1),
+                ("low-signal".to_owned(), 1),
+                ("missing-statement".to_owned(), 1),
+                ("not-actionable".to_owned(), 1),
+                ("unsupported-kind".to_owned(), 1),
+            ])
+        );
+        assert_eq!(eligible.declarations[0].qualified_name, "Useful.item");
+    }
+
+    #[test]
+    fn broad_policy_includes_normally_excluded_declarations_with_text() {
+        let rows = vec![
+            declaration("Generated.item", "theorem", "public").with_flag("generated"),
+            declaration("Private.item", "theorem", "private"),
+            declaration("Synthetic.item", "theorem", "public"),
+            declaration("LowSignal.item", "theorem", "public").with_low_signal("broad_head:Eq"),
+            declaration("Missing.item", "theorem", "public").with_statement(""),
+        ];
+
+        let eligible = eligible_declarations(&rows, SearchVectorEligibilityPolicy::Broad);
+
+        assert_eq!(eligible.summary.policy_id, "broad");
+        assert_eq!(eligible.summary.total, 5);
+        assert_eq!(eligible.summary.eligible, 4);
+        assert_eq!(
+            eligible.summary.skipped_by_reason,
+            std::collections::BTreeMap::from([("missing-statement".to_owned(), 1)])
+        );
+    }
+
+    #[test]
+    fn vector_generation_reports_no_eligible_query_without_model_work() {
+        let rows = vec![declaration("Synthetic.item", "theorem", "public")];
+        let cache = TempDir::new().unwrap();
+
+        let output = generate_vector_candidates(
+            &request(
+                cache.path().join("corpus"),
+                SearchVectorEligibilityPolicy::ActionablePublicStatement,
+            ),
+            &rows,
+            &[],
+        );
+
+        assert_eq!(output.summary.status, SearchVectorCandidateStatus::Skipped);
+        assert_eq!(output.summary.reason.as_deref(), Some("no-eligible-vector-queries"));
+        assert_eq!(output.summary.query_eligibility.eligible, 0);
+        assert_eq!(output.summary.corpus_eligibility.eligible, 0);
+        assert!(output.summary.top_k_saturated);
+        assert!(output.candidates.is_empty());
+    }
+
+    #[test]
+    fn vector_summary_records_top_k_saturation_from_eligible_corpus_size() {
+        let small = (0..2)
+            .map(|index| declaration(&format!("Useful.small_{index}"), "theorem", "public"))
+            .collect::<Vec<_>>();
+        let large = (0..40)
+            .map(|index| declaration(&format!("Useful.large_{index}"), "theorem", "public"))
+            .collect::<Vec<_>>();
+        let cache = TempDir::new().unwrap();
+
+        let small_output = generate_vector_candidates(
+            &request(cache.path().join("small"), SearchVectorEligibilityPolicy::Broad),
+            &small,
+            &[],
+        );
+        let large_output = generate_vector_candidates(
+            &request(cache.path().join("large"), SearchVectorEligibilityPolicy::Broad),
+            &large,
+            &[],
+        );
+
+        assert_eq!(small_output.summary.top_k, 32);
+        assert_eq!(small_output.summary.eligible_corpus_size, 2);
+        assert!(small_output.summary.top_k_saturated);
+        assert_eq!(large_output.summary.top_k, 32);
+        assert_eq!(large_output.summary.eligible_corpus_size, 40);
+        assert!(!large_output.summary.top_k_saturated);
+    }
+
+    fn request(
+        corpus_cache_root: std::path::PathBuf,
+        eligibility_policy: SearchVectorEligibilityPolicy,
+    ) -> SearchVectorCandidateRequest {
+        SearchVectorCandidateRequest {
+            model_id: "unsupported/test-model".to_owned(),
+            revision: None,
+            acquisition_policy: SearchVectorAcquisitionPolicy::CacheOnly,
+            model_cache_root: None,
+            text_vector_cache_root: None,
+            corpus_cache_root,
+            document_policy: SearchEmbeddingDocumentPolicy::NameAndFormalStatement,
+            eligibility_policy,
+        }
+    }
+
+    fn declaration(name: &str, kind: &str, visibility: &str) -> HydratedDeclaration {
+        HydratedDeclaration {
+            handle: DeclarationHandle::for_test(name),
+            declaration_id: format!("workspace:{name}"),
+            origin: "workspace".to_owned(),
+            module: name.split('.').next().unwrap_or("Fixture").to_owned(),
+            qualified_name: name.to_owned(),
+            display_name: name.rsplit('.').next().unwrap_or(name).to_owned(),
+            kind: kind.to_owned(),
+            visibility: visibility.to_owned(),
+            modifiers: Vec::new(),
+            source_span: None,
+            statement_text: "example statement".to_owned(),
+            status_flags: Vec::new(),
+            feature_version: "test".to_owned(),
+            fingerprints: Fingerprints {
+                statement: format!("{name}:statement"),
+                safe_binder_permutation: String::new(),
+                connective_shape: String::new(),
+                conclusion_shape: String::new(),
+            },
+            role_features: Vec::new(),
+            binder_count: 0,
+            low_signal_markers: Vec::new(),
+        }
+    }
+
+    trait DeclarationTestExt {
+        fn with_flag(self, flag: &str) -> Self;
+        fn with_low_signal(self, marker: &str) -> Self;
+        fn with_statement(self, statement: &str) -> Self;
+    }
+
+    impl DeclarationTestExt for HydratedDeclaration {
+        fn with_flag(mut self, flag: &str) -> Self {
+            self.status_flags.push(flag.to_owned());
+            self
+        }
+
+        fn with_low_signal(mut self, marker: &str) -> Self {
+            self.low_signal_markers.push(marker.to_owned());
+            self
+        }
+
+        fn with_statement(mut self, statement: &str) -> Self {
+            self.statement_text = statement.to_owned();
+            self
         }
     }
 }

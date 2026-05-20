@@ -321,6 +321,7 @@ fn vector_search_request(args: &EvalArgs) -> Option<VectorSearchRequest> {
         text_vector_cache_root: args.vector_text_cache_root.clone(),
         corpus_cache_root: args.vector_corpus_cache_root.clone(),
         document_policy: args.vector_document_policy.into(),
+        eligibility_policy: args.vector_eligibility.into(),
     })
 }
 

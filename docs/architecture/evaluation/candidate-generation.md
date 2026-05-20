@@ -31,6 +31,34 @@ reuse a persisted declaration-vector corpus and query it for nearest neighbors, 
 work happens only when the hidden vector flag is set. The default audit path remains
 symbolic and keeps the existing selected-candidate hydration limit.
 
+## Vector eligibility and top-k policy
+
+Search owns vector corpus and query eligibility. The default hidden policy is
+`actionable-public-statement`: it excludes generated, private, synthetic, low-signal,
+missing-statement, non-actionable, and unsupported-kind declarations before any embedding
+or vector-index work. A `broad` policy may include normally excluded declarations for a
+named experiment, but artifacts must record that choice.
+
+Eligibility is not document policy. Eligibility decides whether a declaration can be a
+query or corpus row. Document policy decides whether the embedded text is a formal
+statement, name plus formal statement, or another named text selection. Embedding still
+owns model-specific wrapping such as query/document prefixes; vector-index still owns
+persistence and nearest-neighbor mechanics.
+
+Hidden vector artifacts record:
+
+| Fact | Meaning |
+| --- | --- |
+| `query_eligibility` | policy id/version, total query declarations, eligible query declarations, skip reasons |
+| `corpus_eligibility` | policy id/version, total corpus declarations, eligible corpus declarations, skip reasons |
+| `top_k` | search-owned nearest-neighbor request size |
+| `eligible_corpus_size` | corpus size after eligibility filtering |
+| `top_k_saturated` | `true` when `top_k >= eligible_corpus_size` |
+
+Saturated `top_k` runs can prove plumbing, but they are not vector retrieval-quality
+evidence. A quality claim needs non-saturated denominators, vector-only positives, and
+hard-negative survival.
+
 ## Metrics
 
 `metrics.stage_metrics.candidate_generation_recall` counts labeled positives known to the generated stage, including
@@ -67,6 +95,24 @@ Vector candidate generation follows the same rule. Eval sees stable source facts
 denominators; it does not call embedding or vector-index directly to reconstruct search.
 Vector backend names, corpus storage layout, model runtime details, and final model input
 strings remain private to their owning crates.
+
+Design Note: this document owns the stable observation vocabulary for candidate
+generation. The smallest public interface is named policy facts and stage denominators.
+Backend names, storage rows, model prefixes, raw statement text, worker rows, and
+retrieval keys must not leak into eval/report JSON. The default symbolic audit capability
+is preserved; the discarded behavior is unrecorded semantic/vector probing without
+explicit corpus/query eligibility or top-k saturation facts.
+
+Design It Twice: letting embedding/vector-index reject declarations would leak Lean
+actionability into lower crates; letting eval filter after the observation would make eval
+reconstruct search. Search-owned named eligibility policies are deeper because search
+already owns declaration meaning and candidate-generation policy.
+
+Red Flag Review: the eligibility surface is not a pass-through wrapper because it records
+policy counts and skip reasons, not rows; it avoids temporal decomposition by keeping
+filtering in search before runtime work; it avoids information leakage by keeping backend
+and model vocabulary out of public artifacts; and its API is describable as policy,
+counts, top-k, and saturation.
 
 ## Evidence commands
 

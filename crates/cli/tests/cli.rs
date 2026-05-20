@@ -374,6 +374,7 @@ fn eval_hidden_search_dataset_mode_writes_feature_artifact() {
     assert!(!help_stdout.contains("--write-vector-search"));
     assert!(!help_stdout.contains("--vector-acquisition"));
     assert!(!help_stdout.contains("--vector-document-policy"));
+    assert!(!help_stdout.contains("--vector-eligibility"));
 
     let assert = Command::cargo_bin("lean-dup")
         .unwrap()
@@ -451,6 +452,8 @@ fn eval_hidden_vector_search_mode_writes_skipped_artifact_without_model() {
             "--write-vector-search",
             "--vector-acquisition",
             "cache-only",
+            "--vector-eligibility",
+            "actionable-public-statement",
             "--vector-model-cache-root",
         ])
         .arg(model_cache.path())
@@ -476,6 +479,17 @@ fn eval_hidden_vector_search_mode_writes_skipped_artifact_without_model() {
     assert_eq!(vector["reason"], "vector-model-not-prepared");
     assert_eq!(vector["vector_candidates"]["status"], "skipped");
     assert_eq!(vector["vector_candidates"]["acquisition_policy"], "cache-only");
+    assert_eq!(
+        vector["vector_candidates"]["query_eligibility"]["policy_id"],
+        "actionable-public-statement"
+    );
+    assert_eq!(
+        vector["vector_candidates"]["corpus_eligibility"]["policy_id"],
+        "actionable-public-statement"
+    );
+    assert_eq!(vector["vector_candidates"]["top_k"], 32);
+    assert!(vector["vector_candidates"]["eligible_corpus_size"].is_number());
+    assert!(vector["vector_candidates"]["top_k_saturated"].is_boolean());
     assert!(vector["symbolic_baseline"]["stage_metrics"].is_object());
 
     let raw = fs::read_to_string(artifact).unwrap();

@@ -3,7 +3,10 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 use lean_dup_embedding::EmbeddingAcquisitionPolicy;
 use lean_dup_eval::EvalSuite;
-use lean_dup_search::{ProbePolicy, ReviewProfile, SearchEmbeddingDocumentPolicy, SearchVectorAcquisitionPolicy};
+use lean_dup_search::{
+    ProbePolicy, ReviewProfile, SearchEmbeddingDocumentPolicy, SearchVectorAcquisitionPolicy,
+    SearchVectorEligibilityPolicy,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
@@ -227,6 +230,9 @@ pub struct EvalArgs {
 
     #[arg(long = "vector-document-policy", hide = true, value_enum, default_value_t = CliVectorDocumentPolicy::NameAndFormalStatement)]
     pub vector_document_policy: CliVectorDocumentPolicy,
+
+    #[arg(long = "vector-eligibility", hide = true, value_enum, default_value_t = CliVectorEligibilityPolicy::ActionablePublicStatement)]
+    pub vector_eligibility: CliVectorEligibilityPolicy,
 }
 
 #[derive(Debug, Clone, clap::Args)]
@@ -337,6 +343,12 @@ pub enum CliVectorDocumentPolicy {
     LegacyRerankV1,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum CliVectorEligibilityPolicy {
+    ActionablePublicStatement,
+    Broad,
+}
+
 impl From<CliVectorDocumentPolicy> for SearchEmbeddingDocumentPolicy {
     fn from(value: CliVectorDocumentPolicy) -> Self {
         match value {
@@ -344,6 +356,15 @@ impl From<CliVectorDocumentPolicy> for SearchEmbeddingDocumentPolicy {
             CliVectorDocumentPolicy::NameAndFormalStatement => Self::NameAndFormalStatement,
             CliVectorDocumentPolicy::InformalOrFormal => Self::InformalOrFormal,
             CliVectorDocumentPolicy::LegacyRerankV1 => Self::LegacyRerankV1,
+        }
+    }
+}
+
+impl From<CliVectorEligibilityPolicy> for SearchVectorEligibilityPolicy {
+    fn from(value: CliVectorEligibilityPolicy) -> Self {
+        match value {
+            CliVectorEligibilityPolicy::ActionablePublicStatement => Self::ActionablePublicStatement,
+            CliVectorEligibilityPolicy::Broad => Self::Broad,
         }
     }
 }

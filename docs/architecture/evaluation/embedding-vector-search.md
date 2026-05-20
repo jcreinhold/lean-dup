@@ -73,6 +73,47 @@ gain vector facts when the nearest-neighbor query also finds them. Vector-only p
 generated and ranked so eval can measure recall, but they are not shown by default; vector
 score is not a production visibility threshold.
 
+### 35M design note: eligibility and top-k
+
+`lean-dup-search` owns vector corpus and query eligibility. The hidden knowledge is Lean
+actionability: generated declarations, private declarations, synthetic fixtures,
+low-signal declarations, missing statements, non-actionable declarations, and unsupported
+kinds. Embedding must not learn those concepts, and vector-index must not learn them
+either; both crates receive only already-eligible declaration documents and vectors.
+
+The smallest public interface is a named eligibility policy plus counts: policy id,
+policy version, total declarations, eligible declarations, skip reasons, `top_k`,
+eligible corpus size, and `top_k_saturated`. The skip labels are stable diagnostic facts,
+not retrieval keys. Document policy remains separate: eligibility decides which
+declarations enter a vector corpus or query set; declaration-document policy decides which
+text fields are embedded for those declarations.
+
+Non-leaking decisions include raw statement text, final model input text, model prefixes,
+tokenizer/runtime details, database paths, table names, ANN parameters, and vector-cache
+layout. The preserved user-facing capability is the default symbolic duplicate audit:
+ordinary audit and eval do not build models, query vector corpora, or change visibility.
+The discarded behavior is the Python-era/ad hoc habit of embedding whatever row set is
+convenient without recording whether the corpus is actionable or whether `top_k` saturated
+the corpus.
+
+Design It Twice:
+
+- *Embedding or vector-index rejects noisy declarations.* Rejected: it would force model
+  runtime and vector persistence crates to know Lean actionability policy.
+- *Eval filters rows after the observation.* Rejected: eval would reconstruct candidate
+  generation and could not report what search actually queried.
+- *Search owns named corpus/query eligibility policies.* Chosen: search already owns
+  candidate policy, generated/private facts, actionability, and merge semantics. This
+  keeps the public surface small and prevents temporal decomposition across search,
+  embedding, vector-index, and eval.
+
+The default hidden policy is `actionable-public-statement`. It excludes declarations with
+stable reasons: `generated`, `private`, `synthetic`, `low-signal`, `missing-statement`,
+`not-actionable`, and `unsupported-kind`. A named `broad` policy may include normally
+excluded declarations for experiments, but the artifact must record that policy choice.
+Saturated runs (`top_k >= eligible_corpus_size`) are smoke evidence only; they cannot
+support vector-search quality claims.
+
 Search controls declaration-document selection, per-query top-k, symbolic/vector merge
 ordering, and the rule that vector-only candidates are ranked for measurement but not
 shown by vector score alone. Eval passes a search-owned vector request; search returns
@@ -167,3 +208,21 @@ Backend identity is architecture evidence only. References:
 - *Implementation details in interface comments:* backend names appear in this document
   as architecture evidence; they must not become search, eval, or report interface
   comments.
+
+35M Red Flag Review:
+
+- *Shallow module:* eligibility pulls concrete actionability checks behind one search
+  policy instead of scattering boolean filters across eval and embedding.
+- *Pass-through wrapper:* the public facts are counts and stable skip reasons; they do
+  not forward declaration rows or backend status through another name.
+- *Temporal decomposition:* eligibility runs before embedding and corpus work because it
+  is a search policy, not because it is a pipeline step owned by another crate.
+- *Information leakage:* Lean actionability stays in search; model/runtime and
+  persistence details stay in their owning crates.
+- *Special-general mixture:* default policy is lean-dup-specific; document policy and
+  vector persistence remain separate abstractions.
+- *Conjoined methods:* selecting eligible declarations, formatting document text,
+  embedding vectors, and querying corpora remain separate crate responsibilities.
+- *Hard-to-describe public API:* the API is policy plus counts plus top-k saturation.
+- *Implementation-detail comments:* skip reasons describe stable search facts, not
+  worker rows, storage fields, or model input mechanics.
