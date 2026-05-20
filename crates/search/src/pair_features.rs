@@ -345,7 +345,7 @@ mod tests {
 
     fn declaration(name: &str, module: &str, kind: &str, origin: &str) -> DeclarationBuilder {
         DeclarationBuilder(HydratedDeclaration {
-            handle: DeclarationHandle::for_test(name),
+            handle: DeclarationHandle::from_fixture_id(name),
             declaration_id: name.to_owned(),
             origin: origin.to_owned(),
             module: module.to_owned(),

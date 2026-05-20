@@ -53,11 +53,7 @@ fn run_workload(args: PerfArgs, cache_root: &Path) -> Result<PerfWorkloadReport>
     let stdout_text = String::from_utf8_lossy(&stdout);
     let parsed = serde_json::from_str::<serde_json::Value>(&stdout_text).ok();
     let candidate_count = json_u64(parsed.as_ref(), "/retrieval/candidate_count");
-    let review_groups = parsed
-        .as_ref()
-        .and_then(|payload| payload.pointer("/review/groups"))
-        .and_then(serde_json::Value::as_array)
-        .map(|groups| groups.len() as u64);
+    let review_groups = json_u64(parsed.as_ref(), "/review/group_count");
     let visible_groups = json_u64(parsed.as_ref(), "/visible_group_count");
     let semantic_planned_pairs = json_u64(parsed.as_ref(), "/semantic_verification/planned_pairs");
     let semantic_cached_hits = json_u64(parsed.as_ref(), "/semantic_verification/cached_hits");

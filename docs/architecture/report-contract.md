@@ -8,12 +8,47 @@ This document defines `G7 report_contract` in [production-readiness.md](producti
 
 ## Schema
 
-Audit JSON is additive. The stable surface is `report_schema_version` plus an `explanations` object. Existing
-top-level fields remain for compatibility; production consumers should prefer these.
+Audit JSON is summary-first. The stable surface is `report_schema_version`, grouped command metadata, compact review
+diagnostics, bounded `visible_groups`, and the `explanations` object. Full forensic group detail belongs in targeted
+`show` output, not in ordinary audit JSON.
 
 ```jsonc
 {
-  "report_schema_version": "lean-dup.report.v1",
+  "report_schema_version": "lean-dup.report.v3",
+  "workspace": {
+    "requested_workspace": "tests/fixtures/tiny",
+    "lake_root": "tests/fixtures/tiny",
+    "selected_roots": ["Tiny"],
+    "source_count": 1
+  },
+  "cache": {
+    "root": "target/lean-dup/cache",
+    "fingerprint": "..."
+  },
+  "options": {
+    "include_private": true,
+    "compare_indexes": [],
+    "compare_mathlib": false,
+    "include_generated": false,
+    "show_noise": false,
+    "review_profile": "mathlib"
+  },
+  "review": {
+    "group_count": 12,
+    "suppressed_count": 4,
+    "candidate_pairs": 88,
+    "emitted_groups": 12,
+    "diagnostics": {
+      "candidate_pairs": 88,
+      "emitted_groups": 12,
+      "suppressed_groups": 4
+    }
+  },
+  "visible_groups": [],
+  "visible_group_count": 12,
+  "visible_groups_emitted": 0,
+  "visible_group_limit": 500,
+  "visible_groups_truncated": false,
   "explanations": {
     "visible_queue": {
       "count": 0,                       // visible groups
@@ -49,7 +84,6 @@ top-level fields remain for compatibility; production consumers should prefer th
         { "label": "mathlib", "origin": "mathlib", "evidence_mode": "proof-grade",
           "declaration_count": 312611, "reason": "source-backed, importable" }
       ]
-      // index paths and source roots intentionally live in legacy provenance fields, not here
     }
   }
 }

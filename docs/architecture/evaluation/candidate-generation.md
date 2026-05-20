@@ -115,7 +115,7 @@ tracked generated-only pairs that did not survive first-stage selection.
 | `candidate_generation_recall` | labeled positives present at generation (including generated-only survivors) |
 | `candidate_stage_recall` | labeled positives at vector-generated, symbolic-generated, merged-generated, ranked, and visible stages |
 | `top_k_recall_before_final_ranking` | labeled positives surviving into ranked observations at each `k` |
-| `ranked_recall` | the previous ranked-recall vocabulary, kept for compatibility |
+| `ranked_recall` | labeled positives that survive ranked observation at each configured cutoff |
 | `visible_queue_precision` | shown true positives / shown pairs |
 | `hard_negative_survival` | hard negatives at generated, top-k, and visible stages |
 | `hard_negative_stage_survival` | hard negatives at vector-generated, symbolic-generated, merged-generated, ranked, and visible stages |

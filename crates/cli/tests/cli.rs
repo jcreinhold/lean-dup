@@ -682,7 +682,7 @@ fn audit_json_keeps_progress_and_profile_off_stdout() {
     let payload: Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(payload["command"], "audit");
     assert_eq!(payload["status"], "ok");
-    assert_eq!(payload["review"]["groups"].as_array().unwrap().len(), 0);
+    assert!(payload["review"]["groups"].is_null());
     assert!(payload["review"]["group_count"].as_u64().unwrap() >= payload["visible_groups_emitted"].as_u64().unwrap());
     assert!(payload["visible_groups"].is_array());
     let first_group = payload["visible_groups"].as_array().unwrap().first().unwrap();
@@ -722,12 +722,13 @@ fn review_profiles_filter_one_ranked_audit_result() {
     let payload: Value = serde_json::from_str(&stdout).unwrap();
     let counts = &payload["profile_counts"];
 
-    assert_eq!(payload["review_profile"], "api-design");
+    assert_eq!(payload["options"]["review_profile"], "api-design");
     assert_eq!(payload["visible_group_count"], counts["api_design"]);
     assert!(counts["mathlib"].as_u64().unwrap() <= counts["internal"].as_u64().unwrap());
     assert!(counts["internal"].as_u64().unwrap() <= counts["api_design"].as_u64().unwrap());
     assert!(counts["api_design"].as_u64().unwrap() <= counts["noise"].as_u64().unwrap());
-    assert_eq!(payload["review"]["groups"].as_array().unwrap().len(), 0);
+    assert!(payload["review"]["groups"].is_null());
+    assert!(payload["review"]["group_count"].is_u64());
     assert_eq!(
         payload["visible_groups_emitted"].as_u64().unwrap(),
         payload["visible_groups"].as_array().unwrap().len() as u64
@@ -752,7 +753,7 @@ fn audit_json_includes_stable_report_explanations() {
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let payload: Value = serde_json::from_str(&stdout).unwrap();
 
-    assert_eq!(payload["report_schema_version"], "lean-dup.report.v2");
+    assert_eq!(payload["report_schema_version"], "lean-dup.report.v3");
     assert_eq!(
         payload["explanations"]["visible_queue"]["visible"],
         payload["visible_group_count"]
@@ -794,7 +795,7 @@ fn audit_text_reports_queue_probe_and_provenance_explanations() {
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
 
-    assert!(stdout.contains("report schema: lean-dup.report.v2"));
+    assert!(stdout.contains("report schema: lean-dup.report.v3"));
     assert!(stdout.contains("visible groups emitted:"));
     assert!(stdout.contains("visible queue:"));
     assert!(stdout.contains("hidden groups: total="));

@@ -93,8 +93,6 @@ pub(crate) struct VectorSearchLabelReport {
 pub(crate) struct VectorSearchLabelFactReport {
     pub(crate) status: String,
     pub(crate) source: LabelFactSource,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) skipped_reason: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -249,7 +247,6 @@ fn label_fact_report(fact: &GoldLabelFact) -> VectorSearchLabelFactReport {
     VectorSearchLabelFactReport {
         status: fact_status(fact).to_owned(),
         source: fact.source,
-        skipped_reason: fact.skipped_reason,
     }
 }
 
@@ -257,7 +254,7 @@ fn label_status(labels: &GoldLabels, pair: &GoldPair, facts: &[GoldLabelFact]) -
     if labels.positives.contains(pair) {
         if facts
             .iter()
-            .any(|fact| fact.polarity == Some(LabelPolarity::Positive) && is_expanded_source(fact.source))
+            .any(|fact| fact.polarity == LabelPolarity::Positive && is_expanded_source(fact.source))
         {
             "expanded-positive"
         } else {
@@ -267,15 +264,13 @@ fn label_status(labels: &GoldLabels, pair: &GoldPair, facts: &[GoldLabelFact]) -
     } else if labels.hard_negatives.contains(pair) {
         if facts
             .iter()
-            .any(|fact| fact.polarity == Some(LabelPolarity::HardNegative) && is_expanded_source(fact.source))
+            .any(|fact| fact.polarity == LabelPolarity::HardNegative && is_expanded_source(fact.source))
         {
             "expanded-hard-negative"
         } else {
             "hard-negative"
         }
         .to_owned()
-    } else if facts.iter().any(|fact| fact.skipped_reason.is_some()) {
-        "skipped".to_owned()
     } else {
         "unlabeled".to_owned()
     }
@@ -283,20 +278,15 @@ fn label_status(labels: &GoldLabels, pair: &GoldPair, facts: &[GoldLabelFact]) -
 
 fn fact_status(fact: &GoldLabelFact) -> &'static str {
     match (fact.polarity, fact.source) {
-        (_, LabelFactSource::ConflictResolved) => "skipped",
-        (Some(LabelPolarity::Positive), source) if is_expanded_source(source) => "expanded-positive",
-        (Some(LabelPolarity::HardNegative), source) if is_expanded_source(source) => "expanded-hard-negative",
-        (Some(LabelPolarity::Positive), _) => "positive",
-        (Some(LabelPolarity::HardNegative), _) => "hard-negative",
-        (None, _) => "skipped",
+        (LabelPolarity::Positive, source) if is_expanded_source(source) => "expanded-positive",
+        (LabelPolarity::HardNegative, source) if is_expanded_source(source) => "expanded-hard-negative",
+        (LabelPolarity::Positive, _) => "positive",
+        (LabelPolarity::HardNegative, _) => "hard-negative",
     }
 }
 
 fn is_expanded_source(source: LabelFactSource) -> bool {
-    matches!(
-        source,
-        LabelFactSource::ExpandedPositiveCluster | LabelFactSource::ExpandedHardNegativeCluster
-    )
+    matches!(source, LabelFactSource::TypedCluster)
 }
 
 fn label_facts_by_pair(labels: &GoldLabels) -> BTreeMap<GoldPair, Vec<GoldLabelFact>> {

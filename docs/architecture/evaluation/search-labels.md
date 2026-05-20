@@ -6,17 +6,32 @@ typed metadata.
 
 ## Label schema
 
-Legacy fields stay supported during migration:
+Labels are typed at the file boundary. The eval parser rejects unknown fields so
+old untyped label keys cannot silently change scoring denominators.
 
-- `positive_clusters`, `positive_pairs`
-- `hard_negative_clusters`, `hard_negative_pairs`
-
-Typed labels use `typed_pairs`:
+Direct labels use `typed_pairs`:
 
 ```json
 {
   "left": "Tiny.same_left",
   "right": "Tiny.same_right",
+  "polarity": "positive",
+  "match_class": "exact-theorem-duplicate",
+  "expected_stage_visibility": "visible",
+  "adjudication_source": "fixture-intent",
+  "confidence": "high",
+  "semantic_verification_required": true,
+  "static_evidence_acceptable": true
+}
+```
+
+Same-class groups use `typed_clusters`; eval owns expanding the members into
+unordered typed pair facts:
+
+```json
+{
+  "id": "exact-internal-aliases",
+  "members": ["Tiny.same_left", "Tiny.use_same_left", "Tiny.same_right"],
   "polarity": "positive",
   "match_class": "exact-theorem-duplicate",
   "expected_stage_visibility": "visible",
@@ -34,15 +49,13 @@ Typed labels use `typed_pairs`:
 | `polarity` | `positive`, `hard-negative` |
 | `match_class` | mirrors [search-quality.md](../search-quality.md): `exact-theorem-duplicate`, `binder-permutation-duplicate`, `reducible-definition-duplicate`, `replacement-candidate`, `specialization-generalization`, `local-cleanup-duplicate`, `static-structural-similarity`, `non-actionable-related-theorem`, `hard-negative` |
 | `expected_stage_visibility` | `candidate` (generated, not necessarily high-ranked), `ranked` (survives first-stage), `visible` (default queue), `hidden` (intentionally not default-visible) |
-| `adjudication_source` | `fixture-intent`, `manual-inspection`, `prompt27-evidence`, `python-era-regression` |
+| `adjudication_source` | `fixture-intent`, `manual-inspection`, `prompt27-evidence` |
 | `confidence` | `high`, `medium`, `low` (only with documented reason) |
 
 ## Validation
 
-- Typed labels must include every typed field above; partial typed labels are rejected.
-- Typed labels for the same unordered pair must agree on polarity and match class.
-- Legacy positive/hard-negative contradictions drop the hard-negative entry after pair
-  normalization. Typed labels do not get that escape hatch.
+- Typed labels and typed clusters must include every typed field above; partial typed labels are rejected.
+- Typed labels for the same unordered pair must be identical. Contradictions are fixture errors.
 - Label identity is direction-insensitive: `A/B` and `B/A` are the same pair.
 
 ## Fixture coverage
@@ -67,14 +80,12 @@ The manual suites stay slow and private-path aware. Their typed labels are adjud
 not a claim that the current search stack finds them. Files: `manual-internal.json`,
 `manual-mathlib.json`.
 
-## Why a typed layer instead of a new format
+## Why typed clusters stay inside eval
 
-A full migration to a typed-only file format would force broad rewrites before the eval gates could keep running. The
-current scorer only needs positive and hard-negative sets, so removing legacy clusters now adds risk without
-improving the oracle. The typed layer wraps the legacy files: `eval::labels` accepts clusters and direct pairs, then
-adds typed `typed_pairs` with the schema above. Compatibility, contradiction handling, and task taxonomy stay inside
-`eval::labels`; scoring sees normalized unordered pairs; consumers read typed metadata without rediscovering label
-provenance.
+Fixture authors may group declarations when every expanded pair has the same
+adjudication. Eval expands those groups into normalized unordered pairs before
+scoring. Search, report, and vector artifacts consume pair facts and do not need
+to know label-file layout.
 
 ## Commands
 

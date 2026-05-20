@@ -234,18 +234,9 @@ pub struct CacheCleanupEntryReport {
 pub struct AuditReport {
     pub report_schema_version: &'static str,
     pub status: &'static str,
-    pub requested_workspace: PathBuf,
-    pub lake_root: PathBuf,
-    pub selected_roots: Vec<String>,
-    pub source_count: usize,
-    pub cache_root: PathBuf,
-    pub cache_fingerprint: String,
-    pub include_private: bool,
-    pub compare_indexes: Vec<String>,
-    pub compare_mathlib: bool,
-    pub include_generated: bool,
-    pub show_noise: bool,
-    pub review_profile: ReviewProfile,
+    pub workspace: AuditWorkspaceReport,
+    pub cache: AuditCacheReport,
+    pub options: AuditOptionsReport,
     pub scoring: SearchScoringSummary,
     pub profile_counts: ReviewProfileCounts,
     pub retrieval: RetrievalReport,
@@ -260,6 +251,30 @@ pub struct AuditReport {
     pub visible_groups_truncated: bool,
     pub saved_baseline: Option<PathBuf>,
     pub message: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AuditWorkspaceReport {
+    pub requested_workspace: PathBuf,
+    pub lake_root: PathBuf,
+    pub selected_roots: Vec<String>,
+    pub source_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AuditCacheReport {
+    pub root: PathBuf,
+    pub fingerprint: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AuditOptionsReport {
+    pub include_private: bool,
+    pub compare_indexes: Vec<String>,
+    pub compare_mathlib: bool,
+    pub include_generated: bool,
+    pub show_noise: bool,
+    pub review_profile: ReviewProfile,
 }
 
 #[derive(Debug, Serialize)]
@@ -350,7 +365,6 @@ pub struct SemanticVerificationReport {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ReviewReport {
-    pub groups: Vec<ReviewGroupReport>,
     pub group_count: usize,
     pub suppressed_count: usize,
     pub diagnostics: ReviewDiagnosticsReport,
@@ -631,18 +645,24 @@ pub fn audit_report(output: AuditOutput) -> AuditReport {
     AuditReport {
         report_schema_version: crate::report_contract::REPORT_SCHEMA_VERSION,
         status: "ok",
-        requested_workspace: output.requested_workspace,
-        lake_root: output.lake_root,
-        selected_roots: output.selected_roots,
-        source_count: output.source_count,
-        cache_root: output.cache_root,
-        cache_fingerprint: output.cache_fingerprint,
-        include_private: output.include_private,
-        compare_indexes: output.compare_indexes,
-        compare_mathlib: output.compare_mathlib,
-        include_generated: output.include_generated,
-        show_noise: output.show_noise,
-        review_profile: output.review_profile,
+        workspace: AuditWorkspaceReport {
+            requested_workspace: output.requested_workspace,
+            lake_root: output.lake_root,
+            selected_roots: output.selected_roots,
+            source_count: output.source_count,
+        },
+        cache: AuditCacheReport {
+            root: output.cache_root,
+            fingerprint: output.cache_fingerprint,
+        },
+        options: AuditOptionsReport {
+            include_private: output.include_private,
+            compare_indexes: output.compare_indexes,
+            compare_mathlib: output.compare_mathlib,
+            include_generated: output.include_generated,
+            show_noise: output.show_noise,
+            review_profile: output.review_profile,
+        },
         scoring: output.scoring,
         profile_counts,
         retrieval,
@@ -806,7 +826,6 @@ fn semantic_verification_report(report: &AuditProbeSummary) -> SemanticVerificat
 
 fn review_report(review: &AuditReview) -> ReviewReport {
     ReviewReport {
-        groups: review.groups.iter().map(group_report).collect(),
         group_count: review.group_count,
         suppressed_count: review.suppressed_count,
         diagnostics: ReviewDiagnosticsReport {

@@ -229,7 +229,7 @@ end Tiny
 
     fn declaration(id: &str, name: &str, path: &std::path::Path) -> HydratedDeclaration {
         HydratedDeclaration {
-            handle: DeclarationHandle::for_test(id),
+            handle: DeclarationHandle::from_fixture_id(id),
             declaration_id: id.to_owned(),
             origin: "workspace".to_owned(),
             module: "Tiny".to_owned(),

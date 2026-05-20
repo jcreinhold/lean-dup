@@ -50,7 +50,7 @@ You will see a summary block followed by ranked groups. Real output, abridged:
 
 ```
 command: audit
-report schema: lean-dup.report.v1
+report schema: lean-dup.report.v3
 status: ok
 selected roots: Tiny
 source files: 3

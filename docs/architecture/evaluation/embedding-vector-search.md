@@ -192,13 +192,14 @@ Design It Twice:
 
 - *Store one row per generation event.* Rejected: readers would have to repair unordered-pair duplicates and merge
   contradictory row facts.
-- *Join only direct typed labels.* Rejected: legacy expanded clusters still define scoring denominators.
+- *Join only direct typed-pair labels.* Rejected: typed clusters still define expanded scoring denominators.
 - *Eval-owned truth-preserving artifact builder.* Chosen: search supplies stage facts; eval supplies label truth and
   writes one stable row per unordered pair.
 
-The artifact records label facts as `positive`, `hard-negative`, `expanded-positive`, `expanded-hard-negative`,
-`skipped`, or `unlabeled`. A row can carry multiple label facts, for example a skipped hard-negative fact caused by a
-positive-label conflict. Scoring denominators still come from the normalized positive and hard-negative label sets.
+The artifact records label facts as `positive`, `hard-negative`, `expanded-positive`, `expanded-hard-negative`, or
+`unlabeled`. A row can carry multiple typed label facts when a direct typed pair and an expanded typed cluster agree.
+Contradictory typed labels are fixture errors, not skipped compatibility rows. Scoring denominators still come from the
+normalized positive and hard-negative label sets.
 
 Additional metrics in `vector_stage_metrics` report raw `found/total` counts for vector top-k recall, vector top-k
 precision, top-k saturation, vector-only positives, vector-only hard negatives, symbolic-only positives, symbolic-only

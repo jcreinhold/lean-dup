@@ -1,33 +1,5 @@
 {
   "suite": "hard-negatives",
-  "positive_pairs": [
-    {
-      "left": "Tiny.same_left",
-      "right": "External.same_as_tiny"
-    }
-  ],
-  "hard_negative_pairs": [
-    {
-      "left": "Tiny.same_conclusion_nat_domain",
-      "right": "Tiny.same_conclusion_bool_domain"
-    },
-    {
-      "left": "Tiny.broad_eq_only",
-      "right": "Tiny.symmetric_eq_left"
-    },
-    {
-      "left": "Height.WeilHeight",
-      "right": "Stream'.Seq1"
-    },
-    {
-      "left": "Height.WeilHeight",
-      "right": "Topology.WithLawson"
-    },
-    {
-      "left": "VojtaConjectureRankOne",
-      "right": "RiemannHypothesis"
-    }
-  ],
   "typed_pairs": [
     {
       "left": "Tiny.same_left",

@@ -1004,7 +1004,7 @@ mod tests {
 
     fn declaration(id: &str, origin: &str, name: &str) -> HydratedDeclaration {
         HydratedDeclaration {
-            handle: DeclarationHandle::for_test(id),
+            handle: DeclarationHandle::from_fixture_id(id),
             declaration_id: id.to_owned(),
             origin: origin.to_owned(),
             module: name.rsplit_once('.').map(|(module, _)| module).unwrap_or("").to_owned(),

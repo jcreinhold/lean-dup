@@ -1048,7 +1048,7 @@ mod tests {
             row.declaration_id = format!("synthetic:generated:{index}");
             row.qualified_name = format!("Synthetic.generated_{index}");
             row.display_name = format!("generated_{index}");
-            row.handle = lean_dup_index::DeclarationHandle::for_test(row.declaration_id.clone());
+            row.handle = lean_dup_index::DeclarationHandle::from_fixture_id(row.declaration_id.clone());
             rows.push(row);
         }
 

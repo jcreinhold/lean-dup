@@ -103,7 +103,7 @@ Design It Twice:
 
 - *One row per generation event.* Rejected: downstream readers would have to repair duplicate unordered pairs and
   resolve conflicting facts.
-- *Typed labels only.* Rejected: legacy cluster expansion is still part of the scoring oracle, so omitting it makes
+- *Typed pairs only.* Rejected: typed cluster expansion is still part of the scoring oracle, so omitting it makes
   expanded positives and hard negatives look unlabeled.
 - *Eval-owned truth-preserving builder.* Chosen: search supplies stage facts, labels supply oracle facts, and eval
   produces a stable artifact with raw denominators.

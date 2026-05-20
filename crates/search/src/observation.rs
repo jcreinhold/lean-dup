@@ -522,7 +522,7 @@ mod tests {
     fn generated_rows(count: usize) -> Vec<HydratedDeclaration> {
         (0..count)
             .map(|index| HydratedDeclaration {
-                handle: DeclarationHandle::for_test(format!("synthetic-{index}")),
+                handle: DeclarationHandle::from_fixture_id(format!("synthetic-{index}")),
                 declaration_id: format!("synthetic:generated:{index}"),
                 origin: "workspace".to_owned(),
                 module: "Synthetic".to_owned(),

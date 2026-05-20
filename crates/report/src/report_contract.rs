@@ -5,7 +5,7 @@ use serde::Serialize;
 use lean_dup_index::{ComparisonEvidenceMode, ComparisonProvenanceReport};
 use lean_dup_search::{AuditGroup, AuditProbeSummary, AuditQueueSummary, AuditReview};
 
-pub const REPORT_SCHEMA_VERSION: &str = "lean-dup.report.v2";
+pub const REPORT_SCHEMA_VERSION: &str = "lean-dup.report.v3";
 
 /// Stable explanations for audit output.
 ///

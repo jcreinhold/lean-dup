@@ -241,15 +241,21 @@ fn render_audit(report: &AuditReport) -> String {
         "command: audit".to_owned(),
         format!("report schema: {}", report.report_schema_version),
         format!("status: {}", report.status),
-        format!("requested workspace: {}", report.requested_workspace.display()),
-        format!("resolved Lake root: {}", report.lake_root.display()),
-        format!("selected roots: {}", report.selected_roots.join(", ")),
-        format!("source files: {}", report.source_count),
-        format!("cache root: {}", report.cache_root.display()),
-        format!("cache fingerprint: {}", report.cache_fingerprint),
-        format!("include private: {}", report.include_private),
-        format!("compare mathlib: {}", report.compare_mathlib),
-        format!("review profile: {}", review_profile_label(report.review_profile)),
+        format!(
+            "requested workspace: {}",
+            report.workspace.requested_workspace.display()
+        ),
+        format!("resolved Lake root: {}", report.workspace.lake_root.display()),
+        format!("selected roots: {}", report.workspace.selected_roots.join(", ")),
+        format!("source files: {}", report.workspace.source_count),
+        format!("cache root: {}", report.cache.root.display()),
+        format!("cache fingerprint: {}", report.cache.fingerprint),
+        format!("include private: {}", report.options.include_private),
+        format!("compare mathlib: {}", report.options.compare_mathlib),
+        format!(
+            "review profile: {}",
+            review_profile_label(report.options.review_profile)
+        ),
         format!("candidates: {}", report.retrieval.candidate_count),
         format!(
             "comparison provenance: {}",

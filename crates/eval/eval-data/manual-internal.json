@@ -1,48 +1,5 @@
 {
   "suite": "manual-internal",
-  "positive_clusters": [
-    {
-      "id": "exact-statement-12",
-      "members": ["mem", "mem_innerFibrations"]
-    },
-    {
-      "id": "exact-statement-23",
-      "members": ["ext", "ext_of_mem_iff"]
-    },
-    {
-      "id": "exact-statement-35",
-      "members": ["omega_map", "integer_omega_map"]
-    },
-    {
-      "id": "exact-statement-51",
-      "members": ["zfSet_models_delta0Theory", "instZFSetModelsDelta0Theory"]
-    },
-    {
-      "id": "connective-equivalent-9",
-      "members": ["naturality_component", "naturality_component_source_order"]
-    },
-    {
-      "id": "subsumption-candidate-34",
-      "members": ["SSet.Subcomplex.Pairing.toAnodynePresentation", "SSet.Subcomplex.PairingCore.toAnodynePresentation"]
-    }
-  ],
-  "hard_negative_pairs": [
-    {
-      "id": "broad-extensionality",
-      "left": "omegaRecursiveGraph_functional",
-      "right": "naturality_component"
-    },
-    {
-      "id": "broad-cancellation",
-      "left": "VojtaConjectureRankOne",
-      "right": "RiemannHypothesis"
-    },
-    {
-      "id": "same-conclusion-shape",
-      "left": "WeierstrassCurve.valuation_c₄_aux",
-      "right": "WeierstrassCurve.valuation_Δ_aux"
-    }
-  ],
   "typed_pairs": [
     {
       "left": "mem",

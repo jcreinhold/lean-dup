@@ -614,7 +614,7 @@ fn fixture_declaration(
 ) -> lean_dup_index::HydratedDeclaration {
     let module = name.rsplit_once('.').map(|(module, _)| module).unwrap_or("").to_owned();
     lean_dup_index::HydratedDeclaration {
-        handle: DeclarationHandle::for_test(id),
+        handle: DeclarationHandle::from_fixture_id(id),
         declaration_id: id.to_owned(),
         origin: "workspace".to_owned(),
         module,

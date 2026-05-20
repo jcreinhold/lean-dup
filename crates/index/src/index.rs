@@ -214,7 +214,7 @@ impl DeclarationHandle {
         &self.0
     }
 
-    pub fn for_test(value: impl Into<String>) -> Self {
+    pub fn from_fixture_id(value: impl Into<String>) -> Self {
         Self(value.into())
     }
 }
@@ -573,7 +573,7 @@ impl IndexStore {
 
 #[allow(dead_code)]
 impl OpenedIndex {
-    pub fn for_test(path: PathBuf) -> Self {
+    pub fn from_fixture_path(path: PathBuf) -> Self {
         Self { path }
     }
 
