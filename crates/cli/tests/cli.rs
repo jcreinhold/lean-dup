@@ -948,8 +948,10 @@ fn audit_json_keeps_progress_and_profile_off_stdout() {
     let payload: Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(payload["command"], "audit");
     assert_eq!(payload["status"], "ok");
-    assert!(payload["review"]["groups"].is_array());
-    let first_group = payload["review"]["groups"].as_array().unwrap().first().unwrap();
+    assert_eq!(payload["review"]["groups"].as_array().unwrap().len(), 0);
+    assert!(payload["review"]["group_count"].as_u64().unwrap() >= payload["visible_groups_emitted"].as_u64().unwrap());
+    assert!(payload["visible_groups"].is_array());
+    let first_group = payload["visible_groups"].as_array().unwrap().first().unwrap();
     assert!(first_group["id"].as_str().unwrap().contains('-'));
     assert!(!first_group["id"].as_str().unwrap().starts_with("review-"));
     assert!(first_group["evidence"].is_array());
@@ -991,10 +993,12 @@ fn review_profiles_filter_one_ranked_audit_result() {
     assert!(counts["mathlib"].as_u64().unwrap() <= counts["internal"].as_u64().unwrap());
     assert!(counts["internal"].as_u64().unwrap() <= counts["api_design"].as_u64().unwrap());
     assert!(counts["api_design"].as_u64().unwrap() <= counts["noise"].as_u64().unwrap());
+    assert_eq!(payload["review"]["groups"].as_array().unwrap().len(), 0);
     assert_eq!(
-        payload["review"]["diagnostics"]["emitted_groups"].as_u64().unwrap(),
-        payload["review"]["groups"].as_array().unwrap().len() as u64
+        payload["visible_groups_emitted"].as_u64().unwrap(),
+        payload["visible_groups"].as_array().unwrap().len() as u64
     );
+    assert!(payload["visible_groups_emitted"].as_u64().unwrap() <= payload["visible_group_limit"].as_u64().unwrap());
 }
 
 #[test]
@@ -1014,10 +1018,14 @@ fn audit_json_includes_stable_report_explanations() {
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let payload: Value = serde_json::from_str(&stdout).unwrap();
 
-    assert_eq!(payload["report_schema_version"], "lean-dup.report.v1");
+    assert_eq!(payload["report_schema_version"], "lean-dup.report.v2");
     assert_eq!(
         payload["explanations"]["visible_queue"]["visible"],
         payload["visible_group_count"]
+    );
+    assert_eq!(
+        payload["explanations"]["visible_queue"]["emitted"],
+        payload["visible_groups_emitted"]
     );
     assert!(
         payload["explanations"]["visible_queue"]["reason"]
@@ -1052,7 +1060,8 @@ fn audit_text_reports_queue_probe_and_provenance_explanations() {
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
 
-    assert!(stdout.contains("report schema: lean-dup.report.v1"));
+    assert!(stdout.contains("report schema: lean-dup.report.v2"));
+    assert!(stdout.contains("visible groups emitted:"));
     assert!(stdout.contains("visible queue:"));
     assert!(stdout.contains("hidden groups: total="));
     assert!(stdout.contains("probe summary: semantic probes disabled"));
@@ -1129,7 +1138,7 @@ fn audit_fixture_mathlib_label_produces_actionable_hints() {
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let payload: Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(payload["comparison_provenance"][0]["evidence_mode"], "static");
-    let groups = payload["review"]["groups"].as_array().unwrap();
+    let groups = payload["visible_groups"].as_array().unwrap();
     let exact = groups
         .iter()
         .find(|group| {
@@ -1199,7 +1208,7 @@ fn source_backed_external_index_gets_proof_grade_probe_evidence() {
     assert_eq!(payload["comparison_provenance"][0]["evidence_mode"], "proof-grade");
     assert!(payload["semantic_verification"]["planned_pairs"].as_u64().unwrap() > 0);
     assert!(payload["semantic_verification"]["verified_results"].as_u64().unwrap() > 0);
-    let groups = payload["review"]["groups"].as_array().unwrap();
+    let groups = payload["visible_groups"].as_array().unwrap();
     let exact = groups
         .iter()
         .find(|group| group["target_decl"] == "External.same_as_tiny")
@@ -1260,7 +1269,7 @@ fn show_renders_evidence_blockers_probe_hint_and_callers_for_group() {
         .success();
     let stdout = String::from_utf8(audit.get_output().stdout.clone()).unwrap();
     let payload: Value = serde_json::from_str(&stdout).unwrap();
-    let group_id = payload["review"]["groups"][0]["id"].as_str().unwrap();
+    let group_id = payload["visible_groups"][0]["id"].as_str().unwrap();
 
     let show = Command::cargo_bin("lean-dup")
         .unwrap()

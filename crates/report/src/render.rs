@@ -312,8 +312,18 @@ fn render_audit(report: &AuditReport) -> String {
             "semantic reranking: {}",
             report.semantic_verification.semantic_reranking.version
         ),
-        format!("review groups: {}", report.review.groups.len()),
+        format!("review groups: {}", report.review.group_count),
         format!("visible groups: {}", report.visible_group_count),
+        format!(
+            "visible groups emitted: {} / {}{}",
+            report.visible_groups_emitted,
+            report.visible_group_limit,
+            if report.visible_groups_truncated {
+                " (truncated)"
+            } else {
+                ""
+            }
+        ),
         format!("visible queue: {}", report.explanations.visible_queue.reason),
         format!(
             "hidden groups: total={} profile/noise={} generated={} unverified-proof-grade={} unavailable-probe={} other={}",

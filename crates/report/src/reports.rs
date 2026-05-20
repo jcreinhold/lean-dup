@@ -291,6 +291,9 @@ pub struct AuditReport {
     pub review: ReviewReport,
     pub visible_groups: Vec<ReviewGroupReport>,
     pub visible_group_count: usize,
+    pub visible_groups_emitted: usize,
+    pub visible_group_limit: usize,
+    pub visible_groups_truncated: bool,
     pub saved_baseline: Option<PathBuf>,
     pub message: &'static str,
 }
@@ -384,6 +387,7 @@ pub struct SemanticVerificationReport {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ReviewReport {
     pub groups: Vec<ReviewGroupReport>,
+    pub group_count: usize,
     pub suppressed_count: usize,
     pub diagnostics: ReviewDiagnosticsReport,
     pub candidate_pairs: usize,
@@ -639,7 +643,8 @@ fn eval_count_metric_dto(metric: lean_dup_eval::CountMetric) -> EvalCountMetricD
 }
 
 pub fn audit_report(output: AuditOutput) -> AuditReport {
-    let visible_group_count = output.visible_groups.len();
+    let visible_group_count = output.visible_group_count;
+    let visible_groups_emitted = output.visible_groups.len();
     let profile_counts = ReviewProfileCounts {
         mathlib: output.profile_counts.mathlib,
         internal: output.profile_counts.internal,
@@ -691,6 +696,9 @@ pub fn audit_report(output: AuditOutput) -> AuditReport {
         review,
         visible_groups,
         visible_group_count,
+        visible_groups_emitted,
+        visible_group_limit: output.visible_group_limit,
+        visible_groups_truncated: output.visible_groups_truncated,
         saved_baseline: output.saved_baseline,
         message: "audit ranking queue generated",
     }
@@ -843,6 +851,7 @@ fn semantic_verification_report(report: &AuditProbeSummary) -> SemanticVerificat
 fn review_report(review: &AuditReview) -> ReviewReport {
     ReviewReport {
         groups: review.groups.iter().map(group_report).collect(),
+        group_count: review.group_count,
         suppressed_count: review.suppressed_count,
         diagnostics: ReviewDiagnosticsReport {
             candidate_pairs: review.diagnostics.candidate_pairs,

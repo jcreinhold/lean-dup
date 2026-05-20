@@ -213,19 +213,19 @@ impl Default for ProbeDiagnostics {
     }
 }
 
-/// Return the candidate sets worth ranking for the requested default queue.
+/// Return the candidate sets worth ranking for the requested review queue.
 ///
-/// In the mathlib profile, feature-only mathlib overlaps are intentionally not
-/// ranked unless the user asks for a broad/noise-oriented profile. This keeps
-/// the default report actionable without changing retrieval's diagnostic
-/// counters or index behavior.
+/// Default profiles keep only strong static candidates before semantic probing
+/// and ranking. Broad/noise-oriented profiles keep the full retrieval output.
+/// This keeps reports actionable without changing retrieval diagnostics,
+/// candidate-generation behavior, or index contents.
 pub fn candidate_sets_for_review(
     candidate_sets: &[CandidateSet],
     compare_mathlib: bool,
     review_profile: ReviewProfile,
     show_noise: bool,
 ) -> Vec<CandidateSet> {
-    if show_noise || review_profile != ReviewProfile::Mathlib {
+    if show_noise || review_profile == ReviewProfile::Noise {
         return candidate_sets.to_vec();
     }
 
@@ -1162,6 +1162,32 @@ mod tests {
             }],
             false,
             ReviewProfile::Mathlib,
+            false,
+        );
+
+        assert_eq!(shaped[0].candidates, vec![exact]);
+    }
+
+    #[test]
+    fn internal_review_shape_uses_actionable_candidate_narrowing() {
+        let anchor = declaration("workspace:Tiny:Tiny.local", "workspace", "Tiny.local");
+        let exact = candidate(
+            declaration("workspace:Tiny:Tiny.exact", "workspace", "Tiny.exact"),
+            "statement-fingerprint",
+            100.0,
+        );
+        let broad = candidate(
+            declaration("workspace:Tiny:Tiny.broad", "workspace", "Tiny.broad"),
+            "role-feature",
+            40.0,
+        );
+        let shaped = candidate_sets_for_review(
+            &[CandidateSet {
+                anchor,
+                candidates: vec![exact.clone(), broad],
+            }],
+            false,
+            ReviewProfile::Internal,
             false,
         );
 

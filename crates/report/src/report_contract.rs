@@ -5,7 +5,7 @@ use serde::Serialize;
 use lean_dup_index::{ComparisonEvidenceMode, ComparisonProvenanceReport};
 use lean_dup_search::{AuditGroup, AuditProbeSummary, AuditQueueSummary, AuditReview};
 
-pub const REPORT_SCHEMA_VERSION: &str = "lean-dup.report.v1";
+pub const REPORT_SCHEMA_VERSION: &str = "lean-dup.report.v2";
 
 /// Stable explanations for audit output.
 ///
@@ -23,6 +23,9 @@ pub struct AuditExplanations {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct VisibleQueueExplanation {
     pub visible: usize,
+    pub emitted: usize,
+    pub limit: usize,
+    pub truncated: bool,
     pub total: usize,
     pub summary: String,
     pub reason: String,
@@ -77,14 +80,14 @@ pub struct GroupExplanation {
 }
 
 pub fn explain_audit(
-    review: &AuditReview,
-    visible_groups: &[AuditGroup],
+    _review: &AuditReview,
+    _visible_groups: &[AuditGroup],
     queue: &AuditQueueSummary,
     probes: &AuditProbeSummary,
     provenance: &[ComparisonProvenanceReport],
 ) -> AuditExplanations {
     let hidden_groups = hidden_groups(queue);
-    let visible_queue = visible_queue(visible_groups.len(), review.groups.len(), &hidden_groups);
+    let visible_queue = visible_queue(queue, &hidden_groups);
     AuditExplanations {
         visible_queue,
         hidden_groups,
@@ -105,13 +108,26 @@ pub fn explain_group(group: &AuditGroup) -> GroupExplanation {
     }
 }
 
-fn visible_queue(visible: usize, total: usize, hidden: &HiddenGroupExplanation) -> VisibleQueueExplanation {
-    let summary = format!("{visible}/{total} ranked groups visible");
+fn visible_queue(queue: &AuditQueueSummary, hidden: &HiddenGroupExplanation) -> VisibleQueueExplanation {
+    let visible = queue.visible;
+    let emitted = queue.emitted;
+    let total = queue.total;
+    let truncated = queue.truncated;
+    let summary = if truncated {
+        format!("{visible}/{total} ranked groups visible; emitted first {emitted}")
+    } else {
+        format!("{visible}/{total} ranked groups visible")
+    };
     let reason = if total == 0 {
         "No candidate groups were ranked after retrieval and review shaping.".to_owned()
     } else if visible > 0 {
+        let truncation = if truncated {
+            format!(" Only the first {emitted} groups are included in ordinary audit JSON.")
+        } else {
+            String::new()
+        };
         format!(
-            "{visible} groups match the active review profile; {} groups are hidden.",
+            "{visible} groups match the active review profile; {} groups are hidden.{truncation}",
             total - visible
         )
     } else if hidden.noise_or_profile == hidden.total {
@@ -125,6 +141,9 @@ fn visible_queue(visible: usize, total: usize, hidden: &HiddenGroupExplanation) 
     };
     VisibleQueueExplanation {
         visible,
+        emitted,
+        limit: queue.limit,
+        truncated,
         total,
         summary,
         reason,
@@ -400,6 +419,7 @@ mod tests {
                 emitted_groups: groups.len(),
                 suppressed_groups: 0,
             },
+            group_count: groups.len(),
             groups,
             suppressed_count: 0,
         }
@@ -408,6 +428,9 @@ mod tests {
     fn queue(hidden: AuditHiddenGroupCounts) -> AuditQueueSummary {
         AuditQueueSummary {
             visible: 0,
+            emitted: 0,
+            limit: 500,
+            truncated: false,
             total: hidden.total,
             hidden,
         }

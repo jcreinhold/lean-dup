@@ -31,6 +31,8 @@ use crate::semantic_verification::{
 use crate::source_refs::{SourceFactInput, collect_source_facts};
 use crate::{ProbePolicy, Result, ReviewProfile};
 
+const DEFAULT_VISIBLE_GROUP_LIMIT: usize = 500;
+
 /// Request for a complete duplicate-audit computation.
 ///
 /// The search crate owns the phase ordering from local index reuse through
@@ -78,6 +80,9 @@ pub struct AuditOutput {
     pub queue_summary: AuditQueueSummary,
     pub review: AuditReview,
     pub visible_groups: Vec<AuditGroup>,
+    pub visible_group_count: usize,
+    pub visible_group_limit: usize,
+    pub visible_groups_truncated: bool,
     pub saved_baseline: Option<PathBuf>,
 }
 
@@ -177,6 +182,7 @@ pub struct AuditProbeSummary {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AuditReview {
     pub groups: Vec<AuditGroup>,
+    pub group_count: usize,
     pub suppressed_count: usize,
     pub diagnostics: AuditReviewDiagnostics,
 }
@@ -271,6 +277,9 @@ pub enum AuditHiddenReason {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditQueueSummary {
     pub visible: usize,
+    pub emitted: usize,
+    pub limit: usize,
+    pub truncated: bool,
     pub total: usize,
     pub hidden: AuditHiddenGroupCounts,
 }
@@ -534,13 +543,16 @@ fn search_baseline_group(group: baseline::BaselineGroup) -> SearchBaselineGroup 
 
 fn project_audit_output(workflow: WorkflowOutput) -> AuditOutput {
     let filter = review_filter(workflow.review_profile, workflow.include_generated, workflow.show_noise);
-    let visible_groups = workflow
-        .review
-        .visible_groups(filter)
+    let visible_ranked_groups = workflow.review.visible_groups(filter);
+    let visible_group_count = visible_ranked_groups.len();
+    let visible_group_limit = DEFAULT_VISIBLE_GROUP_LIMIT;
+    let visible_groups_truncated = visible_group_count > visible_group_limit;
+    let visible_groups = visible_ranked_groups
         .into_iter()
+        .take(visible_group_limit)
         .map(|group| audit_group(group, filter))
         .collect::<Vec<_>>();
-    let queue_summary = audit_queue_summary(&workflow.review, filter);
+    let queue_summary = audit_queue_summary(&workflow.review, filter, visible_groups.len(), visible_group_limit);
     let profile_counts = audit_profile_counts(&workflow.review);
     let review = audit_review(&workflow.review, filter);
     AuditOutput {
@@ -564,6 +576,9 @@ fn project_audit_output(workflow: WorkflowOutput) -> AuditOutput {
         queue_summary,
         review,
         visible_groups,
+        visible_group_count,
+        visible_group_limit,
+        visible_groups_truncated,
         saved_baseline: workflow.saved_baseline,
     }
 }
@@ -614,9 +629,10 @@ fn audit_probe_summary(diagnostics: &ProbeDiagnostics) -> AuditProbeSummary {
     }
 }
 
-fn audit_review(review: &RankedReview, filter: ReviewFilter) -> AuditReview {
+fn audit_review(review: &RankedReview, _filter: ReviewFilter) -> AuditReview {
     AuditReview {
-        groups: review.groups.iter().map(|group| audit_group(group, filter)).collect(),
+        groups: Vec::new(),
+        group_count: review.groups.len(),
         suppressed_count: review.suppressed.len(),
         diagnostics: audit_review_diagnostics(&review.diagnostics),
     }
@@ -714,7 +730,12 @@ fn audit_visibility(group: &RankedGroup, filter: ReviewFilter) -> AuditVisibilit
     }
 }
 
-fn audit_queue_summary(review: &RankedReview, filter: ReviewFilter) -> AuditQueueSummary {
+fn audit_queue_summary(
+    review: &RankedReview,
+    filter: ReviewFilter,
+    visible_groups_emitted: usize,
+    visible_group_limit: usize,
+) -> AuditQueueSummary {
     let mut hidden = AuditHiddenGroupCounts::default();
     for group in &review.groups {
         if filter.includes(group) {
@@ -729,8 +750,12 @@ fn audit_queue_summary(review: &RankedReview, filter: ReviewFilter) -> AuditQueu
             AuditHiddenReason::OtherBlocker => hidden.other_blockers += 1,
         }
     }
+    let visible = review.visible_groups(filter).len();
     AuditQueueSummary {
-        visible: review.visible_groups(filter).len(),
+        visible,
+        emitted: visible_groups_emitted,
+        limit: visible_group_limit,
+        truncated: visible_groups_emitted < visible,
         total: review.groups.len(),
         hidden,
     }
@@ -930,11 +955,11 @@ fn open_compare_indexes(
 fn source_fact_declarations(
     workspace_rows: &[lean_dup_index::HydratedDeclaration],
     candidate_sets: &[crate::retrieval::CandidateSet],
-    compare_mathlib: bool,
+    _compare_mathlib: bool,
     review_profile: ReviewProfile,
     show_noise: bool,
 ) -> Vec<lean_dup_index::HydratedDeclaration> {
-    if !compare_mathlib || show_noise || review_profile != ReviewProfile::Mathlib {
+    if show_noise || review_profile == ReviewProfile::Noise {
         return workspace_rows.to_vec();
     }
 

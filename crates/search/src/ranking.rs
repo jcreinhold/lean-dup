@@ -72,6 +72,17 @@ impl ReviewFilter {
         if !self.include_generated && group.blockers.iter().any(|blocker| blocker == "generated-declaration") {
             return false;
         }
+        if !self.show_noise && group.members.iter().all(|member| member.visibility == "private") {
+            return false;
+        }
+        if !self.show_noise
+            && group
+                .blockers
+                .iter()
+                .any(|blocker| matches!(blocker.as_str(), "lean-probe-rejected" | "lean-probe-unavailable"))
+        {
+            return false;
+        }
         group.review_priority <= self.min_priority
     }
 }
@@ -834,6 +845,68 @@ mod tests {
         assert!(review.groups[0].blockers.contains(&"generated-declaration".to_owned()));
         assert!(review.groups[0].blockers.contains(&"broad-head-only".to_owned()));
         assert!(review.visible_groups(filter).is_empty());
+    }
+
+    #[test]
+    fn rejected_or_unavailable_probe_groups_are_hidden_by_default() {
+        for status in [EvidenceStatus::Rejected, EvidenceStatus::Unavailable] {
+            let left = declaration("workspace:Tiny:Tiny.left", "workspace", "Tiny.left");
+            let right = declaration("workspace:Tiny:Tiny.right", "workspace", "Tiny.right");
+            let pair_id = "workspace:Tiny:Tiny.left::workspace:Tiny:Tiny.right".to_owned();
+            let mut evidence = BTreeMap::new();
+            evidence.insert(
+                pair_id.clone(),
+                SemanticEvidence {
+                    pair_id: pair_id.clone(),
+                    kind: EvidenceKind::ExactTheorem,
+                    status,
+                    obligation: crate::SearchSemanticObligationKind::ExactTheorem,
+                    unavailable_reason: None,
+                    summary: None,
+                },
+            );
+            let mut ranked_candidate = candidate(right, "statement-fingerprint", 100.0);
+            ranked_candidate.pair_id = pair_id;
+            let review = rank_candidates(RankingInput {
+                candidate_sets: &[candidate_set(left, ranked_candidate)],
+                semantic_evidence: &evidence,
+                source_facts: &SourceFacts::empty(),
+                profile: RankingProfile::default(),
+                comparison_policy: Box::leak(Box::new(ComparisonEvidencePolicy::default())),
+            });
+            let filter = ReviewFilter {
+                include_generated: false,
+                show_noise: false,
+                min_priority: ReviewPriority::Medium,
+            };
+
+            assert!(review.visible_groups(filter).is_empty());
+        }
+    }
+
+    #[test]
+    fn private_private_helper_groups_are_noise_by_default() {
+        let mut left = declaration("workspace:Tiny:Tiny.left_aux", "workspace", "Tiny.left_aux");
+        left.visibility = "private".to_owned();
+        let mut right = declaration("workspace:Tiny:Tiny.right_aux", "workspace", "Tiny.right_aux");
+        right.visibility = "private".to_owned();
+        let review = rank_candidates(input(vec![candidate_set(
+            left,
+            candidate(right, "statement-fingerprint", 100.0),
+        )]));
+        let default_filter = ReviewFilter {
+            include_generated: false,
+            show_noise: false,
+            min_priority: ReviewPriority::Medium,
+        };
+        let noise_filter = ReviewFilter {
+            include_generated: true,
+            show_noise: true,
+            min_priority: ReviewPriority::Noise,
+        };
+
+        assert!(review.visible_groups(default_filter).is_empty());
+        assert_eq!(review.visible_groups(noise_filter).len(), 1);
     }
 
     #[test]
