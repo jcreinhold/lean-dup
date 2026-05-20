@@ -5,7 +5,7 @@ name = "lean-dup-vector-search"
 version = { workspace = true }
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
+clap = { workspace = true }
 lean-dup-diagnostics = { workspace = true }
 lean-dup-embedding = { workspace = true }
 lean-dup-eval = { workspace = true }

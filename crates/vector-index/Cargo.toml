@@ -5,14 +5,14 @@ name = "lean-dup-vector-index"
 version = { workspace = true }
 
 [dependencies]
-arrow-array = "58"
-arrow-schema = "58"
-futures = "0.3"
-lancedb = "0.29.0"
+arrow-array = { workspace = true }
+arrow-schema = { workspace = true }
+futures = { workspace = true }
+lancedb = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { version = "1", features = ["rt-multi-thread"] }
+tokio = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
