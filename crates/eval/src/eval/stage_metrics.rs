@@ -539,6 +539,7 @@ mod tests {
             positives,
             hard_negatives,
             typed_pairs: Vec::new(),
+            label_facts: Vec::new(),
         }
     }
 

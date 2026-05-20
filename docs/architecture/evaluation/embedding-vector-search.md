@@ -132,6 +132,45 @@ Stage counters in hidden artifacts:
 | `ranked`            | pair survived into ranked observation facts                 |
 | `visible`           | pair entered the shown queue                                |
 
+### 35N artifact truthfulness
+
+Vector artifacts use schema `lean-dup.vector-search.v2`. They are eval-owned summaries of pair truth, not logs of
+generation events. Each row is keyed by the normalized unordered declaration pair. If symbolic and vector generation
+both observe the same pair, eval emits one row with the best facts: any symbolic generation, any vector generation, any
+merged generation, any ranked survival, any visible survival, minimum rank, minimum vector rank, maximum vector score,
+sorted generation policies, sorted feature families, and privacy-safe declaration hashes.
+
+Design Note:
+
+- Hidden knowledge: eval owns label expansion, conflict resolution, row deduplication, and validation denominators;
+  search owns stage facts and privacy-safe content hashes; embedding and vector-index own model/runtime/storage
+  mechanics.
+- Smallest public interface: artifact rows expose declaration names, content hashes, explicit label facts, stage facts,
+  and raw metric denominators.
+- Non-leaking decisions: raw formal statements, source snippets, final model inputs, model prefixes, backend names,
+  persistence vocabulary, retrieval keys, worker rows, and absolute paths must not appear in artifacts.
+- Preserved capability: default symbolic audit and ordinary eval remain unchanged and do not build or query vector
+  corpora.
+- Discarded behavior: treating expanded cluster positives or hard negatives as unlabeled, treating duplicate event rows
+  as evidence, and hiding top-k saturation.
+
+Design It Twice:
+
+- *Store one row per generation event.* Rejected: readers would have to repair unordered-pair duplicates and merge
+  contradictory row facts.
+- *Join only direct typed labels.* Rejected: legacy expanded clusters still define scoring denominators.
+- *Eval-owned truth-preserving artifact builder.* Chosen: search supplies stage facts; eval supplies label truth and
+  writes one stable row per unordered pair.
+
+The artifact records label facts as `positive`, `hard-negative`, `expanded-positive`, `expanded-hard-negative`,
+`skipped`, or `unlabeled`. A row can carry multiple label facts, for example a skipped hard-negative fact caused by a
+positive-label conflict. Scoring denominators still come from the normalized positive and hard-negative label sets.
+
+Additional metrics in `vector_stage_metrics` report raw `found/total` counts for vector top-k recall, vector top-k
+precision, top-k saturation, vector-only positives, vector-only hard negatives, symbolic-only positives, symbolic-only
+hard negatives, merged-generated recall, ranked recall, visible precision, and visible hard-negative count. These
+metrics are artifact-local; Prompt 35O is responsible for testing vector score as hidden ranking evidence.
+
 Cache-only missing model preparation is a skipped vector experiment, not an eval failure.
 The symbolic baseline remains in the artifact, and existing suite gates are evaluated
 against the symbolic baseline, not against experimental vector output.
@@ -226,3 +265,22 @@ Backend identity is architecture evidence only. References:
 - *Hard-to-describe public API:* the API is policy plus counts plus top-k saturation.
 - *Implementation-detail comments:* skip reasons describe stable search facts, not
   worker rows, storage fields, or model input mechanics.
+
+35N Red Flag Review:
+
+- *Shallow module:* eval does artifact truth work—deduplication, label expansion, and
+  denominator construction—instead of forwarding event rows.
+- *Pass-through wrapper:* vector artifact v2 changes the representation from generation
+  events to unordered-pair summaries.
+- *Temporal decomposition:* row truth is owned by eval because eval owns labels and
+  validation denominators, not because eval happens after search.
+- *Information leakage:* backend names, storage vocabulary, model prefixes, raw text,
+  worker rows, retrieval keys, and absolute paths remain forbidden artifact content.
+- *Special-general mixture:* vector-specific denominators live in the hidden vector
+  artifact; ordinary eval metrics stay unchanged.
+- *Conjoined methods:* search generation, label parsing, vector runtime, vector storage,
+  and artifact writing remain separately owned.
+- *Hard-to-describe public API:* one row per unordered pair plus `found/total` vector
+  stage metrics.
+- *Implementation-detail comments:* interface comments describe artifact facts and
+  privacy constraints, not database or runtime mechanics.

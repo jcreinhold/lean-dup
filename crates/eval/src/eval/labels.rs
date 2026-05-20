@@ -16,6 +16,7 @@ pub struct GoldLabels {
     pub positives: FxHashSet<GoldPair>,
     pub hard_negatives: FxHashSet<GoldPair>,
     pub typed_pairs: Vec<TypedGoldLabel>,
+    pub label_facts: Vec<GoldLabelFact>,
 }
 
 /// A task-specific adjudication for one unordered declaration pair.
@@ -33,6 +34,31 @@ pub struct TypedGoldLabel {
     pub confidence: LabelConfidence,
     pub semantic_verification_required: bool,
     pub static_evidence_acceptable: bool,
+}
+
+/// Stable label provenance for one normalized pair.
+///
+/// Scoring uses the positive and hard-negative sets. Artifacts use these facts
+/// to explain whether a pair was directly typed, expanded from a cluster, or
+/// skipped because a stronger positive label won.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GoldLabelFact {
+    pub pair: GoldPair,
+    pub polarity: Option<LabelPolarity>,
+    pub source: LabelFactSource,
+    pub typed: Option<TypedGoldLabel>,
+    pub skipped_reason: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LabelFactSource {
+    TypedPair,
+    DirectPositivePair,
+    DirectHardNegativePair,
+    ExpandedPositiveCluster,
+    ExpandedHardNegativeCluster,
+    ConflictResolved,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -138,11 +164,45 @@ pub fn load_builtin(suite: EvalSuite) -> Result<GoldLabels> {
 
 fn parse(json: &str) -> Result<GoldLabels> {
     let file: LabelFile = serde_json::from_str(json)?;
-    let mut positives = expand_clusters(&file.positive_clusters);
-    positives.extend(expand_pairs(&file.positive_pairs));
-    let mut hard_negatives = expand_clusters(&file.hard_negative_clusters);
-    hard_negatives.extend(expand_pairs(&file.hard_negative_pairs));
+    let mut label_facts = Vec::new();
+    label_facts.extend(expand_cluster_facts(
+        &file.positive_clusters,
+        LabelPolarity::Positive,
+        LabelFactSource::ExpandedPositiveCluster,
+    ));
+    label_facts.extend(expand_pair_facts(
+        &file.positive_pairs,
+        LabelPolarity::Positive,
+        LabelFactSource::DirectPositivePair,
+    ));
+    label_facts.extend(expand_cluster_facts(
+        &file.hard_negative_clusters,
+        LabelPolarity::HardNegative,
+        LabelFactSource::ExpandedHardNegativeCluster,
+    ));
+    label_facts.extend(expand_pair_facts(
+        &file.hard_negative_pairs,
+        LabelPolarity::HardNegative,
+        LabelFactSource::DirectHardNegativePair,
+    ));
     let typed_pairs = validate_typed_pairs(file.typed_pairs)?;
+    label_facts.extend(typed_pairs.iter().cloned().map(|typed| GoldLabelFact {
+        pair: typed.pair.clone(),
+        polarity: Some(typed.polarity),
+        source: LabelFactSource::TypedPair,
+        typed: Some(typed),
+        skipped_reason: None,
+    }));
+    let mut positives = label_facts
+        .iter()
+        .filter(|fact| fact.polarity == Some(LabelPolarity::Positive))
+        .map(|fact| fact.pair.clone())
+        .collect::<FxHashSet<_>>();
+    let mut hard_negatives = label_facts
+        .iter()
+        .filter(|fact| fact.polarity == Some(LabelPolarity::HardNegative))
+        .map(|fact| fact.pair.clone())
+        .collect::<FxHashSet<_>>();
     for typed in &typed_pairs {
         match typed.polarity {
             LabelPolarity::Positive => {
@@ -153,12 +213,27 @@ fn parse(json: &str) -> Result<GoldLabels> {
             }
         }
     }
+    let dropped_hard_negatives = hard_negatives
+        .iter()
+        .filter(|pair| positives.contains(*pair))
+        .cloned()
+        .collect::<Vec<_>>();
+    for pair in dropped_hard_negatives {
+        label_facts.push(GoldLabelFact {
+            pair,
+            polarity: None,
+            source: LabelFactSource::ConflictResolved,
+            typed: None,
+            skipped_reason: Some("positive-label-wins"),
+        });
+    }
     hard_negatives.retain(|pair| !positives.contains(pair));
     Ok(GoldLabels {
         suite: file.suite,
         positives,
         hard_negatives,
         typed_pairs,
+        label_facts,
     })
 }
 
@@ -206,30 +281,50 @@ fn required<T>(value: Option<T>, field: &'static str, pair: &GoldPair) -> Result
     })
 }
 
-fn expand_clusters(clusters: &[LabelCluster]) -> FxHashSet<GoldPair> {
-    let mut pairs = FxHashSet::default();
+fn expand_cluster_facts(
+    clusters: &[LabelCluster],
+    polarity: LabelPolarity,
+    source: LabelFactSource,
+) -> Vec<GoldLabelFact> {
+    let mut facts = Vec::new();
     for cluster in clusters {
         for left_index in 0..cluster.members.len() {
             for right_index in left_index + 1..cluster.members.len() {
-                pairs.insert(GoldPair::new(
-                    cluster.members[left_index].clone(),
-                    cluster.members[right_index].clone(),
-                ));
+                facts.push(GoldLabelFact {
+                    pair: GoldPair::new(
+                        cluster.members[left_index].clone(),
+                        cluster.members[right_index].clone(),
+                    ),
+                    polarity: Some(polarity),
+                    source,
+                    typed: None,
+                    skipped_reason: None,
+                });
             }
         }
     }
-    pairs
+    facts
 }
 
-fn expand_pairs(pairs: &[LabelPair]) -> impl Iterator<Item = GoldPair> + '_ {
-    pairs
-        .iter()
-        .map(|pair| GoldPair::new(pair.left.clone(), pair.right.clone()))
+fn expand_pair_facts(
+    pairs: &[LabelPair],
+    polarity: LabelPolarity,
+    source: LabelFactSource,
+) -> impl Iterator<Item = GoldLabelFact> + '_ {
+    pairs.iter().map(move |pair| GoldLabelFact {
+        pair: GoldPair::new(pair.left.clone(), pair.right.clone()),
+        polarity: Some(polarity),
+        source,
+        typed: None,
+        skipped_reason: None,
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{AdjudicationSource, ExpectedStageVisibility, LabelConfidence, LabelPolarity, MatchClass, parse};
+    use super::{
+        AdjudicationSource, ExpectedStageVisibility, LabelConfidence, LabelFactSource, LabelPolarity, MatchClass, parse,
+    };
     use crate::eval::scoring::GoldPair;
 
     #[test]
@@ -250,6 +345,12 @@ mod tests {
         assert!(labels.positives.contains(&GoldPair::new("P", "Q")));
         assert!(labels.hard_negatives.contains(&GoldPair::new("A", "D")));
         assert!(labels.typed_pairs.is_empty());
+        assert!(labels.label_facts.iter().any(|fact| {
+            fact.pair == GoldPair::new("A", "B") && fact.source == LabelFactSource::ExpandedPositiveCluster
+        }));
+        assert!(labels.label_facts.iter().any(|fact| {
+            fact.pair == GoldPair::new("A", "D") && fact.source == LabelFactSource::ExpandedHardNegativeCluster
+        }));
     }
 
     #[test]
@@ -268,6 +369,11 @@ mod tests {
 
         assert!(!labels.hard_negatives.contains(&GoldPair::new("A", "B")));
         assert!(labels.hard_negatives.contains(&GoldPair::new("A", "C")));
+        assert!(labels.label_facts.iter().any(|fact| {
+            fact.pair == GoldPair::new("A", "B")
+                && fact.source == LabelFactSource::ConflictResolved
+                && fact.skipped_reason == Some("positive-label-wins")
+        }));
     }
 
     #[test]

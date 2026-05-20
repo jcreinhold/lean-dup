@@ -154,7 +154,9 @@ pub(crate) struct VectorCandidateOutput {
 #[derive(Debug, Clone)]
 pub(crate) struct VectorCandidate {
     pub(crate) anchor_name: String,
+    pub(crate) anchor_content_hash: String,
     pub(crate) declaration: HydratedDeclaration,
+    pub(crate) declaration_content_hash: String,
     pub(crate) score: f32,
     pub(crate) rank: usize,
 }
@@ -408,7 +410,9 @@ pub(crate) fn generate_vector_candidates(
             if seen.insert(key) {
                 candidates.push(VectorCandidate {
                     anchor_name: query_document.declaration_name.clone(),
+                    anchor_content_hash: query_document.content_hash.clone(),
                     declaration: declaration.clone(),
+                    declaration_content_hash: candidate.content_hash,
                     score: candidate.score,
                     rank,
                 });

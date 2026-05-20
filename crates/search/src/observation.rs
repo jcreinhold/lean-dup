@@ -155,6 +155,8 @@ pub struct SearchObservedPair {
     pub generation_policy: String,
     pub rank: Option<usize>,
     pub shown: bool,
+    pub left_content_hash: Option<String>,
+    pub right_content_hash: Option<String>,
     pub vector_score: Option<f64>,
     pub vector_rank: Option<usize>,
     pub origin: String,
@@ -201,6 +203,8 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
                 generation_policy: generation_policy_for_ranked(&candidate.declaration),
                 rank: scored.ranked.then_some(index + 1),
                 shown: scored.shown,
+                left_content_hash: None,
+                right_content_hash: None,
                 vector_score: None,
                 vector_rank: None,
                 origin: candidate.declaration.origin.clone(),
@@ -474,6 +478,8 @@ fn merge_vector_candidates(
                 pair.merged_generated = pair.symbolic_generated || pair.vector_generated;
                 pair.vector_score = Some(f64::from(vector.score));
                 pair.vector_rank = Some(vector.rank);
+                pair.left_content_hash = Some(vector.anchor_content_hash.clone());
+                pair.right_content_hash = Some(vector.declaration_content_hash.clone());
             }
             continue;
         }
@@ -495,6 +501,8 @@ fn merge_vector_candidates(
             generation_policy: generation_policy_for_vector(&vector.declaration),
             rank: scored.ranked.then_some(vector.rank),
             shown: false,
+            left_content_hash: Some(vector.anchor_content_hash),
+            right_content_hash: Some(vector.declaration_content_hash),
             vector_score: Some(f64::from(vector.score)),
             vector_rank: Some(vector.rank),
             origin: vector.declaration.origin.clone(),
@@ -676,6 +684,8 @@ fn generated_observed_pair(
         generation_policy: evidence.policy,
         rank: None,
         shown: scored.shown,
+        left_content_hash: None,
+        right_content_hash: None,
         vector_score: None,
         vector_rank: None,
         origin: candidate.origin.clone(),
@@ -784,7 +794,9 @@ mod tests {
             &mut pairs,
             vec![VectorCandidate {
                 anchor_name: "Synthetic.generated_0".to_owned(),
+                anchor_content_hash: "hash-left".to_owned(),
                 declaration: rows[1].clone(),
+                declaration_content_hash: "hash-right".to_owned(),
                 score: 0.95,
                 rank: 1,
             }],
@@ -801,6 +813,8 @@ mod tests {
         assert!(pair.ranked);
         assert!(!pair.shown);
         assert_eq!(pair.vector_rank, Some(1));
+        assert_eq!(pair.left_content_hash.as_deref(), Some("hash-left"));
+        assert_eq!(pair.right_content_hash.as_deref(), Some("hash-right"));
         assert_eq!(pair.generation_policy, "vector_local_duplicate_audit");
     }
 

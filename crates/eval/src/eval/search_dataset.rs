@@ -240,6 +240,7 @@ mod tests {
                 semantic_verification_required: true,
                 static_evidence_acceptable: true,
             }],
+            label_facts: Vec::new(),
         }
     }
 
@@ -255,6 +256,8 @@ mod tests {
             generation_policy: "local_duplicate_audit".to_owned(),
             rank: Some(rank),
             shown: rank == 1,
+            left_content_hash: None,
+            right_content_hash: None,
             vector_score: None,
             vector_rank: None,
             origin: "workspace".to_owned(),

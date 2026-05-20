@@ -473,7 +473,7 @@ fn eval_hidden_vector_search_mode_writes_skipped_artifact_without_model() {
     );
 
     let vector: Value = serde_json::from_str(&fs::read_to_string(&artifact).unwrap()).unwrap();
-    assert_eq!(vector["schema_version"], "lean-dup.vector-search.v1");
+    assert_eq!(vector["schema_version"], "lean-dup.vector-search.v2");
     assert_eq!(vector["suite"], "default");
     assert_eq!(vector["status"], "skipped");
     assert_eq!(vector["reason"], "vector-model-not-prepared");
@@ -490,10 +490,14 @@ fn eval_hidden_vector_search_mode_writes_skipped_artifact_without_model() {
     assert_eq!(vector["vector_candidates"]["top_k"], 32);
     assert!(vector["vector_candidates"]["eligible_corpus_size"].is_number());
     assert!(vector["vector_candidates"]["top_k_saturated"].is_boolean());
+    assert!(vector["vector_stage_metrics"]["vector_top_k_recall"].is_object());
+    assert!(vector["vector_stage_metrics"]["vector_top_k_precision"].is_object());
+    assert!(vector["vector_stage_metrics"]["top_k_saturation"].is_object());
+    assert!(vector["vector_stage_metrics"]["vector_only_positives"].is_object());
     assert!(vector["symbolic_baseline"]["stage_metrics"].is_object());
 
     let raw = fs::read_to_string(artifact).unwrap();
-    for forbidden in [
+    let forbidden_artifact_text = [
         "/Users/",
         "statement_text",
         "model.safetensors",
@@ -502,10 +506,28 @@ fn eval_hidden_vector_search_mode_writes_skipped_artifact_without_model() {
         "posting",
         "worker JSONL",
         "tensor",
+        "FastEmbed",
+        "LanceDB",
+        "Qdrant",
+        "sqlite-vec",
+        "HNSW",
+        "ANN",
+        "\"table\"",
+        "\"row\"",
+        "graph",
+        "layer",
+        "neighbor",
         "lancedb",
         "table_name",
-    ] {
-        assert!(!raw.contains(forbidden), "vector search artifact leaked {forbidden}");
+        "FeatureMatch",
+        "IndexQuery",
+    ];
+    for forbidden in forbidden_artifact_text
+        .into_iter()
+        .map(str::to_owned)
+        .chain([["query", ":"].concat(), ["passage", ":"].concat()])
+    {
+        assert!(!raw.contains(&forbidden), "vector search artifact leaked {forbidden}");
     }
 }
 
