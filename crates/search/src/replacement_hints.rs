@@ -1,5 +1,7 @@
 use serde::Serialize;
 
+use lean_dup_worker::SourceSpan;
+
 use crate::ranking::{ConfidenceTier, RankedGroup, RankedReview, ReviewAction, ReviewFilter};
 use crate::scorer;
 use crate::source_refs::{ImportStatus, SourceFacts, SourceReference};
@@ -44,6 +46,9 @@ pub fn attach_replacement_hints(
     profile: ReplacementHintProfile,
 ) -> RankedReview {
     for group in &mut review.groups {
+        if private_helper_wrapper_cleanup(group, facts) {
+            group.recommended_action = ReviewAction::InlinePrivateHelper;
+        }
         group.replacement_hint = hint_for_group(group, facts, profile);
     }
     review
@@ -112,6 +117,11 @@ fn hint_for_group(
     if group.recommended_action == ReviewAction::LocalAlias {
         notes.push("alias-first cleanup is safer than deleting the local declaration".to_owned());
     }
+    if group.recommended_action == ReviewAction::InlinePrivateHelper {
+        notes.push(
+            "only the public wrapper calls the private helper; inline the helper body into the wrapper".to_owned(),
+        );
+    }
 
     Some(ReplacementHint {
         target_decl,
@@ -138,8 +148,55 @@ fn eligible(group: &RankedGroup) -> bool {
     }
     matches!(
         group.recommended_action,
-        ReviewAction::AlreadyInMathlib | ReviewAction::ReplaceLocalUses | ReviewAction::LocalAlias
+        ReviewAction::AlreadyInMathlib
+            | ReviewAction::ReplaceLocalUses
+            | ReviewAction::LocalAlias
+            | ReviewAction::InlinePrivateHelper
     )
+}
+
+fn private_helper_wrapper_cleanup(group: &RankedGroup, facts: &SourceFacts) -> bool {
+    if !group.blockers.iter().any(|blocker| blocker == "non-public-declaration") {
+        return false;
+    }
+    if !matches!(
+        group.recommended_action,
+        ReviewAction::ReplaceLocalUses | ReviewAction::LocalAlias
+    ) {
+        return false;
+    }
+    let Some(target_decl) = group.target_decl.as_deref() else {
+        return false;
+    };
+    let Some(target) = group.members.iter().find(|member| {
+        member.origin == "workspace" && member.visibility == "public" && member.qualified_name == target_decl
+    }) else {
+        return false;
+    };
+    let private_members = group
+        .members
+        .iter()
+        .filter(|member| member.origin == "workspace" && member.visibility != "public")
+        .collect::<Vec<_>>();
+    let [private] = private_members.as_slice() else {
+        return false;
+    };
+    let Some(private_fact) = facts.declaration(&private.declaration_id) else {
+        return false;
+    };
+    !private_fact.references.is_empty()
+        && target.source_span.as_ref().is_some_and(|target_span| {
+            private_fact
+                .references
+                .iter()
+                .all(|reference| span_contains(target_span, reference))
+        })
+}
+
+fn span_contains(span: &SourceSpan, reference: &SourceReference) -> bool {
+    reference.file == std::path::Path::new(&span.file)
+        && reference.line >= span.start.line as usize
+        && reference.line <= span.end.line as usize
 }
 
 fn aggregate_import_status(statuses: impl Iterator<Item = ImportStatus>) -> ImportStatus {
@@ -227,7 +284,81 @@ end Tiny
         assert!(hint.notes.iter().all(|note| !note.contains("delete")));
     }
 
+    #[test]
+    fn private_helper_used_only_by_public_wrapper_gets_inline_action() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("Tiny.lean");
+        std::fs::write(
+            &path,
+            r#"
+namespace Tiny
+private theorem helper : True := by trivial
+theorem public : True := helper
+end Tiny
+"#,
+        )
+        .unwrap();
+        let private = declaration_with_span(
+            "workspace:Tiny:_private.Tiny.0.Tiny.helper",
+            "_private.Tiny.0.Tiny.helper",
+            "private",
+            &path,
+            3,
+            3,
+        );
+        let public = declaration_with_span("workspace:Tiny:Tiny.public", "Tiny.public", "public", &path, 4, 4);
+        let facts = collect_source_facts(SourceFactInput::new(&[private.clone(), public.clone()]));
+        let review = RankedReview {
+            groups: vec![RankedGroup {
+                id: "review-1".to_owned(),
+                pair_id: "p1".to_owned(),
+                relation: ReviewRelation::ExactStatement,
+                members: vec![member(&public), member(&private)],
+                evidence: Vec::new(),
+                signals: vec![
+                    "statement-fingerprint".to_owned(),
+                    "probe:verified:exact-theorem".to_owned(),
+                ],
+                blockers: vec!["non-public-declaration".to_owned()],
+                confidence: ConfidenceTier::High,
+                review_priority: ReviewPriority::High,
+                recommended_action: ReviewAction::ReplaceLocalUses,
+                target_decl: Some("Tiny.public".to_owned()),
+                target_module: Some("Tiny".to_owned()),
+                evidence_mode: ReviewEvidenceMode::ProofGrade,
+                probe_summary: Some("Lean verified semantic evidence".to_owned()),
+                semantic_obligations: Vec::new(),
+                local_caller_count: 1,
+                replacement_hint: None,
+            }],
+            suppressed: Vec::new(),
+            diagnostics: RankingDiagnostics::default(),
+        };
+
+        let review = attach_replacement_hints(review, &facts, ReplacementHintProfile::default());
+        let group = &review.groups[0];
+        assert_eq!(group.recommended_action, ReviewAction::InlinePrivateHelper);
+        let hint = group.replacement_hint.as_ref().unwrap();
+        assert_eq!(hint.caller_count, 1);
+        assert!(
+            hint.notes
+                .iter()
+                .any(|note| note.contains("inline the helper body into the wrapper"))
+        );
+    }
+
     fn declaration(id: &str, name: &str, path: &std::path::Path) -> HydratedDeclaration {
+        declaration_with_span(id, name, "public", path, 4, 4)
+    }
+
+    fn declaration_with_span(
+        id: &str,
+        name: &str,
+        visibility: &str,
+        path: &std::path::Path,
+        start_line: u64,
+        end_line: u64,
+    ) -> HydratedDeclaration {
         HydratedDeclaration {
             handle: DeclarationHandle::from_fixture_id(id),
             declaration_id: id.to_owned(),
@@ -236,12 +367,18 @@ end Tiny
             qualified_name: name.to_owned(),
             display_name: name.rsplit('.').next().unwrap().to_owned(),
             kind: "theorem".to_owned(),
-            visibility: "public".to_owned(),
+            visibility: visibility.to_owned(),
             modifiers: Vec::new(),
             source_span: Some(SourceSpan {
                 file: path.display().to_string(),
-                start: SourcePoint { line: 4, column: 1 },
-                end: SourcePoint { line: 4, column: 35 },
+                start: SourcePoint {
+                    line: start_line,
+                    column: 1,
+                },
+                end: SourcePoint {
+                    line: end_line,
+                    column: 35,
+                },
             }),
             statement_text: "theorem local : True".to_owned(),
             docstring_text: None,
@@ -257,6 +394,20 @@ end Tiny
             role_features: Vec::new(),
             binder_count: 0,
             low_signal_markers: Vec::new(),
+        }
+    }
+
+    fn member(declaration: &HydratedDeclaration) -> ReviewMember {
+        ReviewMember {
+            declaration_id: declaration.declaration_id.clone(),
+            origin: declaration.origin.clone(),
+            module: declaration.module.clone(),
+            qualified_name: declaration.qualified_name.clone(),
+            display_name: declaration.display_name.clone(),
+            kind: declaration.kind.clone(),
+            visibility: declaration.visibility.clone(),
+            source_span: declaration.source_span.clone(),
+            status_flags: Vec::new(),
         }
     }
 }

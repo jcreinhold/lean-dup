@@ -875,6 +875,7 @@ fn action_label(action: ReviewAction) -> &'static str {
         ReviewAction::AlreadyInMathlib => "already-in-mathlib",
         ReviewAction::LocalAlias => "local-alias",
         ReviewAction::ReplaceLocalUses => "replace-local-uses",
+        ReviewAction::InlinePrivateHelper => "inline-private-helper",
         ReviewAction::MergeGeneralization => "merge-generalization",
         ReviewAction::SpecializationOf => "specialization-of",
         ReviewAction::ProbableSourceClone => "probable-source-clone",

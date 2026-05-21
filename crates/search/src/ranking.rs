@@ -174,6 +174,7 @@ pub enum ReviewAction {
     AlreadyInMathlib,
     LocalAlias,
     ReplaceLocalUses,
+    InlinePrivateHelper,
     MergeGeneralization,
     SpecializationOf,
     ProbableSourceClone,
