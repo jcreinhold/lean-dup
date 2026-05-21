@@ -6,9 +6,8 @@ use lean_dup_index::{HydratedDeclaration, OpenedIndex};
 
 use crate::Result;
 use crate::pair_features::{SearchPairFeatures, feature_families, pair_features};
-use crate::retrieval::{
-    CandidateExplanation, GeneratedPairEvidence, RetrievalDiagnostics, generated_pair_evidence, retrieve_candidates,
-};
+use crate::retrieval::{GeneratedPairEvidence, RetrievalDiagnostics, generated_pair_evidence, retrieve_candidates};
+use crate::review_policy;
 use crate::scorer::{
     SearchPairScoring, SearchScoringSummary, SearchScoringVariant, default_summary, score_observation,
 };
@@ -40,6 +39,7 @@ pub struct SearchObservation {
     pub visible_groups_found: usize,
     pub visible_groups_total: usize,
     pub scoring: SearchScoringSummary,
+    pub review_policy: crate::review_policy::SearchReviewPolicySummary,
     pub semantic_reranking: SearchSemanticRerankingSummary,
     pub semantic_obligation_yield: Vec<SearchSemanticObligationYield>,
     pub retrieval: SearchRetrievalObservation,
@@ -92,7 +92,11 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
     let mut ranked_pair_ids = BTreeSet::new();
     for set in &output.candidate_sets {
         for (index, candidate) in set.candidates.iter().enumerate() {
-            let shown = is_shown_queue_candidate(&candidate.explanation);
+            let shown = review_policy::symbolic_observation_visible(
+                &set.anchor,
+                &candidate.declaration,
+                &candidate.explanation.contributions,
+            );
             let features = pair_features(
                 &set.anchor,
                 &candidate.declaration,
@@ -128,9 +132,13 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
         .candidate_sets
         .iter()
         .filter(|set| {
-            set.candidates
-                .iter()
-                .any(|candidate| is_shown_queue_candidate(&candidate.explanation))
+            set.candidates.iter().any(|candidate| {
+                review_policy::symbolic_observation_visible(
+                    &set.anchor,
+                    &candidate.declaration,
+                    &candidate.explanation.contributions,
+                )
+            })
         })
         .count();
     let visible_groups_total = output.candidate_sets.len();
@@ -146,6 +154,7 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
         } else {
             SearchScoringSummary::new(request.scoring_variant)
         },
+        review_policy: review_policy::summary(),
         semantic_reranking: semantic_reranking_summary(),
         semantic_obligation_yield: Vec::new(),
         retrieval: retrieval_observation(&output.diagnostics, merged_generated_count),
@@ -182,6 +191,7 @@ pub fn rescore_observation(observation: &SearchObservation, variant: SearchScori
         visible_groups_found,
         visible_groups_total,
         scoring: SearchScoringSummary::new(variant),
+        review_policy: observation.review_policy,
         semantic_reranking: observation.semantic_reranking.clone(),
         semantic_obligation_yield: observation.semantic_obligation_yield.clone(),
         retrieval: observation.retrieval.clone(),
@@ -256,15 +266,6 @@ fn retrieval_observation(
             })
             .collect(),
     }
-}
-
-fn is_shown_queue_candidate(explanation: &CandidateExplanation) -> bool {
-    explanation.contributions.iter().any(|contribution| {
-        matches!(
-            contribution.kind.as_str(),
-            "statement-fingerprint" | "safe-permutation-fingerprint" | "connective-fingerprint"
-        )
-    })
 }
 
 fn tracked_generated_pairs(
@@ -407,7 +408,8 @@ fn generated_observed_pair(
 ) -> SearchObservedPair {
     let feature_families = feature_families(&evidence.contributions);
     let features = pair_features(anchor, candidate, &evidence.contributions);
-    let scored = score_observation(&features, variant, false, false);
+    let default_shown = review_policy::symbolic_observation_visible(anchor, candidate, &evidence.contributions);
+    let scored = score_observation(&features, variant, false, default_shown);
     SearchObservedPair {
         left: anchor.qualified_name.clone(),
         right: candidate.qualified_name.clone(),

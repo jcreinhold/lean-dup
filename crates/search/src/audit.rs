@@ -19,6 +19,7 @@ use crate::replacement_hints::{
 };
 use crate::retrieval::RetrievalDiagnostics;
 use crate::retrieval::retrieve_candidates;
+use crate::review_policy::{self, SearchReviewPolicySummary};
 use crate::scorer::{SearchScoringSummary, default_summary};
 use crate::semantic_reranking::{
     SearchSemanticObligationFact, SearchSemanticObligationYield, SearchSemanticRerankingSummary, sorted_yield,
@@ -73,6 +74,7 @@ pub struct AuditOutput {
     pub show_noise: bool,
     pub review_profile: ReviewProfile,
     pub scoring: SearchScoringSummary,
+    pub review_policy: SearchReviewPolicySummary,
     pub retrieval: AuditRetrievalSummary,
     pub comparison_provenance: Vec<ComparisonProvenanceReport>,
     pub semantic_verification: AuditProbeSummary,
@@ -569,6 +571,7 @@ fn project_audit_output(workflow: WorkflowOutput) -> AuditOutput {
         show_noise: workflow.show_noise,
         review_profile: workflow.review_profile,
         scoring: default_summary(),
+        review_policy: review_policy::summary(),
         retrieval: audit_retrieval_summary(&workflow.retrieval),
         comparison_provenance: workflow.comparison_provenance,
         semantic_verification: audit_probe_summary(&workflow.semantic_verification),

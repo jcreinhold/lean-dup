@@ -14,6 +14,7 @@ mod pair_features;
 mod ranking;
 mod replacement_hints;
 mod retrieval;
+mod review_policy;
 mod scorer;
 mod semantic_reranking;
 mod semantic_verification;
@@ -33,6 +34,7 @@ pub use observation::{
 pub use pair_features::{
     SearchEvidenceMode, SearchModuleRelation, SearchPairFeatures, SearchRoleOverlap, SearchSemanticEvidenceState,
 };
+pub use review_policy::SearchReviewPolicySummary;
 pub use scorer::{SearchPairScoring, SearchScoringSummary, SearchScoringVariant};
 pub use semantic_reranking::{
     SearchSemanticObligationFact, SearchSemanticObligationKind, SearchSemanticObligationStatus,

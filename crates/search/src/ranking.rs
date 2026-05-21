@@ -4,6 +4,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::retrieval::{CandidateSet, KeyContribution, RetrievedCandidate};
+use crate::review_policy;
 use crate::scorer;
 use crate::semantic_reranking::SearchSemanticObligationFact;
 use crate::semantic_verification::{EvidenceKind, EvidenceStatus, SemanticEvidence};
@@ -296,16 +297,16 @@ fn rank_pair(anchor: &HydratedDeclaration, candidate: &RetrievedCandidate, input
     }
     if source_clone {
         signals.insert("source-clone".to_owned());
+        blockers.remove("non-theorem-static-only");
     }
-    if is_generated(anchor) || is_generated(&candidate.declaration) {
-        blockers.insert("generated-declaration".to_owned());
+    if verified_exact || specialization || verified_permuted || verified_replacement {
+        blockers.remove("non-theorem-static-only");
     }
-    if broad_head_only(anchor, &candidate.declaration, &candidate.explanation.contributions) {
-        blockers.insert("broad-head-only".to_owned());
-    }
-    if typeclass_instance_noise(anchor) || typeclass_instance_noise(&candidate.declaration) {
-        blockers.insert("typeclass-instance-noise".to_owned());
-    }
+    blockers.extend(review_policy::visibility_blockers(
+        anchor,
+        &candidate.declaration,
+        &candidate.explanation.contributions,
+    ));
     if !exact && !permuted && !connective && !specialization && !source_clone && !near {
         blockers.insert("weak-feature-overlap".to_owned());
     }
@@ -341,6 +342,10 @@ fn rank_pair(anchor: &HydratedDeclaration, candidate: &RetrievedCandidate, input
     let mut confidence = confidence_for(relation, priority);
     if blockers.contains("generated-declaration")
         || blockers.contains("broad-head-only")
+        || blockers.contains("non-public-declaration")
+        || blockers.contains("low-signal-declaration")
+        || blockers.contains("typeclass-instance-noise")
+        || blockers.contains("non-theorem-static-only")
         || blockers.contains("unverified-proof-grade-evidence")
     {
         priority = ReviewPriority::Noise;
@@ -561,36 +566,8 @@ fn same_source_fingerprint(left: &HydratedDeclaration, right: &HydratedDeclarati
     !left.is_empty() && left == right
 }
 
-fn is_generated(declaration: &HydratedDeclaration) -> bool {
-    declaration.status_flags.iter().any(|flag| flag == "generated")
-}
-
-fn typeclass_instance_noise(declaration: &HydratedDeclaration) -> bool {
-    declaration.kind == "instance" || declaration.display_name.starts_with("inst")
-}
-
 fn theorem_like(declaration: &HydratedDeclaration) -> bool {
-    matches!(declaration.kind.as_str(), "theorem" | "axiom")
-}
-
-fn broad_head_only(left: &HydratedDeclaration, right: &HydratedDeclaration, contributions: &[KeyContribution]) -> bool {
-    if contributions.is_empty() {
-        return false;
-    }
-    let broad_heads = left
-        .low_signal_markers
-        .iter()
-        .chain(right.low_signal_markers.iter())
-        .filter_map(|marker| marker.strip_prefix("broad_head:"))
-        .collect::<BTreeSet<_>>();
-    !broad_heads.is_empty()
-        && contributions.iter().all(|contribution| {
-            contribution.kind == "role-feature"
-                && contribution
-                    .display
-                    .as_deref()
-                    .is_some_and(|display| broad_heads.contains(display))
-        })
+    review_policy::theorem_like(declaration)
 }
 
 fn recommended_target<'a>(

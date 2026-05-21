@@ -32,6 +32,7 @@ pub struct EvalReportDto {
     pub status: String,
     pub suite: String,
     pub scorer_version: String,
+    pub review_policy_version: String,
     pub metrics: EvalMetricsDto,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub artifact_path: Option<PathBuf>,
@@ -51,6 +52,8 @@ pub struct EvalRunReportDto {
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scorer_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review_policy_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metrics: Option<EvalMetricsDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -272,6 +275,7 @@ pub struct AuditReport {
     pub cache: AuditCacheReport,
     pub options: AuditOptionsReport,
     pub scoring: SearchScoringSummary,
+    pub review_policy: lean_dup_search::SearchReviewPolicySummary,
     pub profile_counts: ReviewProfileCounts,
     pub retrieval: RetrievalReport,
     pub comparison_provenance: Vec<ComparisonProvenanceReportDto>,
@@ -521,6 +525,7 @@ pub fn eval_report(report: EvalOutput) -> EvalReportDto {
         status: report.status,
         suite: report.suite,
         scorer_version: report.scorer_version,
+        review_policy_version: report.review_policy_version,
         metrics: eval_metrics_dto(report.metrics),
         artifact_path: None,
         manual_prerequisites: report.manual_prerequisites.map(manual_prerequisites_dto),
@@ -533,6 +538,7 @@ pub fn eval_report(report: EvalOutput) -> EvalReportDto {
                 suite: run.suite,
                 status: run.status,
                 scorer_version: run.scorer_version,
+                review_policy_version: run.review_policy_version,
                 metrics: run.metrics.map(eval_metrics_dto),
                 reason: run.reason,
                 manual: run.manual,
@@ -727,6 +733,7 @@ pub fn audit_report(output: AuditOutput) -> AuditReport {
             review_profile: output.review_profile,
         },
         scoring: output.scoring,
+        review_policy: output.review_policy,
         profile_counts,
         retrieval,
         comparison_provenance,

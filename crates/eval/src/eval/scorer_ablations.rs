@@ -14,6 +14,7 @@ pub struct ScorerAblationReport {
     pub schema_version: &'static str,
     pub suite: String,
     pub scorer_version: String,
+    pub review_policy_version: String,
     pub semantic_reranking: SearchSemanticRerankingSummary,
     pub semantic_obligation_yield: Vec<SearchSemanticObligationYield>,
     pub variants: Vec<ScorerAblationVariantReport>,
@@ -65,6 +66,7 @@ pub fn write_default_artifact(repo_root: &Path, report: &ScorerAblationReport) -
 pub fn report(
     suite: impl Into<String>,
     scorer_version: impl Into<String>,
+    review_policy_version: impl Into<String>,
     semantic_reranking: SearchSemanticRerankingSummary,
     semantic_obligation_yield: Vec<SearchSemanticObligationYield>,
     variants: Vec<ScorerAblationVariantReport>,
@@ -74,6 +76,7 @@ pub fn report(
         schema_version: SCORER_ABLATION_SCHEMA_VERSION,
         suite: suite.into(),
         scorer_version: scorer_version.into(),
+        review_policy_version: review_policy_version.into(),
         semantic_reranking,
         semantic_obligation_yield,
         variants,
@@ -96,6 +99,7 @@ mod tests {
         let report = report(
             "unit",
             "lean-dup.symbolic-scorer.v1",
+            "lean-dup.symbolic-review-policy.v2",
             lean_dup_search::SearchSemanticRerankingSummary::default(),
             Vec::new(),
             vec![ScorerAblationVariantReport {

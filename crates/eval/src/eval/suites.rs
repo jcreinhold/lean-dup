@@ -40,6 +40,7 @@ pub struct EvalOutput {
     pub status: String,
     pub suite: String,
     pub scorer_version: String,
+    pub review_policy_version: String,
     pub metrics: EvaluationMetrics,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub manual_prerequisites: Option<ManualSuitePrerequisites>,
@@ -59,6 +60,8 @@ pub struct EvaluationRunReport {
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scorer_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review_policy_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metrics: Option<EvaluationMetrics>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -183,6 +186,7 @@ fn run_manual_single(request: EvalRequest, reporter: &mut Reporter) -> Result<Ev
             status: "skipped".to_owned(),
             suite: suite.clone(),
             scorer_version: scorer_version.clone(),
+            review_policy_version: "lean-dup.symbolic-review-policy.v2".to_owned(),
             metrics: aggregate_metrics(&suite, &[]),
             manual_prerequisites: Some(prerequisites.clone()),
             search_dataset_artifact: None,
@@ -192,6 +196,7 @@ fn run_manual_single(request: EvalRequest, reporter: &mut Reporter) -> Result<Ev
                 suite,
                 status: "skipped".to_owned(),
                 scorer_version: Some(scorer_version),
+                review_policy_version: Some("lean-dup.symbolic-review-policy.v2".to_owned()),
                 metrics: None,
                 reason: Some(prerequisites.skip_reason()),
                 manual: true,
@@ -273,6 +278,7 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
     let retrieval_ms = retrieval_started.elapsed().as_millis();
     let output = base_output;
     let scorer_version = output.scoring.version.to_owned();
+    let review_policy_version = output.review_policy.version.to_owned();
 
     let observed = ObservedRun {
         suite: labels.suite.clone(),
@@ -312,6 +318,7 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
         let report = scorer_ablations::report(
             &labels.suite,
             &scorer_version,
+            &review_policy_version,
             output.semantic_reranking.clone(),
             output.semantic_obligation_yield.clone(),
             scorer_ablations.clone(),
@@ -325,6 +332,7 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
         status: "ok".to_owned(),
         suite: labels.suite,
         scorer_version,
+        review_policy_version,
         metrics,
         manual_prerequisites: None,
         search_dataset_artifact,
@@ -455,6 +463,10 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
                 .version
                 .to_owned()
         });
+    let review_policy_version = runs
+        .iter()
+        .find_map(|run| run.review_policy_version.clone())
+        .unwrap_or_else(|| "lean-dup.symbolic-review-policy.v2".to_owned());
     let scorer_ablations = if request.write_scorer_ablations {
         aggregate_scorer_ablations(&runs)
     } else {
@@ -478,6 +490,7 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
         let report = scorer_ablations::report(
             "production-gate",
             &scorer_version,
+            &review_policy_version,
             semantic_reranking,
             semantic_obligation_yield,
             scorer_ablations.clone(),
@@ -491,6 +504,7 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
         status: status.to_owned(),
         suite: "production-gate".to_owned(),
         scorer_version,
+        review_policy_version,
         metrics,
         manual_prerequisites: None,
         search_dataset_artifact: None,
@@ -509,6 +523,7 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
             suite: request.suite.as_str().to_owned(),
             status: "skipped".to_owned(),
             scorer_version: None,
+            review_policy_version: None,
             metrics: None,
             reason: Some(prerequisites.skip_reason()),
             manual,
@@ -523,6 +538,7 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
             suite: report.suite,
             status: report.status,
             scorer_version: Some(report.scorer_version),
+            review_policy_version: Some(report.review_policy_version),
             metrics: Some(report.metrics),
             reason: None,
             manual,
@@ -540,6 +556,7 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
                 suite: suite.as_str().to_owned(),
                 status: status.to_owned(),
                 scorer_version: None,
+                review_policy_version: None,
                 metrics: None,
                 reason: Some(reason),
                 manual,

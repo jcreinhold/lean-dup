@@ -602,6 +602,10 @@ fn eval_hidden_search_dataset_mode_writes_feature_artifact() {
     assert_eq!(dataset["scoring"]["version"], "lean-dup.symbolic-scorer.v1");
     assert_eq!(dataset["scoring"]["variant"], "symbolic-only");
     assert_eq!(
+        dataset["review_policy"]["version"],
+        "lean-dup.symbolic-review-policy.v2"
+    );
+    assert_eq!(
         dataset["semantic_reranking"]["version"],
         "lean-dup.semantic-reranking.v1"
     );
@@ -660,6 +664,7 @@ fn eval_hidden_scorer_ablation_mode_writes_variant_artifact() {
     let ablations: Value = serde_json::from_str(&fs::read_to_string(&artifact).unwrap()).unwrap();
     assert_eq!(ablations["schema_version"], "lean-dup.scorer-ablation.v1");
     assert_eq!(ablations["scorer_version"], "lean-dup.symbolic-scorer.v1");
+    assert_eq!(ablations["review_policy_version"], "lean-dup.symbolic-review-policy.v2");
     assert_eq!(
         ablations["semantic_reranking"]["version"],
         "lean-dup.semantic-reranking.v1"
@@ -753,10 +758,23 @@ fn audit_json_keeps_progress_and_profile_off_stdout() {
     assert!(payload["review"]["groups"].is_null());
     assert!(payload["review"]["group_count"].as_u64().unwrap() >= payload["visible_groups_emitted"].as_u64().unwrap());
     assert!(payload["visible_groups"].is_array());
-    let first_group = payload["visible_groups"].as_array().unwrap().first().unwrap();
-    assert!(first_group["id"].as_str().unwrap().contains('-'));
-    assert!(!first_group["id"].as_str().unwrap().starts_with("review-"));
-    assert!(first_group["evidence"].is_array());
+    assert_eq!(
+        payload["review_policy"]["version"],
+        "lean-dup.symbolic-review-policy.v2"
+    );
+    if let Some(first_group) = payload["visible_groups"].as_array().unwrap().first() {
+        assert!(first_group["id"].as_str().unwrap().contains('-'));
+        assert!(!first_group["id"].as_str().unwrap().starts_with("review-"));
+        assert!(first_group["evidence"].is_array());
+    } else {
+        assert_eq!(payload["visible_group_count"], 0);
+        assert!(
+            payload["explanations"]["visible_queue"]["reason"]
+                .as_str()
+                .unwrap()
+                .contains("No ranked groups pass")
+        );
+    }
     assert!(payload.get("kind").is_none());
     assert!(!stdout.contains("feature_row"));
     assert!(!stdout.contains("declaration_row"));

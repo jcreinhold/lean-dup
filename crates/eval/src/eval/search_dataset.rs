@@ -16,6 +16,7 @@ pub struct SearchDataset {
     pub schema_version: &'static str,
     pub suite: String,
     pub scoring: SearchScoringSummary,
+    pub review_policy: lean_dup_search::SearchReviewPolicySummary,
     pub semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary,
     pub semantic_obligation_yield: Vec<lean_dup_search::SearchSemanticObligationYield>,
     pub pairs: Vec<SearchDatasetPair>,
@@ -78,6 +79,7 @@ pub fn build(suite: &str, labels: &GoldLabels, observation: &SearchObservation) 
         schema_version: SEARCH_DATASET_SCHEMA_VERSION,
         suite: suite.to_owned(),
         scoring: observation.scoring.clone(),
+        review_policy: observation.review_policy,
         semantic_reranking: observation.semantic_reranking.clone(),
         semantic_obligation_yield: observation.semantic_obligation_yield.clone(),
         pairs,
@@ -173,6 +175,9 @@ mod tests {
             visible_groups_found: 1,
             visible_groups_total: 2,
             scoring: lean_dup_search::SearchScoringSummary::new(lean_dup_search::SearchScoringVariant::SymbolicOnly),
+            review_policy: lean_dup_search::SearchReviewPolicySummary {
+                version: "lean-dup.symbolic-review-policy.v2",
+            },
             semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary::default(),
             semantic_obligation_yield: Vec::new(),
             retrieval: SearchRetrievalObservation::default(),
@@ -207,6 +212,9 @@ mod tests {
                 scoring: lean_dup_search::SearchScoringSummary::new(
                     lean_dup_search::SearchScoringVariant::SymbolicOnly,
                 ),
+                review_policy: lean_dup_search::SearchReviewPolicySummary {
+                    version: "lean-dup.symbolic-review-policy.v2",
+                },
                 semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary::default(),
                 semantic_obligation_yield: Vec::new(),
                 retrieval: SearchRetrievalObservation::default(),
