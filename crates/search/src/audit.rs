@@ -177,6 +177,7 @@ pub struct AuditProbeSummary {
     pub unavailable_by_module: BTreeMap<String, usize>,
     pub unavailable_by_origin: BTreeMap<String, usize>,
     pub verified_results: usize,
+    pub rejected_results: usize,
     pub obligation_yield: Vec<SearchSemanticObligationYield>,
 }
 
@@ -628,6 +629,7 @@ fn audit_probe_summary(diagnostics: &ProbeDiagnostics) -> AuditProbeSummary {
         unavailable_by_module: diagnostics.unavailable_by_module.clone(),
         unavailable_by_origin: diagnostics.unavailable_by_origin.clone(),
         verified_results: diagnostics.verified_results,
+        rejected_results: diagnostics.rejected_results,
         obligation_yield: sorted_yield(diagnostics.obligation_yield.clone()),
     }
 }

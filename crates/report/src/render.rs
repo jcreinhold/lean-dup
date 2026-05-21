@@ -262,10 +262,12 @@ fn render_audit(report: &AuditReport) -> String {
             report.explanations.comparison_provenance.summary
         ),
         format!(
-            "semantic probes: planned={} cached={} worker={} unavailable={}",
+            "semantic probes: planned={} cached={} worker={} verified={} rejected={} unavailable={}",
             report.semantic_verification.planned_pairs,
             report.semantic_verification.cached_hits,
             report.semantic_verification.worker_pairs,
+            report.semantic_verification.verified_results,
+            report.semantic_verification.rejected_results,
             report.semantic_verification.unavailable_results
         ),
         format!(

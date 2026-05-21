@@ -398,6 +398,7 @@ pub struct SemanticVerificationReport {
     pub unavailable_by_module: std::collections::BTreeMap<String, usize>,
     pub unavailable_by_origin: std::collections::BTreeMap<String, usize>,
     pub verified_results: usize,
+    pub rejected_results: usize,
     pub obligation_yield: Vec<SearchSemanticObligationYield>,
 }
 
@@ -890,6 +891,7 @@ fn semantic_verification_report(report: &AuditProbeSummary) -> SemanticVerificat
         unavailable_by_module: report.unavailable_by_module.clone(),
         unavailable_by_origin: report.unavailable_by_origin.clone(),
         verified_results: report.verified_results,
+        rejected_results: report.rejected_results,
         obligation_yield: report.obligation_yield.clone(),
     }
 }

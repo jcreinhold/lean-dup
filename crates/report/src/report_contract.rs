@@ -47,6 +47,7 @@ pub struct SemanticProbeExplanation {
     pub summary: String,
     pub planned_pairs: usize,
     pub verified_results: usize,
+    pub rejected_results: usize,
     pub unavailable_results: usize,
     pub cached_hits: usize,
     pub worker_pairs: usize,
@@ -172,8 +173,13 @@ fn semantic_probes(probes: &AuditProbeSummary) -> SemanticProbeExplanation {
         "semantic probes enabled; no probe obligations were planned".to_owned()
     } else if probes.verified_results > 0 {
         format!(
-            "{} verified, {} unavailable from {} planned semantic probe pairs",
-            probes.verified_results, probes.unavailable_results, probes.planned_pairs
+            "{} verified, {} rejected, {} unavailable from {} planned semantic probe pairs",
+            probes.verified_results, probes.rejected_results, probes.unavailable_results, probes.planned_pairs
+        )
+    } else if probes.rejected_results > 0 {
+        format!(
+            "0 verified, {} rejected, {} unavailable from {} planned semantic probe pairs",
+            probes.rejected_results, probes.unavailable_results, probes.planned_pairs
         )
     } else if probes.unavailable_results > 0 {
         format!(
@@ -191,6 +197,7 @@ fn semantic_probes(probes: &AuditProbeSummary) -> SemanticProbeExplanation {
         summary,
         planned_pairs: probes.planned_pairs,
         verified_results: probes.verified_results,
+        rejected_results: probes.rejected_results,
         unavailable_results: probes.unavailable_results,
         cached_hits: probes.cached_hits,
         worker_pairs: probes.worker_pairs,
@@ -347,6 +354,7 @@ mod tests {
         let mut diagnostics = AuditProbeSummary {
             enabled: true,
             planned_pairs: 2,
+            rejected_results: 1,
             unavailable_results: 2,
             ..AuditProbeSummary::default()
         };
@@ -369,6 +377,8 @@ mod tests {
                 .get("opaque-or-unreducible"),
             Some(&2)
         );
+        assert_eq!(explanations.semantic_probes.rejected_results, 1);
+        assert!(explanations.semantic_probes.summary.contains("1 rejected"));
         assert!(explanations.semantic_probes.summary.contains("2 unavailable"));
     }
 

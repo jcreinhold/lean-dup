@@ -172,6 +172,7 @@ pub struct ProbeDiagnostics {
     pub unavailable_by_module: BTreeMap<String, usize>,
     pub unavailable_by_origin: BTreeMap<String, usize>,
     pub verified_results: usize,
+    pub rejected_results: usize,
     pub obligation_yield: Vec<SearchSemanticObligationYield>,
 }
 
@@ -208,6 +209,7 @@ impl Default for ProbeDiagnostics {
             unavailable_by_module: BTreeMap::new(),
             unavailable_by_origin: BTreeMap::new(),
             verified_results: 0,
+            rejected_results: 0,
             obligation_yield: Vec::new(),
         }
     }
@@ -960,11 +962,14 @@ fn record_evidence_diagnostic(evidence: &SemanticEvidence, planned: &PlannedProb
                 SearchSemanticObligationStatus::Verified,
             );
         }
-        EvidenceStatus::Rejected => increment_yield(
-            &mut diagnostics.obligation_yield,
-            planned.obligation.semantic_kind(),
-            SearchSemanticObligationStatus::Rejected,
-        ),
+        EvidenceStatus::Rejected => {
+            diagnostics.rejected_results += 1;
+            increment_yield(
+                &mut diagnostics.obligation_yield,
+                planned.obligation.semantic_kind(),
+                SearchSemanticObligationStatus::Rejected,
+            );
+        }
         EvidenceStatus::Unavailable => {
             let summary = evidence.summary.as_deref().unwrap_or_default();
             let reason = if summary.contains("missing-declaration")
@@ -1445,6 +1450,8 @@ mod tests {
         assert_eq!(exact.cached, 1);
         assert_eq!(exact.verified, 1);
         assert_eq!(exact.rejected, 1);
+        assert_eq!(diagnostics.verified_results, 1);
+        assert_eq!(diagnostics.rejected_results, 1);
     }
 
     fn empty_index() -> lean_dup_index::OpenedIndex {
