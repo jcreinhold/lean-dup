@@ -18,8 +18,9 @@ use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_index::{HydratedDeclaration, IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
 use lean_dup_project::{WorkspaceRequest, resolve, resolve_project_mathlib};
 use lean_dup_search::{
-    SearchObservation, SearchObservationRequest, SearchScoringVariant, SearchStageObservation, SearchTrackedPair,
-    observe_search, observe_search_stages, rescore_observation,
+    SearchCandidateSourceFact, SearchCandidateSourceFamily, SearchCandidateTopKStatus, SearchObservation,
+    SearchObservationRequest, SearchScoringVariant, SearchStageObservation, SearchTrackedPair, observe_search,
+    observe_search_stages, rescore_observation,
 };
 use lean_dup_worker::WorkerClient;
 
@@ -1640,6 +1641,7 @@ fn observed_pairs(output: &SearchObservation) -> Vec<ObservedPair> {
             shown: pair.shown,
             origin: pair.origin.clone(),
             feature_families: pair.feature_families.clone(),
+            candidate_sources: observed_candidate_sources(&pair.candidate_sources),
             survived_shown_filter: pair.survived_shown_filter,
         })
         .collect()
@@ -1660,9 +1662,43 @@ fn compact_observed_pairs(output: &SearchStageObservation) -> Vec<ObservedPair> 
             shown: pair.shown,
             origin: pair.origin.clone(),
             feature_families: pair.feature_families.clone(),
+            candidate_sources: observed_candidate_sources(&pair.candidate_sources),
             survived_shown_filter: pair.survived_shown_filter,
         })
         .collect()
+}
+
+fn observed_candidate_sources(
+    items: &[SearchCandidateSourceFact],
+) -> Vec<crate::eval::scoring::ObservedCandidateSource> {
+    items
+        .iter()
+        .map(|source| crate::eval::scoring::ObservedCandidateSource {
+            source_id: source.source_id.clone(),
+            source_family: source_family_label(source.source_family).to_owned(),
+            pair_id: source.pair_id.clone(),
+            left_declaration_id: source.left_declaration_id.clone(),
+            right_declaration_id: source.right_declaration_id.clone(),
+            origin: source.origin.clone(),
+            generation_rank: source.generation_rank,
+            top_k_status: top_k_status_label(source.top_k_status).to_owned(),
+            top_k_saturated: source.top_k_saturated,
+            feature_families: source.feature_families.clone(),
+        })
+        .collect()
+}
+
+fn source_family_label(family: SearchCandidateSourceFamily) -> &'static str {
+    match family {
+        SearchCandidateSourceFamily::Symbolic => "symbolic",
+    }
+}
+
+fn top_k_status_label(status: SearchCandidateTopKStatus) -> &'static str {
+    match status {
+        SearchCandidateTopKStatus::Selected => "selected",
+        SearchCandidateTopKStatus::GeneratedNotSelected => "generated-not-selected",
+    }
 }
 
 fn enforce_suite_gates(definition: &SuiteDefinition, labels: &GoldLabels, metrics: &EvaluationMetrics) -> Result<()> {
@@ -1979,6 +2015,8 @@ mod tests {
                 hard_negative_stage_survival: Default::default(),
                 candidate_count_by_origin: Default::default(),
                 candidate_count_by_feature_family: Default::default(),
+                generated_candidate_count_by_source_family: Default::default(),
+                generated_candidate_count_by_source_id: Default::default(),
                 generated_candidate_count_by_policy: Default::default(),
                 generated_candidate_count_by_feature_family: Default::default(),
                 hard_negative_generated_by_feature_family: Default::default(),

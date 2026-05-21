@@ -22,6 +22,8 @@ pub struct SearchStageMetrics {
     pub hard_negative_stage_survival: CandidateStageSurvival,
     pub candidate_count_by_origin: BTreeMap<String, usize>,
     pub candidate_count_by_feature_family: BTreeMap<String, usize>,
+    pub generated_candidate_count_by_source_family: BTreeMap<String, usize>,
+    pub generated_candidate_count_by_source_id: BTreeMap<String, usize>,
     pub generated_candidate_count_by_policy: BTreeMap<String, usize>,
     pub generated_candidate_count_by_feature_family: BTreeMap<String, usize>,
     pub hard_negative_generated_by_feature_family: BTreeMap<String, usize>,
@@ -164,6 +166,8 @@ pub fn score(labels: &GoldLabels, observed: &ObservedRun, k_values: &[usize]) ->
         },
         candidate_count_by_origin: count_by_origin(observed),
         candidate_count_by_feature_family: count_by_feature_family(observed),
+        generated_candidate_count_by_source_family: count_generated_by_source_family(observed),
+        generated_candidate_count_by_source_id: count_generated_by_source_id(observed),
         generated_candidate_count_by_policy: count_generated_by_policy(observed),
         generated_candidate_count_by_feature_family: count_generated_by_feature_family(observed),
         hard_negative_generated_by_feature_family: count_generated_hard_negatives_by_feature_family(labels, observed),
@@ -215,6 +219,14 @@ pub fn aggregate(_suite: &str, runs: &[&SearchStageMetrics]) -> SearchStageMetri
         candidate_count_by_origin: sum_maps(runs.iter().map(|metrics| &metrics.candidate_count_by_origin)),
         candidate_count_by_feature_family: sum_maps(
             runs.iter().map(|metrics| &metrics.candidate_count_by_feature_family),
+        ),
+        generated_candidate_count_by_source_family: sum_maps(
+            runs.iter()
+                .map(|metrics| &metrics.generated_candidate_count_by_source_family),
+        ),
+        generated_candidate_count_by_source_id: sum_maps(
+            runs.iter()
+                .map(|metrics| &metrics.generated_candidate_count_by_source_id),
         ),
         generated_candidate_count_by_policy: sum_maps(
             runs.iter().map(|metrics| &metrics.generated_candidate_count_by_policy),
@@ -297,6 +309,34 @@ fn count_generated_by_policy(observed: &ObservedRun) -> BTreeMap<String, usize> 
     let mut counts = BTreeMap::new();
     for pair in observed.pairs.iter().filter(|pair| pair.generated) {
         *counts.entry(pair.generation_policy.clone()).or_insert(0) += 1;
+    }
+    counts
+}
+
+fn count_generated_by_source_family(observed: &ObservedRun) -> BTreeMap<String, usize> {
+    let mut seen = BTreeSet::new();
+    for pair in observed.pairs.iter().filter(|pair| pair.generated) {
+        for source in &pair.candidate_sources {
+            seen.insert((source.source_family.clone(), pair.pair.clone()));
+        }
+    }
+    let mut counts = BTreeMap::new();
+    for (family, _) in seen {
+        *counts.entry(family).or_insert(0) += 1;
+    }
+    counts
+}
+
+fn count_generated_by_source_id(observed: &ObservedRun) -> BTreeMap<String, usize> {
+    let mut seen = BTreeSet::new();
+    for pair in observed.pairs.iter().filter(|pair| pair.generated) {
+        for source in &pair.candidate_sources {
+            seen.insert((source.source_id.clone(), pair.pair.clone()));
+        }
+    }
+    let mut counts = BTreeMap::new();
+    for (source_id, _) in seen {
+        *counts.entry(source_id).or_insert(0) += 1;
     }
     counts
 }
@@ -445,6 +485,14 @@ mod tests {
             metrics.generated_candidate_count_by_policy.get("local_duplicate_audit"),
             Some(&2)
         );
+        assert_eq!(
+            metrics.generated_candidate_count_by_source_family.get("symbolic"),
+            Some(&2)
+        );
+        assert_eq!(
+            metrics.generated_candidate_count_by_source_id.get("symbolic-retrieval"),
+            Some(&2)
+        );
     }
 
     #[test]
@@ -563,6 +611,7 @@ mod tests {
             shown,
             origin: origin.to_owned(),
             feature_families: families.into_iter().map(str::to_owned).collect(),
+            candidate_sources: candidate_sources(left, right, origin, families),
             survived_shown_filter: shown,
         }
     }
@@ -579,8 +628,30 @@ mod tests {
             shown: false,
             origin: origin.to_owned(),
             feature_families: families.into_iter().map(str::to_owned).collect(),
+            candidate_sources: candidate_sources(left, right, origin, families),
             survived_shown_filter: false,
         }
+    }
+
+    fn candidate_sources<const F: usize>(
+        left: &str,
+        right: &str,
+        origin: &str,
+        families: [&str; F],
+    ) -> Vec<crate::eval::scoring::ObservedCandidateSource> {
+        let pair = GoldPair::new(left, right);
+        vec![crate::eval::scoring::ObservedCandidateSource {
+            source_id: "symbolic-retrieval".to_owned(),
+            source_family: "symbolic".to_owned(),
+            pair_id: format!("{}::{}", pair.left, pair.right),
+            left_declaration_id: left.to_owned(),
+            right_declaration_id: right.to_owned(),
+            origin: origin.to_owned(),
+            generation_rank: None,
+            top_k_status: "generated-not-selected".to_owned(),
+            top_k_saturated: false,
+            feature_families: families.into_iter().map(str::to_owned).collect(),
+        }]
     }
 
     fn gold_pair(text: &str) -> GoldPair {

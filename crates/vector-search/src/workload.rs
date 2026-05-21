@@ -5,8 +5,8 @@ use std::time::Instant;
 use lean_dup_diagnostics::perf;
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_eval::{
-    CountMetric, EvalSuite, EvaluationMetrics, GoldLabels, ObservedPair, ObservedRun, TimingMetrics, load_builtin,
-    parse_json, score_run,
+    CountMetric, EvalSuite, EvaluationMetrics, GoldLabels, ObservedCandidateSource, ObservedPair, ObservedRun,
+    TimingMetrics, load_builtin, parse_json, score_run,
 };
 use lean_dup_index::{DeclarationHandle, IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
 use lean_dup_project::{WorkspaceRequest, resolve, resolve_project_mathlib};
@@ -704,6 +704,29 @@ fn observed_from_symbolic(suite: &str, output: &SearchObservation, timings: Timi
                 shown: pair.shown,
                 origin: pair.origin.clone(),
                 feature_families: pair.feature_families.clone(),
+                candidate_sources: pair
+                    .candidate_sources
+                    .iter()
+                    .map(|source| ObservedCandidateSource {
+                        source_id: source.source_id.clone(),
+                        source_family: match source.source_family {
+                            lean_dup_search::SearchCandidateSourceFamily::Symbolic => "symbolic".to_owned(),
+                        },
+                        pair_id: source.pair_id.clone(),
+                        left_declaration_id: source.left_declaration_id.clone(),
+                        right_declaration_id: source.right_declaration_id.clone(),
+                        origin: source.origin.clone(),
+                        generation_rank: source.generation_rank,
+                        top_k_status: match source.top_k_status {
+                            lean_dup_search::SearchCandidateTopKStatus::Selected => "selected".to_owned(),
+                            lean_dup_search::SearchCandidateTopKStatus::GeneratedNotSelected => {
+                                "generated-not-selected".to_owned()
+                            }
+                        },
+                        top_k_saturated: source.top_k_saturated,
+                        feature_families: source.feature_families.clone(),
+                    })
+                    .collect(),
                 survived_shown_filter: pair.survived_shown_filter,
             })
             .collect(),

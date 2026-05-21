@@ -68,6 +68,8 @@ pub struct SearchStageObservation {
 pub struct SearchStageObservedPair {
     pub left: String,
     pub right: String,
+    pub left_declaration_id: String,
+    pub right_declaration_id: String,
     pub generated: bool,
     pub symbolic_generated: bool,
     pub merged_generated: bool,
@@ -77,7 +79,41 @@ pub struct SearchStageObservedPair {
     pub shown: bool,
     pub origin: String,
     pub feature_families: Vec<String>,
+    pub candidate_sources: Vec<SearchCandidateSourceFact>,
     pub survived_shown_filter: bool,
+}
+
+/// Stable candidate-source facts attached to an observed declaration pair.
+///
+/// Search owns source-specific generation, fanout, and merge policy. Eval may
+/// count these facts by source id or source family, but callers must not infer
+/// retrieval keys, posting layout, scorer internals, or backend details from
+/// this surface.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SearchCandidateSourceFact {
+    pub source_id: String,
+    pub source_family: SearchCandidateSourceFamily,
+    pub pair_id: String,
+    pub left_declaration_id: String,
+    pub right_declaration_id: String,
+    pub origin: String,
+    pub generation_rank: Option<usize>,
+    pub top_k_status: SearchCandidateTopKStatus,
+    pub top_k_saturated: bool,
+    pub feature_families: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SearchCandidateSourceFamily {
+    Symbolic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SearchCandidateTopKStatus {
+    Selected,
+    GeneratedNotSelected,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -98,6 +134,8 @@ pub struct SearchRetrievalObservation {
 pub struct SearchObservedPair {
     pub left: String,
     pub right: String,
+    pub left_declaration_id: String,
+    pub right_declaration_id: String,
     pub generated: bool,
     pub symbolic_generated: bool,
     pub merged_generated: bool,
@@ -107,6 +145,7 @@ pub struct SearchObservedPair {
     pub shown: bool,
     pub origin: String,
     pub feature_families: Vec<String>,
+    pub candidate_sources: Vec<SearchCandidateSourceFact>,
     pub survived_shown_filter: bool,
     pub features: SearchPairFeatures,
     pub scoring: SearchPairScoring,
@@ -125,6 +164,7 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
     let output = retrieve_candidates(request.workspace, request.comparison_indexes)?;
     let mut pairs = Vec::new();
     let mut ranked_pair_ids = BTreeSet::new();
+    let top_k_saturated = top_k_saturation_by_anchor(&output.diagnostics);
     for set in &output.candidate_sets {
         for (index, candidate) in set.candidates.iter().enumerate() {
             let shown = review_policy::symbolic_observation_visible(
@@ -138,6 +178,8 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
                 &candidate.explanation.contributions,
             );
             let scored = score_observation(&features, request.scoring_variant, true, shown);
+            let rank = index + 1;
+            let feature_families = feature_families(&candidate.explanation.contributions);
             ranked_pair_ids.insert(pair_key(
                 &set.anchor.qualified_name,
                 &candidate.declaration.qualified_name,
@@ -145,15 +187,26 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
             pairs.push(SearchObservedPair {
                 left: set.anchor.qualified_name.clone(),
                 right: candidate.declaration.qualified_name.clone(),
+                left_declaration_id: set.anchor.declaration_id.clone(),
+                right_declaration_id: candidate.declaration.declaration_id.clone(),
                 generated: true,
                 symbolic_generated: true,
                 merged_generated: true,
                 ranked: scored.ranked,
                 generation_policy: generation_policy_for_ranked(&candidate.declaration),
-                rank: scored.ranked.then_some(index + 1),
+                rank: scored.ranked.then_some(rank),
                 shown: scored.shown,
                 origin: candidate.declaration.origin.clone(),
-                feature_families: feature_families(&candidate.explanation.contributions),
+                feature_families: feature_families.clone(),
+                candidate_sources: vec![symbolic_source_fact(
+                    &set.anchor,
+                    &candidate.declaration,
+                    &candidate.declaration.origin,
+                    Some(rank),
+                    SearchCandidateTopKStatus::Selected,
+                    top_k_saturated.contains(&set.anchor.declaration_id),
+                    feature_families,
+                )],
                 survived_shown_filter: scored.survived_shown_filter,
                 features,
                 scoring: scored.scoring,
@@ -211,6 +264,7 @@ pub fn observe_search_stages(request: SearchObservationRequest<'_>) -> Result<Se
     let output = retrieve_candidates(request.workspace, request.comparison_indexes)?;
     let mut pairs = Vec::new();
     let mut ranked_pair_ids = BTreeSet::new();
+    let top_k_saturated = top_k_saturation_by_anchor(&output.diagnostics);
     for set in &output.candidate_sets {
         for (index, candidate) in set.candidates.iter().enumerate() {
             let shown = review_policy::symbolic_observation_visible(
@@ -218,6 +272,8 @@ pub fn observe_search_stages(request: SearchObservationRequest<'_>) -> Result<Se
                 &candidate.declaration,
                 &candidate.explanation.contributions,
             );
+            let rank = index + 1;
+            let feature_families = feature_families(&candidate.explanation.contributions);
             ranked_pair_ids.insert(pair_key(
                 &set.anchor.qualified_name,
                 &candidate.declaration.qualified_name,
@@ -225,15 +281,26 @@ pub fn observe_search_stages(request: SearchObservationRequest<'_>) -> Result<Se
             pairs.push(SearchStageObservedPair {
                 left: set.anchor.qualified_name.clone(),
                 right: candidate.declaration.qualified_name.clone(),
+                left_declaration_id: set.anchor.declaration_id.clone(),
+                right_declaration_id: candidate.declaration.declaration_id.clone(),
                 generated: true,
                 symbolic_generated: true,
                 merged_generated: true,
                 ranked: true,
                 generation_policy: generation_policy_for_ranked(&candidate.declaration),
-                rank: Some(index + 1),
+                rank: Some(rank),
                 shown,
                 origin: candidate.declaration.origin.clone(),
-                feature_families: feature_families(&candidate.explanation.contributions),
+                feature_families: feature_families.clone(),
+                candidate_sources: vec![symbolic_source_fact(
+                    &set.anchor,
+                    &candidate.declaration,
+                    &candidate.declaration.origin,
+                    Some(rank),
+                    SearchCandidateTopKStatus::Selected,
+                    top_k_saturated.contains(&set.anchor.declaration_id),
+                    feature_families,
+                )],
                 survived_shown_filter: shown,
             });
         }
@@ -378,6 +445,45 @@ fn retrieval_observation(
                 count: item.count,
             })
             .collect(),
+    }
+}
+
+fn top_k_saturation_by_anchor(diagnostics: &RetrievalDiagnostics) -> BTreeSet<String> {
+    diagnostics
+        .heap_truncations
+        .iter()
+        .map(|truncation| truncation.anchor_declaration_id.clone())
+        .collect()
+}
+
+fn symbolic_source_fact(
+    anchor: &HydratedDeclaration,
+    candidate: &HydratedDeclaration,
+    origin: &str,
+    generation_rank: Option<usize>,
+    top_k_status: SearchCandidateTopKStatus,
+    top_k_saturated: bool,
+    feature_families: Vec<String>,
+) -> SearchCandidateSourceFact {
+    SearchCandidateSourceFact {
+        source_id: "symbolic-retrieval".to_owned(),
+        source_family: SearchCandidateSourceFamily::Symbolic,
+        pair_id: stable_declaration_pair_id(&anchor.declaration_id, &candidate.declaration_id),
+        left_declaration_id: anchor.declaration_id.clone(),
+        right_declaration_id: candidate.declaration_id.clone(),
+        origin: origin.to_owned(),
+        generation_rank,
+        top_k_status,
+        top_k_saturated,
+        feature_families,
+    }
+}
+
+fn stable_declaration_pair_id(left: &str, right: &str) -> String {
+    if left <= right {
+        format!("{left}::{right}")
+    } else {
+        format!("{right}::{left}")
     }
 }
 
@@ -566,6 +672,8 @@ fn generated_observed_pair(
     SearchObservedPair {
         left: anchor.qualified_name.clone(),
         right: candidate.qualified_name.clone(),
+        left_declaration_id: anchor.declaration_id.clone(),
+        right_declaration_id: candidate.declaration_id.clone(),
         generated: true,
         symbolic_generated: true,
         merged_generated: true,
@@ -574,7 +682,16 @@ fn generated_observed_pair(
         rank: None,
         shown: scored.shown,
         origin: candidate.origin.clone(),
-        feature_families,
+        feature_families: feature_families.clone(),
+        candidate_sources: vec![symbolic_source_fact(
+            anchor,
+            candidate,
+            &candidate.origin,
+            None,
+            SearchCandidateTopKStatus::GeneratedNotSelected,
+            false,
+            feature_families,
+        )],
         survived_shown_filter: scored.survived_shown_filter,
         features,
         scoring: scored.scoring,
@@ -587,9 +704,12 @@ fn generated_stage_pair(
     evidence: GeneratedPairEvidence,
 ) -> SearchStageObservedPair {
     let default_shown = review_policy::symbolic_observation_visible(anchor, candidate, &evidence.contributions);
+    let feature_families = feature_families(&evidence.contributions);
     SearchStageObservedPair {
         left: anchor.qualified_name.clone(),
         right: candidate.qualified_name.clone(),
+        left_declaration_id: anchor.declaration_id.clone(),
+        right_declaration_id: candidate.declaration_id.clone(),
         generated: true,
         symbolic_generated: true,
         merged_generated: true,
@@ -598,7 +718,16 @@ fn generated_stage_pair(
         rank: None,
         shown: default_shown,
         origin: candidate.origin.clone(),
-        feature_families: feature_families(&evidence.contributions),
+        feature_families: feature_families.clone(),
+        candidate_sources: vec![symbolic_source_fact(
+            anchor,
+            candidate,
+            &candidate.origin,
+            None,
+            SearchCandidateTopKStatus::GeneratedNotSelected,
+            false,
+            feature_families,
+        )],
         survived_shown_filter: default_shown,
     }
 }
@@ -637,8 +766,8 @@ mod tests {
     use lean_dup_worker::{Fingerprints, RoleFeature};
 
     use super::{
-        SearchObservationRequest, SearchScoringVariant, SearchTrackedPair, observe_search, observe_search_stages,
-        rescore_observation,
+        SearchCandidateSourceFamily, SearchCandidateTopKStatus, SearchObservationRequest, SearchScoringVariant,
+        SearchTrackedPair, observe_search, observe_search_stages, rescore_observation,
     };
 
     #[test]
@@ -670,6 +799,13 @@ mod tests {
         assert_eq!(pair.rank, None);
         assert_eq!(pair.generation_policy, "local_duplicate_audit");
         assert!(pair.feature_families.contains(&"statement_fingerprint".to_owned()));
+        assert_eq!(pair.candidate_sources.len(), 1);
+        let source = &pair.candidate_sources[0];
+        assert_eq!(source.source_id, "symbolic-retrieval");
+        assert_eq!(source.source_family, SearchCandidateSourceFamily::Symbolic);
+        assert_eq!(source.top_k_status, SearchCandidateTopKStatus::GeneratedNotSelected);
+        assert_eq!(source.generation_rank, None);
+        assert!(source.feature_families.contains(&"statement_fingerprint".to_owned()));
         assert!(observation.retrieval.generated_candidate_count > observation.retrieval.ranked_candidate_count);
     }
 
@@ -730,6 +866,7 @@ mod tests {
                     pair.rank,
                     pair.shown,
                     pair.feature_families.clone(),
+                    pair.candidate_sources.clone(),
                 )
             })
             .collect::<Vec<_>>();
@@ -745,10 +882,37 @@ mod tests {
                     pair.rank,
                     pair.shown,
                     pair.feature_families.clone(),
+                    pair.candidate_sources.clone(),
                 )
             })
             .collect::<Vec<_>>();
         assert_eq!(compact_pairs, detailed_pairs);
+    }
+
+    #[test]
+    fn symbolic_source_facts_record_selected_rank_and_saturation_without_private_keys() {
+        let rows = generated_rows(100);
+        let observation = observe_search_stages(SearchObservationRequest {
+            workspace: &rows,
+            comparison_indexes: &[],
+            tracked_pairs: &[],
+            scoring_variant: SearchScoringVariant::SymbolicOnly,
+        })
+        .unwrap();
+
+        let saturated = observation
+            .pairs
+            .iter()
+            .flat_map(|pair| pair.candidate_sources.iter())
+            .find(|source| source.top_k_saturated)
+            .expect("saturated symbolic source fact");
+
+        assert_eq!(saturated.source_id, "symbolic-retrieval");
+        assert_eq!(saturated.source_family, SearchCandidateSourceFamily::Symbolic);
+        assert_eq!(saturated.top_k_status, SearchCandidateTopKStatus::Selected);
+        assert!(saturated.generation_rank.is_some());
+        assert!(!saturated.pair_id.contains("same-statement"));
+        assert!(!saturated.pair_id.contains("same-role"));
     }
 
     #[test]

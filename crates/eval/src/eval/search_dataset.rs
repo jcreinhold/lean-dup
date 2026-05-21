@@ -256,6 +256,8 @@ mod tests {
         SearchObservedPair {
             left: left.to_owned(),
             right: right.to_owned(),
+            left_declaration_id: left.to_owned(),
+            right_declaration_id: right.to_owned(),
             generated: true,
             symbolic_generated: true,
             merged_generated: true,
@@ -265,6 +267,7 @@ mod tests {
             shown: rank == 1,
             origin: "workspace".to_owned(),
             feature_families: vec!["statement_fingerprint".to_owned()],
+            candidate_sources: Vec::new(),
             survived_shown_filter: rank == 1,
             features: SearchPairFeatures {
                 retrieval_feature_families: vec!["statement_fingerprint".to_owned()],

@@ -42,7 +42,26 @@ pub struct ObservedPair {
     pub shown: bool,
     pub origin: String,
     pub feature_families: Vec<String>,
+    pub candidate_sources: Vec<ObservedCandidateSource>,
     pub survived_shown_filter: bool,
+}
+
+/// Search-owned candidate-source facts preserved for eval denominators.
+///
+/// Eval counts these stable facts by source id and family. It does not inspect
+/// retrieval keys, feature encodings, index storage, or scorer internals.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ObservedCandidateSource {
+    pub source_id: String,
+    pub source_family: String,
+    pub pair_id: String,
+    pub left_declaration_id: String,
+    pub right_declaration_id: String,
+    pub origin: String,
+    pub generation_rank: Option<usize>,
+    pub top_k_status: String,
+    pub top_k_saturated: bool,
+    pub feature_families: Vec<String>,
 }
 
 /// Observed candidates and measured costs for one corpus run.
@@ -253,6 +272,7 @@ mod tests {
                     shown,
                     origin: "workspace".to_owned(),
                     feature_families: vec!["statement_fingerprint".to_owned()],
+                    candidate_sources: Vec::new(),
                     survived_shown_filter: shown,
                 })
                 .collect(),

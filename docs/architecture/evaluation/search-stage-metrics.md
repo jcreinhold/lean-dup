@@ -20,6 +20,8 @@ supported.
 | `hard_negative_stage_survival` | hard negatives at vector-generated, symbolic-generated, merged-generated, ranked, and visible stages |
 | `candidate_count_by_origin` | candidates grouped by `workspace`, `mathlib`, `external:<label>`, … |
 | `candidate_count_by_feature_family` | candidates grouped by stable retrieval-evidence family |
+| `generated_candidate_count_by_source_family` | deduped generated unordered pairs grouped by stable candidate-source family |
+| `generated_candidate_count_by_source_id` | deduped generated unordered pairs grouped by stable candidate-source id |
 | `generated_candidate_count_by_policy` | generated observations grouped by private search policy label |
 | `generated_candidate_count_by_feature_family` | generated observations grouped by feature family |
 | `hard_negative_generated_by_feature_family` | generated hard negatives grouped by feature family |
@@ -56,6 +58,14 @@ unknown
 Raw contribution keys make short-term debugging easy and leak Lean-owned encodings, SQLite query shape, and retrieval
 internals into the report contract. Later retrieval refactors become JSON migrations. Stable family vocabulary keeps
 the eval boundary owning observability while retrieval keeps its internal keys private.
+
+## Candidate source facts
+
+Search attaches stable candidate-source facts to observed pairs. Eval may count by source family or source id, but it
+does not inspect retrieval keys or posting rows. In the current symbolic-only core path the only source is
+`symbolic-retrieval` with source family `symbolic`, so `symbolic_generated` and `merged_generated` have identical
+recall. The source counts intentionally use deduped unordered pairs; legacy generation-policy counts still reflect the
+older observation-entry shape for continuity.
 
 ## Commands
 

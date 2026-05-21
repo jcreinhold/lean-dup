@@ -15,9 +15,9 @@ pub use eval::{
     EvaluationRunReport, ExpectedStageVisibility, GoldLabelFact, GoldLabels, GoldPair, HardNegativeSurvival,
     LabelConfidence, LabelEndpointResolution, LabelEndpointStatus, LabelFactSource, LabelLossLayer, LabelPolarity,
     LabelResolutionCandidate, LabelResolutionReport, LabelResolutionStatus, LabelTrace, LabelTraceCount,
-    ManualMathlibPrerequisites, ManualSuitePrerequisites, MatchClass, ObservedPair, ObservedRun, PrerequisiteCheck,
-    PrerequisiteStatus, RecallAtK, SearchStageMetrics, TimingMetrics, TypedGoldLabel, load_builtin, parse_json, run,
-    score_run,
+    ManualMathlibPrerequisites, ManualSuitePrerequisites, MatchClass, ObservedCandidateSource, ObservedPair,
+    ObservedRun, PrerequisiteCheck, PrerequisiteStatus, RecallAtK, SearchStageMetrics, TimingMetrics, TypedGoldLabel,
+    load_builtin, parse_json, run, score_run,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use lean_dup_eval::{CountMetric, GoldPair, ObservedPair, ObservedRun, TimingMetrics};
+use lean_dup_eval::{CountMetric, GoldPair, ObservedCandidateSource, ObservedPair, ObservedRun, TimingMetrics};
 use lean_dup_search::{SearchObservation, SearchObservedPair};
 use serde::Serialize;
 
@@ -156,6 +156,7 @@ pub(crate) fn observed_run(
                 shown: pair.visible,
                 origin: pair.pair.origin.clone(),
                 feature_families: pair.pair.feature_families.clone(),
+                candidate_sources: observed_candidate_sources(&pair.pair),
                 survived_shown_filter: pair.visible,
             })
             .collect(),
@@ -167,6 +168,57 @@ pub(crate) fn observed_run(
         semantic_verification: Default::default(),
         timings,
         peak_memory_bytes,
+    }
+}
+
+fn observed_candidate_sources(pair: &VectorPair) -> Vec<ObservedCandidateSource> {
+    let mut sources = Vec::new();
+    if pair.symbolic_generated {
+        sources.push(ObservedCandidateSource {
+            source_id: "symbolic-retrieval".to_owned(),
+            source_family: "symbolic".to_owned(),
+            pair_id: stable_pair_id(&pair.left_hash, &pair.right_hash),
+            left_declaration_id: pair.left_hash.clone(),
+            right_declaration_id: pair.right_hash.clone(),
+            origin: pair.origin.clone(),
+            generation_rank: pair.symbolic_rank,
+            top_k_status: if pair.symbolic_rank.is_some() {
+                "selected"
+            } else {
+                "generated-not-selected"
+            }
+            .to_owned(),
+            top_k_saturated: false,
+            feature_families: pair.feature_families.clone(),
+        });
+    }
+    if pair.vector_generated {
+        sources.push(ObservedCandidateSource {
+            source_id: "vector-nearest-neighbor".to_owned(),
+            source_family: "vector".to_owned(),
+            pair_id: stable_pair_id(&pair.left_hash, &pair.right_hash),
+            left_declaration_id: pair.left_hash.clone(),
+            right_declaration_id: pair.right_hash.clone(),
+            origin: pair.origin.clone(),
+            generation_rank: pair.vector_rank,
+            top_k_status: if pair.vector_rank.is_some() {
+                "selected"
+            } else {
+                "generated-not-selected"
+            }
+            .to_owned(),
+            top_k_saturated: false,
+            feature_families: vec!["vector_similarity".to_owned()],
+        });
+    }
+    sources
+}
+
+fn stable_pair_id(left: &str, right: &str) -> String {
+    if left <= right {
+        format!("{left}::{right}")
+    } else {
+        format!("{right}::{left}")
     }
 }
 
