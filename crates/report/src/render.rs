@@ -82,7 +82,13 @@ fn render_perf(report: &PerfReport) -> String {
 fn render_doctor(report: &DoctorReport) -> String {
     let mut lines = vec![
         "command: doctor".to_owned(),
+        format!("report schema: {}", report.report_schema_version),
         format!("status: {}", report.status),
+        format!("version: {}", report.release.version),
+        format!("git revision: {}", report.release.git_revision),
+        format!("build profile: {}", report.release.build_profile),
+        format!("index schema: {}", report.release.index_schema_version),
+        format!("cache key: {}", report.release.cache_key_version),
         format!(
             "requested workspace: {}",
             path_diagnostic_label(&report.requested_workspace)
@@ -97,6 +103,12 @@ fn render_doctor(report: &DoctorReport) -> String {
         format!("cache labels: {}", report.cache.labels.len()),
         format!("cache disk bytes: {}", report.cache.total_disk_bytes),
         format!("lean: {}", report.lean_version),
+        format!("worker protocol: {}", report.worker.protocol_version),
+        format!("worker version: {}", report.worker.worker_version),
+        format!("worker extract: {}", report.worker.extract_version),
+        format!("worker features: {}", report.worker.features_version),
+        format!("worker probe: {}", report.worker.probe_version),
+        format!("worker commands: {}", report.worker.supported_commands.join(", ")),
     ];
     for label in &report.cache.labels {
         lines.push(format!(

@@ -13,7 +13,7 @@ use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexStore, IndexSummary
 use lean_dup_project::{ResolvedWorkspace, WorkspaceRequest, resolve, resolve_project_mathlib};
 use lean_dup_report::{AuditReport, CacheCleanupReportDto, DiffReport, DoctorReport, IndexReport, Report, ShowReport};
 use lean_dup_search::{AuditRequest, run_audit, run_diff, run_show};
-use lean_dup_worker::WorkerClient;
+use lean_dup_worker::{WorkerClient, WorkerVersion};
 
 use crate::error::{AppError, Result};
 
@@ -126,6 +126,8 @@ fn doctor(args: DoctorArgs, reporter: &mut Reporter) -> Result<DoctorReport> {
     };
 
     Ok(DoctorReport {
+        report_schema_version: lean_dup_report::REPORT_SCHEMA_VERSION,
+        release: crate::release::identity(),
         status: if missing_oleans.is_empty() { "ok" } else { "warning" },
         requested_workspace: foundation.workspace.requested_root,
         lake_root: foundation.workspace.root,
@@ -136,12 +138,29 @@ fn doctor(args: DoctorArgs, reporter: &mut Reporter) -> Result<DoctorReport> {
         cache_root: foundation.cache.root,
         cache_fingerprint: foundation.cache.fingerprint,
         cache: cache_diagnostics,
+        worker: worker_diagnostics(&worker_version),
         lean_version: worker_version
             .lean_version
             .unwrap_or_else(|| "unknown Lean version".to_owned()),
         require_oleans: args.require_oleans,
         missing_oleans,
     })
+}
+
+fn worker_diagnostics(version: &WorkerVersion) -> lean_dup_report::WorkerDiagnosticsReport {
+    lean_dup_report::WorkerDiagnosticsReport {
+        protocol_version: version.protocol_version.clone(),
+        worker_version: version.worker_version.clone(),
+        lean_version: version
+            .lean_version
+            .clone()
+            .unwrap_or_else(|| "unknown Lean version".to_owned()),
+        extract_version: version.extract_version.clone(),
+        features_version: version.features_version.clone(),
+        probe_version: version.probe_version.clone(),
+        supported_commands: version.supported_commands.clone(),
+        supported_capabilities: version.supported_capabilities.clone(),
+    }
 }
 
 fn cache_cleanup(args: CacheCleanupArgs, reporter: &mut Reporter) -> Result<CacheCleanupReportDto> {

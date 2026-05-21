@@ -3,6 +3,7 @@ mod commands;
 mod error;
 mod extensions;
 mod perf;
+mod release;
 mod render;
 
 use std::ffi::OsString;
@@ -39,6 +40,16 @@ where
             return code;
         }
     };
+
+    if cli.version {
+        return match release::write_version(stdout) {
+            Ok(()) => 0,
+            Err(error) => {
+                let _ = writeln!(stderr, "error: {error}");
+                1
+            }
+        };
+    }
 
     if cli.list {
         return match extensions::write_command_list(stdout) {

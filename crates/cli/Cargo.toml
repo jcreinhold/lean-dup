@@ -1,7 +1,9 @@
 [package]
+description = "Read-only duplicate auditor for Lean 4 Lake workspaces"
 edition = { workspace = true }
 license = { workspace = true }
 name = "lean-dup-cli"
+readme = "../../README.md"
 version = { workspace = true }
 
 [[bin]]

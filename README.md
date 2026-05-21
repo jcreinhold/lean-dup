@@ -18,6 +18,18 @@ cargo build --release -p lean-dup-cli
 cd lean && lake build
 ```
 
+## Install
+
+From a checkout:
+
+```sh
+cargo install --path crates/cli
+lean-dup --version
+```
+
+The installed `lean-dup` binary is the symbolic auditor. Optional tools such as
+`lean-dup-vector` are external extensions and are not required for the core audit workflow.
+
 For a walkthrough with sample output, the full audit/show loop, and what each field means, see
 [docs/getting-started.md](docs/getting-started.md).
 
@@ -42,6 +54,13 @@ audit to one root and its descendants.
 For local development, swap `target/release/lean-dup` for `cargo run -p lean-dup-cli --`. Other
 commands: `doctor` (workspace, worker, Lake, cache health), `show --group <id>` (one ranked
 group), `diff` (saved baselines), `eval` (quality suites).
+
+Before a longer run, ask the binary what it is and whether the workspace is auditable:
+
+```sh
+lean-dup --version
+lean-dup doctor --workspace /path/to/lake/workspace --format json
+```
 
 ## Caches and replacement hints
 

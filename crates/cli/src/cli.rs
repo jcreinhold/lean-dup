@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 #[command(name = "lean-dup")]
 #[command(about = "Rust foundation CLI for Lean duplicate audits")]
 #[command(arg_required_else_help = true)]
+#[command(disable_version_flag = true)]
 pub struct Cli {
     #[arg(long, global = true, help = "Render typed progress events on stderr")]
     pub progress: bool,
@@ -19,6 +20,9 @@ pub struct Cli {
 
     #[arg(long, help = "List built-in commands and installed external extensions")]
     pub list: bool,
+
+    #[arg(long, help = "Print release identity and schema facts")]
+    pub version: bool,
 
     #[command(subcommand)]
     pub command: Option<Command>,

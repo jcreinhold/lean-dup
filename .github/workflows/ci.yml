@@ -2,10 +2,6 @@ name: ci
 on:
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'LICENSE-*'
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -77,3 +73,37 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      - name: Boundary tests
+        run: cargo test -p lean-dup-cli --test boundaries --locked
+      - name: Release diagnostics
+        run: |
+          set -euo pipefail
+          cargo run -p lean-dup-cli --locked -- --version
+          cargo run -p lean-dup-cli --locked -- doctor \
+            --workspace tests/fixtures/tiny --module Tiny --format json \
+            > target/doctor-ci.json
+          jq -e '.report_schema_version == "lean-dup.report.v3"' target/doctor-ci.json
+          jq -e '.worker.protocol_version == "lean-dup.worker.v1"' target/doctor-ci.json
+      - name: Fixture evals
+        run: |
+          set -euo pipefail
+          mkdir -p target/eval
+          cargo run -p lean-dup-cli --locked -- eval \
+            --suite default --format json --output target/eval/default.json \
+            > target/eval/default.stdout
+          cargo run -p lean-dup-cli --locked -- eval \
+            --suite hard-negatives --format json --output target/eval/hard-negatives.json \
+            > target/eval/hard-negatives.stdout
+          jq -e '.status == "ok"' target/eval/default.json
+          jq -e '.metrics.hard_negative_hits.found == 0' target/eval/hard-negatives.json
+      - name: Report contract fixture
+        run: |
+          set -euo pipefail
+          mkdir -p target/report-contract
+          cargo run -p lean-dup-cli --locked -- audit \
+            --workspace tests/fixtures/tiny --module Tiny \
+            --no-semantic-probes --format json \
+            > target/report-contract/ordinary-audit.json
+          jq -e '.report_schema_version == "lean-dup.report.v3"' target/report-contract/ordinary-audit.json
+          jq -e '.visible_groups_emitted <= .visible_group_limit' target/report-contract/ordinary-audit.json
+          jq -e '.review.groups == null' target/report-contract/ordinary-audit.json

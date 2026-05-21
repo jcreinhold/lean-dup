@@ -32,15 +32,15 @@ fastembed = { version = "5.13.4", default-features = false, features = [
 futures = "0.3"
 hf-hub = { version = "0.5", default-features = false, features = ["rustls-tls", "ureq"] }
 lancedb = "0.29.0"
-lean-dup-diagnostics = { path = "crates/diagnostics" }
-lean-dup-embedding = { path = "crates/embedding" }
-lean-dup-eval = { path = "crates/eval" }
-lean-dup-index = { path = "crates/index" }
-lean-dup-project = { path = "crates/project" }
-lean-dup-report = { path = "crates/report" }
-lean-dup-search = { path = "crates/search" }
-lean-dup-vector-index = { path = "crates/vector-index" }
-lean-dup-worker = { path = "crates/worker" }
+lean-dup-diagnostics = { path = "crates/diagnostics", version = "0.1.0" }
+lean-dup-embedding = { path = "crates/embedding", version = "0.1.0" }
+lean-dup-eval = { path = "crates/eval", version = "0.1.0" }
+lean-dup-index = { path = "crates/index", version = "0.1.0" }
+lean-dup-project = { path = "crates/project", version = "0.1.0" }
+lean-dup-report = { path = "crates/report", version = "0.1.0" }
+lean-dup-search = { path = "crates/search", version = "0.1.0" }
+lean-dup-vector-index = { path = "crates/vector-index", version = "0.1.0" }
+lean-dup-worker = { path = "crates/worker", version = "0.1.0" }
 predicates = "3"
 rusqlite = { version = "0.39", features = ["bundled"] }
 rustc-hash = "2"

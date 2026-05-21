@@ -20,6 +20,7 @@ use lean_dup_worker::{
 use crate::{Error, Result};
 
 pub const INDEX_SCHEMA_VERSION: &str = "lean-dup.index.sqlite.v2";
+pub const INDEX_DIAGNOSTIC_SCHEMA_VERSION: &str = "lean-dup.index.v2";
 const INDEX_PROVENANCE_VERSION: &str = "lean-dup.index.provenance.v1";
 const MATHLIB_DECLARATION_CHUNK_SIZE: usize = 32;
 const MAX_MATHLIB_INDEX_THREADS: usize = 2;

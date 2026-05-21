@@ -275,6 +275,22 @@ fn hidden_perf_fixture_workload_emits_json_metrics() {
 }
 
 #[test]
+fn version_reports_release_identity_without_workspace() {
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("lean-dup 0.1.0"))
+        .stdout(predicate::str::contains("git revision:"))
+        .stdout(predicate::str::contains("build profile:"))
+        .stdout(predicate::str::contains("report schema: lean-dup.report.v3"))
+        .stdout(predicate::str::contains("index schema: lean-dup.index.v2"))
+        .stdout(predicate::str::contains("cache key: rust-cli-cache.v1"))
+        .stdout(predicate::str::contains("doctor --workspace <workspace>"));
+}
+
+#[test]
 fn doctor_json_reports_cache_lifecycle_diagnostics() {
     let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();
@@ -292,7 +308,21 @@ fn doctor_json_reports_cache_lifecycle_diagnostics() {
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let payload: Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(payload["command"], "doctor");
+    assert_eq!(payload["report_schema_version"], "lean-dup.report.v3");
     assert_eq!(payload["status"], "ok");
+    assert_eq!(payload["release"]["version"], "0.1.0");
+    assert_eq!(payload["release"]["report_schema_version"], "lean-dup.report.v3");
+    assert_eq!(payload["release"]["index_schema_version"], "lean-dup.index.v2");
+    assert_eq!(payload["release"]["cache_key_version"], "rust-cli-cache.v1");
+    assert_eq!(payload["worker"]["protocol_version"], "lean-dup.worker.v1");
+    assert_eq!(payload["worker"]["worker_version"], "0.1.0");
+    assert!(
+        payload["worker"]["supported_commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|command| command == "version")
+    );
     assert_eq!(payload["cache"]["cache_root"]["kind"], "cache-root");
     assert!(
         payload["cache"]["cache_root"]["fingerprint"]
@@ -710,12 +740,15 @@ fn doctor_reports_workspace_facts_from_repo_root() {
         .assert()
         .success()
         .stdout(predicate::str::contains("command: doctor"))
+        .stdout(predicate::str::contains("report schema: lean-dup.report.v3"))
+        .stdout(predicate::str::contains("version: 0.1.0"))
         .stdout(predicate::str::contains("requested workspace: workspace-root sha256:"))
         .stdout(predicate::str::contains("resolved Lake root: workspace-root sha256:"))
         .stdout(predicate::str::contains("module roots: LeanDup"))
         .stdout(predicate::str::contains("source files:"))
         .stdout(predicate::str::contains("cache root:"))
         .stdout(predicate::str::contains("lean:"))
+        .stdout(predicate::str::contains("worker protocol: lean-dup.worker.v1"))
         .stdout(predicate::str::contains("cache fingerprint: rust-cli-cache.v1:"));
 }
 

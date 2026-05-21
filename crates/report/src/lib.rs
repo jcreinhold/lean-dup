@@ -21,8 +21,9 @@ pub use reports::{
     EvalCountMetricDto, EvalHardNegativeSurvivalDto, EvalMetricsDto, EvalRecallAtKDto, EvalReportDto, EvalRunReportDto,
     EvalSemanticVerificationStageMetricsDto, EvalStageMetricsDto, EvalTimingMetricsDto, IndexReport,
     ManualMathlibPrerequisitesDto, ManualSuitePrerequisitesDto, PathReferenceReport, PerfReport, PerfWorkloadReport,
-    PrerequisiteCheckDto, Report, RetrievalReport, ReviewDiagnosticsReport, ReviewEvidenceReport, ReviewGroupReport,
-    ReviewMemberReport, ReviewProfileCounts, ReviewReport, SemanticVerificationReport, ShowReport, SourcePointReport,
-    SourceReferenceReport, SourceSpanReport, audit_report, cache_cleanup_report, cache_diagnostics_report, diff_report,
-    eval_report, show_report,
+    PrerequisiteCheckDto, ReleaseIdentityReport, Report, RetrievalReport, ReviewDiagnosticsReport,
+    ReviewEvidenceReport, ReviewGroupReport, ReviewMemberReport, ReviewProfileCounts, ReviewReport,
+    SemanticVerificationReport, ShowReport, SourcePointReport, SourceReferenceReport, SourceSpanReport,
+    WorkerDiagnosticsReport, audit_report, cache_cleanup_report, cache_diagnostics_report, diff_report, eval_report,
+    show_report,
 };

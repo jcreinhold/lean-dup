@@ -177,6 +177,8 @@ pub struct EvalSemanticVerificationStageMetricsDto {
 
 #[derive(Debug, Serialize)]
 pub struct DoctorReport {
+    pub report_schema_version: &'static str,
+    pub release: ReleaseIdentityReport,
     pub status: &'static str,
     #[serde(serialize_with = "serialize_path_ref")]
     pub requested_workspace: PathBuf,
@@ -191,9 +193,33 @@ pub struct DoctorReport {
     pub cache_root: PathBuf,
     pub cache_fingerprint: String,
     pub cache: CacheDiagnosticsReport,
+    pub worker: WorkerDiagnosticsReport,
     pub lean_version: String,
     pub require_oleans: bool,
     pub missing_oleans: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReleaseIdentityReport {
+    pub package: String,
+    pub version: String,
+    pub git_revision: String,
+    pub build_profile: String,
+    pub report_schema_version: String,
+    pub index_schema_version: String,
+    pub cache_key_version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkerDiagnosticsReport {
+    pub protocol_version: String,
+    pub worker_version: String,
+    pub lean_version: String,
+    pub extract_version: String,
+    pub features_version: String,
+    pub probe_version: String,
+    pub supported_commands: Vec<String>,
+    pub supported_capabilities: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -883,7 +909,10 @@ pub fn cache_diagnostics_report(diagnostics: CacheDiagnostics) -> CacheDiagnosti
                         status: format!("{:?}", entry.status).to_ascii_lowercase(),
                         active_latest: entry.active_latest,
                         expected_current: entry.expected_current,
-                        schema_version: entry.schema_version,
+                        schema_version: entry
+                            .schema_version
+                            .as_deref()
+                            .map(lean_dup_index::diagnostic_index_schema_version),
                         provenance_kind: format!("{:?}", entry.provenance_kind).to_ascii_lowercase(),
                         declaration_count: entry.declaration_count,
                         disk_bytes: entry.disk_bytes,
