@@ -13,4 +13,7 @@ pub use scoring::{
     CountMetric, EvaluationMetrics, GoldPair, ObservedPair, ObservedRun, RecallAtK, TimingMetrics, score_run,
 };
 pub use stage_metrics::{CandidateStageSurvival, HardNegativeSurvival, SearchStageMetrics};
-pub use suites::{EvalOutput, EvalRequest, EvaluationRunReport, run};
+pub use suites::{
+    EvalOutput, EvalRequest, EvaluationRunReport, ManualMathlibPrerequisites, ManualSuitePrerequisites,
+    PrerequisiteCheck, PrerequisiteStatus, run,
+};

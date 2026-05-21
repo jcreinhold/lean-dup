@@ -28,10 +28,15 @@ pub enum Report {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct EvalReportDto {
+    pub report_schema_version: &'static str,
     pub status: String,
     pub suite: String,
     pub scorer_version: String,
     pub metrics: EvalMetricsDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_path: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manual_prerequisites: Option<ManualSuitePrerequisitesDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search_dataset_artifact: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -51,6 +56,35 @@ pub struct EvalRunReportDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     pub manual: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manual_prerequisites: Option<ManualSuitePrerequisitesDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ManualSuitePrerequisitesDto {
+    pub suite: String,
+    pub workspace_path: Option<PathBuf>,
+    pub module_selector: String,
+    pub workspace: PrerequisiteCheckDto,
+    pub labels: PrerequisiteCheckDto,
+    pub compiled_oleans: PrerequisiteCheckDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mathlib: Option<ManualMathlibPrerequisitesDto>,
+    pub next_command: String,
+    pub blockers: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ManualMathlibPrerequisitesDto {
+    pub source_workspace: PrerequisiteCheckDto,
+    pub compiled_oleans: PrerequisiteCheckDto,
+    pub external_comparison_artifacts: PrerequisiteCheckDto,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PrerequisiteCheckDto {
+    pub status: lean_dup_eval::PrerequisiteStatus,
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -483,10 +517,13 @@ pub struct BaselineChangeReport {
 
 pub fn eval_report(report: EvalOutput) -> EvalReportDto {
     EvalReportDto {
+        report_schema_version: "lean-dup.eval-report.v1",
         status: report.status,
         suite: report.suite,
         scorer_version: report.scorer_version,
         metrics: eval_metrics_dto(report.metrics),
+        artifact_path: None,
+        manual_prerequisites: report.manual_prerequisites.map(manual_prerequisites_dto),
         search_dataset_artifact: report.search_dataset_artifact,
         scorer_ablation_artifact: report.scorer_ablation_artifact,
         runs: report
@@ -499,8 +536,34 @@ pub fn eval_report(report: EvalOutput) -> EvalReportDto {
                 metrics: run.metrics.map(eval_metrics_dto),
                 reason: run.reason,
                 manual: run.manual,
+                manual_prerequisites: run.manual_prerequisites.map(manual_prerequisites_dto),
             })
             .collect(),
+    }
+}
+
+fn manual_prerequisites_dto(prerequisites: lean_dup_eval::ManualSuitePrerequisites) -> ManualSuitePrerequisitesDto {
+    ManualSuitePrerequisitesDto {
+        suite: prerequisites.suite,
+        workspace_path: prerequisites.workspace_path,
+        module_selector: prerequisites.module_selector,
+        workspace: prerequisite_check_dto(prerequisites.workspace),
+        labels: prerequisite_check_dto(prerequisites.labels),
+        compiled_oleans: prerequisite_check_dto(prerequisites.compiled_oleans),
+        mathlib: prerequisites.mathlib.map(|mathlib| ManualMathlibPrerequisitesDto {
+            source_workspace: prerequisite_check_dto(mathlib.source_workspace),
+            compiled_oleans: prerequisite_check_dto(mathlib.compiled_oleans),
+            external_comparison_artifacts: prerequisite_check_dto(mathlib.external_comparison_artifacts),
+        }),
+        next_command: prerequisites.next_command,
+        blockers: prerequisites.blockers,
+    }
+}
+
+fn prerequisite_check_dto(check: lean_dup_eval::PrerequisiteCheck) -> PrerequisiteCheckDto {
+    PrerequisiteCheckDto {
+        status: check.status,
+        detail: check.detail,
     }
 }
 

@@ -19,9 +19,10 @@ pub use reports::{
     CacheCleanupReportDto, CacheDiagnosticsReport, CacheEntryDiagnosticsReport, CacheLabelDiagnosticsReport,
     CacheLatestDiagnosticsReport, ComparisonProvenanceReportDto, DiffReport, DoctorReport, EvalCountAtKDto,
     EvalCountMetricDto, EvalHardNegativeSurvivalDto, EvalMetricsDto, EvalRecallAtKDto, EvalReportDto, EvalRunReportDto,
-    EvalSemanticVerificationStageMetricsDto, EvalStageMetricsDto, EvalTimingMetricsDto, IndexReport, PerfReport,
-    PerfWorkloadReport, Report, RetrievalReport, ReviewDiagnosticsReport, ReviewEvidenceReport, ReviewGroupReport,
-    ReviewMemberReport, ReviewProfileCounts, ReviewReport, SemanticVerificationReport, ShowReport, SourcePointReport,
+    EvalSemanticVerificationStageMetricsDto, EvalStageMetricsDto, EvalTimingMetricsDto, IndexReport,
+    ManualMathlibPrerequisitesDto, ManualSuitePrerequisitesDto, PerfReport, PerfWorkloadReport, PrerequisiteCheckDto,
+    Report, RetrievalReport, ReviewDiagnosticsReport, ReviewEvidenceReport, ReviewGroupReport, ReviewMemberReport,
+    ReviewProfileCounts, ReviewReport, SemanticVerificationReport, ShowReport, SourcePointReport,
     SourceReferenceReport, SourceSpanReport, audit_report, cache_cleanup_report, cache_diagnostics_report, diff_report,
     eval_report, show_report,
 };

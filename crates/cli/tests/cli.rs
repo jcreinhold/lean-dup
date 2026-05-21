@@ -387,6 +387,7 @@ fn eval_default_json_contains_raw_metric_counts() {
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let payload: Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(payload["command"], "eval");
+    assert_eq!(payload["report_schema_version"], "lean-dup.eval-report.v1");
     assert_eq!(payload["status"], "ok");
     assert_eq!(payload["scorer_version"], "lean-dup.symbolic-scorer.v1");
     assert_eq!(payload["metrics"]["suite"], "default");
@@ -477,7 +478,74 @@ fn eval_output_writes_artifact_and_keeps_stdout_valid() {
     let artifact_payload: Value = serde_json::from_str(&fs::read_to_string(output.path()).unwrap()).unwrap();
     assert_eq!(stdout_payload["command"], "eval");
     assert_eq!(artifact_payload["command"], "eval");
+    let output_path = output.path().to_string_lossy();
+    assert_eq!(stdout_payload["artifact_path"].as_str().unwrap(), output_path.as_ref());
+    assert_eq!(
+        artifact_payload["artifact_path"].as_str().unwrap(),
+        output_path.as_ref()
+    );
     assert_eq!(stdout_payload["metrics"]["suite"], artifact_payload["metrics"]["suite"]);
+}
+
+#[test]
+fn eval_production_gate_json_reports_manual_prerequisite_blockers() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let assert = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["eval", "--suite", "production-gate", "--format", "json"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["status"], "incomplete");
+    let manual = payload["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|run| run["suite"] == "manual-internal")
+        .expect("manual internal run");
+    assert_eq!(manual["status"], "skipped");
+    assert_eq!(manual["manual_prerequisites"]["workspace"]["status"], "missing");
+    assert_eq!(manual["manual_prerequisites"]["labels"]["status"], "ok");
+    assert!(
+        manual["manual_prerequisites"]["next_command"]
+            .as_str()
+            .unwrap()
+            .contains("--workspace <manual-workspace>")
+    );
+    assert!(
+        manual["reason"]
+            .as_str()
+            .unwrap()
+            .contains("missing required --workspace")
+    );
+}
+
+#[test]
+fn eval_manual_suite_without_workspace_reports_structured_skip() {
+    let cache = tempfile::TempDir::new().unwrap();
+    let assert = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["eval", "--suite", "manual-internal", "--format", "json"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["status"], "skipped");
+    assert_eq!(payload["manual_prerequisites"]["workspace"]["status"], "missing");
+    assert_eq!(payload["manual_prerequisites"]["labels"]["status"], "ok");
+    assert_eq!(payload["runs"][0]["status"], "skipped");
+    assert!(
+        payload["runs"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("missing required --workspace")
+    );
 }
 
 #[test]

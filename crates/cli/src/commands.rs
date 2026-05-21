@@ -273,7 +273,8 @@ fn audit_request(args: AuditArgs) -> AuditRequest {
 }
 
 fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<lean_dup_report::EvalReportDto> {
-    Ok(lean_dup_report::eval_report(lean_dup_eval::run(
+    let output_path = args.output.clone();
+    let mut report = lean_dup_report::eval_report(lean_dup_eval::run(
         EvalRequest {
             suite: args.suite.into(),
             workspace: args.workspace,
@@ -284,7 +285,9 @@ fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<lean_dup_report::Eval
             write_scorer_ablations: args.write_scorer_ablations,
         },
         reporter,
-    )?))
+    )?);
+    report.artifact_path = output_path;
+    Ok(report)
 }
 
 fn show(args: ShowArgs, reporter: &mut Reporter) -> Result<ShowReport> {

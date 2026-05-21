@@ -42,6 +42,8 @@ pub struct EvalOutput {
     pub scorer_version: String,
     pub metrics: EvaluationMetrics,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub manual_prerequisites: Option<ManualSuitePrerequisites>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub search_dataset_artifact: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scorer_ablation_artifact: Option<PathBuf>,
@@ -62,8 +64,73 @@ pub struct EvaluationRunReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     pub manual: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manual_prerequisites: Option<ManualSuitePrerequisites>,
     #[serde(skip)]
     pub scorer_ablations: Vec<ScorerAblationVariantReport>,
+}
+
+/// Operator-visible prerequisite facts for a slow manual suite.
+///
+/// Manual suites may depend on private workspaces, compiled `.olean` files, and
+/// project-pinned mathlib sources. Eval reports those prerequisites as stable
+/// checks so a skipped suite is actionable without exposing cache layout,
+/// worker transport rows, or scorer internals.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ManualSuitePrerequisites {
+    pub suite: String,
+    pub workspace_path: Option<PathBuf>,
+    pub module_selector: String,
+    pub workspace: PrerequisiteCheck,
+    pub labels: PrerequisiteCheck,
+    pub compiled_oleans: PrerequisiteCheck,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mathlib: Option<ManualMathlibPrerequisites>,
+    pub next_command: String,
+    pub blockers: Vec<String>,
+}
+
+/// One prerequisite check with a stable status and human-readable detail.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct PrerequisiteCheck {
+    pub status: PrerequisiteStatus,
+    pub detail: String,
+}
+
+/// Stable status vocabulary for manual-suite prerequisite checks.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PrerequisiteStatus {
+    Ok,
+    Missing,
+    Blocked,
+    Unchecked,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ManualMathlibPrerequisites {
+    pub source_workspace: PrerequisiteCheck,
+    pub compiled_oleans: PrerequisiteCheck,
+    pub external_comparison_artifacts: PrerequisiteCheck,
+}
+
+impl ManualSuitePrerequisites {
+    fn is_satisfied(&self) -> bool {
+        self.blockers.is_empty()
+    }
+
+    fn skip_reason(&self) -> String {
+        if self.blockers.is_empty() {
+            format!("manual suite prerequisites satisfied; run `{}`", self.next_command)
+        } else {
+            format!("{}; next command: {}", self.blockers.join("; "), self.next_command)
+        }
+    }
+
+    fn with_runtime_blocker(mut self, reason: String) -> Self {
+        self.blockers.push(reason);
+        self
+    }
 }
 
 struct SuiteDefinition {
@@ -99,7 +166,44 @@ pub fn run(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutput> 
     if request.suite == EvalSuite::ProductionGate {
         return run_production_gate(request, reporter);
     }
+    if matches!(request.suite, EvalSuite::ManualInternal | EvalSuite::ManualMathlib) {
+        return run_manual_single(request, reporter);
+    }
     run_single(request, reporter)
+}
+
+fn run_manual_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutput> {
+    let prerequisites = manual_prerequisites(&request, reporter);
+    if !prerequisites.is_satisfied() {
+        let suite = request.suite.as_str().to_owned();
+        let scorer_version = lean_dup_search::SearchScoringSummary::new(SearchScoringVariant::SymbolicOnly)
+            .version
+            .to_owned();
+        return Ok(EvalOutput {
+            status: "skipped".to_owned(),
+            suite: suite.clone(),
+            scorer_version: scorer_version.clone(),
+            metrics: aggregate_metrics(&suite, &[]),
+            manual_prerequisites: Some(prerequisites.clone()),
+            search_dataset_artifact: None,
+            scorer_ablation_artifact: None,
+            scorer_ablations: Vec::new(),
+            runs: vec![EvaluationRunReport {
+                suite,
+                status: "skipped".to_owned(),
+                scorer_version: Some(scorer_version),
+                metrics: None,
+                reason: Some(prerequisites.skip_reason()),
+                manual: true,
+                manual_prerequisites: Some(prerequisites),
+                scorer_ablations: Vec::new(),
+            }],
+        });
+    }
+
+    let mut output = run_single(request, reporter)?;
+    output.manual_prerequisites = Some(prerequisites);
+    Ok(output)
 }
 
 fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutput> {
@@ -222,6 +326,7 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
         suite: labels.suite,
         scorer_version,
         metrics,
+        manual_prerequisites: None,
         search_dataset_artifact,
         scorer_ablation_artifact,
         scorer_ablations,
@@ -387,6 +492,7 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
         suite: "production-gate".to_owned(),
         scorer_version,
         metrics,
+        manual_prerequisites: None,
         search_dataset_artifact: None,
         scorer_ablation_artifact,
         scorer_ablations,
@@ -395,15 +501,18 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
 }
 
 fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) -> EvaluationRunReport {
-    if manual && !manual_workspace_exists(&request) {
-        let reason = "manual suite workspace is unavailable".to_owned();
+    let manual_prerequisites = manual.then(|| manual_prerequisites(&request, reporter));
+    if let Some(prerequisites) = manual_prerequisites.as_ref()
+        && !prerequisites.is_satisfied()
+    {
         return EvaluationRunReport {
             suite: request.suite.as_str().to_owned(),
             status: "skipped".to_owned(),
             scorer_version: None,
             metrics: None,
-            reason: Some(reason),
+            reason: Some(prerequisites.skip_reason()),
             manual,
+            manual_prerequisites,
             scorer_ablations: Vec::new(),
         };
     }
@@ -417,6 +526,7 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
             metrics: Some(report.metrics),
             reason: None,
             manual,
+            manual_prerequisites,
             scorer_ablations: report.scorer_ablations,
         },
         Err(error) => {
@@ -433,6 +543,13 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
                 metrics: None,
                 reason: Some(reason),
                 manual,
+                manual_prerequisites: manual_prerequisites.map(|prerequisites| {
+                    if status == "skipped" {
+                        prerequisites.with_runtime_blocker(error.to_string())
+                    } else {
+                        prerequisites
+                    }
+                }),
                 scorer_ablations: Vec::new(),
             }
         }
@@ -473,12 +590,216 @@ fn aggregate_scorer_ablations(runs: &[EvaluationRunReport]) -> Vec<ScorerAblatio
         .collect()
 }
 
-fn manual_workspace_exists(request: &EvalRequest) -> bool {
-    request.workspace.as_ref().is_some_and(|path| path.exists())
-}
-
 fn manual_module(request: &EvalRequest) -> String {
     request.manual_module.clone().unwrap_or_else(|| "Workspace".to_owned())
+}
+
+fn manual_prerequisites(request: &EvalRequest, reporter: &mut Reporter) -> ManualSuitePrerequisites {
+    let module_selector = manual_module(request);
+    let mut blockers = Vec::new();
+    let labels = label_prerequisite(request.suite, &mut blockers);
+    let next_command = manual_next_command(request, &module_selector);
+    let workspace_path = request.workspace.clone();
+    let (workspace, compiled_oleans, resolved_workspace) = match workspace_path.as_ref() {
+        Some(path) => match resolve(
+            WorkspaceRequest {
+                requested_root: path.clone(),
+                module_root: Some(module_selector.clone()),
+            },
+            reporter,
+        ) {
+            Ok(workspace) => {
+                let missing = workspace
+                    .missing_olean_sources(&workspace.root, &workspace.source_files)
+                    .into_iter()
+                    .map(|source| source.module.clone())
+                    .collect::<Vec<_>>();
+                let compiled = compiled_olean_check(&missing, "workspace");
+                if !missing.is_empty() {
+                    blockers.push(format!(
+                        "missing compiled workspace oleans ({} missing; sample: {})",
+                        missing.len(),
+                        sample_modules(&missing)
+                    ));
+                }
+                (
+                    check_ok(format!(
+                        "resolved {} Lean source files from {}",
+                        workspace.source_files.len(),
+                        workspace.root.display()
+                    )),
+                    compiled,
+                    Some(workspace),
+                )
+            }
+            Err(error) => {
+                blockers.push(format!("workspace prerequisite failed: {error}"));
+                (
+                    PrerequisiteCheck {
+                        status: PrerequisiteStatus::Missing,
+                        detail: error.to_string(),
+                    },
+                    check_unchecked("compiled oleans require a resolved workspace"),
+                    None,
+                )
+            }
+        },
+        None => {
+            blockers.push("missing required --workspace <path> for manual suite".to_owned());
+            (
+                PrerequisiteCheck {
+                    status: PrerequisiteStatus::Missing,
+                    detail: "pass --workspace <path> for the manual corpus".to_owned(),
+                },
+                check_unchecked("compiled oleans require --workspace <path>"),
+                None,
+            )
+        }
+    };
+
+    let mathlib = if request.suite == EvalSuite::ManualMathlib {
+        Some(mathlib_prerequisites(
+            request,
+            resolved_workspace.as_ref(),
+            reporter,
+            &mut blockers,
+        ))
+    } else {
+        None
+    };
+
+    ManualSuitePrerequisites {
+        suite: request.suite.as_str().to_owned(),
+        workspace_path,
+        module_selector,
+        workspace,
+        labels,
+        compiled_oleans,
+        mathlib,
+        next_command,
+        blockers,
+    }
+}
+
+fn label_prerequisite(suite: EvalSuite, blockers: &mut Vec<String>) -> PrerequisiteCheck {
+    match load_builtin(suite) {
+        Ok(labels) => check_ok(format!(
+            "parsed built-in typed labels ({} positives, {} hard negatives)",
+            labels.positives.len(),
+            labels.hard_negatives.len()
+        )),
+        Err(error) => {
+            blockers.push(format!("label prerequisite failed: {error}"));
+            PrerequisiteCheck {
+                status: PrerequisiteStatus::Blocked,
+                detail: error.to_string(),
+            }
+        }
+    }
+}
+
+fn mathlib_prerequisites(
+    request: &EvalRequest,
+    workspace: Option<&lean_dup_project::ResolvedWorkspace>,
+    reporter: &mut Reporter,
+    blockers: &mut Vec<String>,
+) -> ManualMathlibPrerequisites {
+    let Some(workspace) = workspace else {
+        return ManualMathlibPrerequisites {
+            source_workspace: check_unchecked("mathlib source requires a resolved project workspace"),
+            compiled_oleans: check_unchecked("mathlib oleans require a resolved project workspace"),
+            external_comparison_artifacts: check_unchecked("mathlib index reuse requires a resolved project workspace"),
+        };
+    };
+
+    match resolve_project_mathlib(workspace.root.clone(), request.mathlib_workspace.clone(), reporter) {
+        Ok(mathlib) => {
+            let missing = mathlib
+                .source
+                .missing_olean_sources(&mathlib.source.root, &mathlib.source.source_files)
+                .into_iter()
+                .map(|source| source.module.clone())
+                .collect::<Vec<_>>();
+            let compiled = compiled_olean_check(&missing, "mathlib");
+            if !missing.is_empty() {
+                blockers.push(format!(
+                    "missing compiled mathlib oleans ({} missing; sample: {})",
+                    missing.len(),
+                    sample_modules(&missing)
+                ));
+            }
+            ManualMathlibPrerequisites {
+                source_workspace: check_ok(format!(
+                    "resolved {} mathlib source files from {}",
+                    mathlib.source.source_files.len(),
+                    mathlib.source.root.display()
+                )),
+                compiled_oleans: compiled,
+                external_comparison_artifacts: check_ok(
+                    "manual-mathlib builds or reuses the project-pinned mathlib index; no separate prebuilt comparison artifact is required",
+                ),
+            }
+        }
+        Err(error) => {
+            blockers.push(format!("mathlib prerequisite failed: {error}"));
+            ManualMathlibPrerequisites {
+                source_workspace: PrerequisiteCheck {
+                    status: PrerequisiteStatus::Missing,
+                    detail: error.to_string(),
+                },
+                compiled_oleans: check_unchecked("mathlib oleans require a resolved mathlib source workspace"),
+                external_comparison_artifacts: check_unchecked("mathlib index reuse requires resolved mathlib sources"),
+            }
+        }
+    }
+}
+
+fn compiled_olean_check(missing: &[String], label: &str) -> PrerequisiteCheck {
+    if missing.is_empty() {
+        check_ok(format!("all selected {label} modules have compiled oleans"))
+    } else {
+        PrerequisiteCheck {
+            status: PrerequisiteStatus::Missing,
+            detail: format!("{} missing; sample: {}", missing.len(), sample_modules(missing)),
+        }
+    }
+}
+
+fn check_ok(detail: impl Into<String>) -> PrerequisiteCheck {
+    PrerequisiteCheck {
+        status: PrerequisiteStatus::Ok,
+        detail: detail.into(),
+    }
+}
+
+fn check_unchecked(detail: impl Into<String>) -> PrerequisiteCheck {
+    PrerequisiteCheck {
+        status: PrerequisiteStatus::Unchecked,
+        detail: detail.into(),
+    }
+}
+
+fn sample_modules(modules: &[String]) -> String {
+    modules.iter().take(5).cloned().collect::<Vec<_>>().join(", ")
+}
+
+fn manual_next_command(request: &EvalRequest, module_selector: &str) -> String {
+    let workspace = request
+        .workspace
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "<manual-workspace>".to_owned());
+    let mut command = format!(
+        "cargo run -p lean-dup-cli -- eval --suite {} --workspace {} --manual-module {} --format json --output target/eval/{}.json",
+        request.suite.as_str(),
+        workspace,
+        module_selector,
+        request.suite.as_str()
+    );
+    if let Some(mathlib_workspace) = &request.mathlib_workspace {
+        command.push_str(&format!(" --mathlib-workspace {}", mathlib_workspace.display()));
+    }
+    command
 }
 
 fn is_manual_prerequisite_error(reason: &str) -> bool {
@@ -877,6 +1198,56 @@ mod tests {
         assert_eq!(report.suite, "manual-internal");
         assert_eq!(report.status, "skipped");
         assert!(report.manual);
+        let prerequisites = report.manual_prerequisites.expect("manual prerequisites");
+        assert_eq!(prerequisites.workspace.status, super::PrerequisiteStatus::Missing);
+        assert_eq!(prerequisites.labels.status, super::PrerequisiteStatus::Ok);
+        assert_eq!(
+            prerequisites.compiled_oleans.status,
+            super::PrerequisiteStatus::Unchecked
+        );
+        assert!(prerequisites.next_command.contains("--workspace"));
+        assert!(
+            report
+                .reason
+                .as_deref()
+                .unwrap()
+                .contains("workspace prerequisite failed")
+        );
+    }
+
+    #[test]
+    fn manual_child_suite_without_workspace_reports_operator_command() {
+        let report = run_child_suite(
+            EvalRequest {
+                suite: EvalSuite::ManualMathlib,
+                workspace: None,
+                mathlib_workspace: None,
+                manual_module: Some("KanProofs".to_owned()),
+                k_values: vec![1, 5, 10],
+                write_search_dataset: false,
+                write_scorer_ablations: false,
+            },
+            true,
+            &mut Reporter::new(false, false),
+        );
+
+        assert_eq!(report.status, "skipped");
+        let prerequisites = report.manual_prerequisites.expect("manual prerequisites");
+        assert_eq!(prerequisites.module_selector, "KanProofs");
+        assert_eq!(prerequisites.workspace.status, super::PrerequisiteStatus::Missing);
+        assert_eq!(prerequisites.labels.status, super::PrerequisiteStatus::Ok);
+        assert!(prerequisites.mathlib.is_some());
+        assert!(
+            prerequisites
+                .next_command
+                .contains("cargo run -p lean-dup-cli -- eval --suite manual-mathlib")
+        );
+        assert!(
+            prerequisites
+                .blockers
+                .iter()
+                .any(|blocker| blocker.contains("missing required --workspace"))
+        );
     }
 
     #[test]
