@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
@@ -5,7 +6,7 @@ use std::time::Instant;
 use serde::Serialize;
 
 use crate::EvalSuite;
-use crate::eval::labels::{GoldLabels, load_builtin};
+use crate::eval::labels::{GoldLabelFact, GoldLabels, LabelFactSource, LabelPolarity, TypedGoldLabel, load_builtin};
 use crate::eval::scorer_ablations::{self, ScorerAblationVariantReport};
 use crate::eval::scoring::{
     CountMetric, EvaluationMetrics, GoldPair, ObservedPair, ObservedRun, RecallAtK, TimingMetrics, score_run,
@@ -14,7 +15,7 @@ use crate::eval::search_dataset;
 use crate::eval::stage_metrics::SemanticVerificationStageMetrics;
 use lean_dup_diagnostics::perf;
 use lean_dup_diagnostics::progress::Reporter;
-use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
+use lean_dup_index::{HydratedDeclaration, IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
 use lean_dup_project::{WorkspaceRequest, resolve, resolve_project_mathlib};
 use lean_dup_search::{
     SearchObservation, SearchObservationRequest, SearchScoringVariant, SearchTrackedPair, observe_search,
@@ -45,6 +46,8 @@ pub struct EvalOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub manual_prerequisites: Option<ManualSuitePrerequisites>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub label_resolution: Option<LabelResolutionReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub search_dataset_artifact: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scorer_ablation_artifact: Option<PathBuf>,
@@ -69,8 +72,91 @@ pub struct EvaluationRunReport {
     pub manual: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub manual_prerequisites: Option<ManualSuitePrerequisites>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label_resolution: Option<LabelResolutionReport>,
     #[serde(skip)]
     pub scorer_ablations: Vec<ScorerAblationVariantReport>,
+}
+
+/// Stable label-resolution facts for a completed evaluation run.
+///
+/// Eval owns the mapping from label-file names to current declarations. The
+/// report records resolution and stage survival without exposing index storage,
+/// raw statements, or private cache paths.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct LabelResolutionReport {
+    pub status: LabelResolutionStatus,
+    pub positives: LabelTraceCount,
+    pub hard_negatives: LabelTraceCount,
+    pub blockers: Vec<String>,
+    pub traces: Vec<LabelTrace>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum LabelResolutionStatus {
+    Ok,
+    Blocked,
+}
+
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct LabelTraceCount {
+    pub resolved: usize,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct LabelTrace {
+    pub left: String,
+    pub right: String,
+    pub polarity: LabelPolarity,
+    pub match_class: crate::eval::labels::MatchClass,
+    pub left_resolution: LabelEndpointResolution,
+    pub right_resolution: LabelEndpointResolution,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub canonical_pair: Option<GoldPair>,
+    pub generated: bool,
+    pub ranked: bool,
+    pub rank: Option<usize>,
+    pub visible: bool,
+    pub lost_layer: LabelLossLayer,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct LabelEndpointResolution {
+    pub requested: String,
+    pub status: LabelEndpointStatus,
+    pub candidates: Vec<LabelResolutionCandidate>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum LabelEndpointStatus {
+    Exact,
+    DisplayUnique,
+    Ambiguous,
+    Missing,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct LabelResolutionCandidate {
+    pub qualified_name: String,
+    pub origin: String,
+    pub kind: String,
+    pub visibility: String,
+    pub skipped: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum LabelLossLayer {
+    None,
+    LabelResolution,
+    Eligibility,
+    CandidateGeneration,
+    Ranking,
+    Visibility,
 }
 
 /// Operator-visible prerequisite facts for a slow manual suite.
@@ -189,6 +275,7 @@ fn run_manual_single(request: EvalRequest, reporter: &mut Reporter) -> Result<Ev
             review_policy_version: "lean-dup.symbolic-review-policy.v2".to_owned(),
             metrics: aggregate_metrics(&suite, &[]),
             manual_prerequisites: Some(prerequisites.clone()),
+            label_resolution: None,
             search_dataset_artifact: None,
             scorer_ablation_artifact: None,
             scorer_ablations: Vec::new(),
@@ -201,6 +288,7 @@ fn run_manual_single(request: EvalRequest, reporter: &mut Reporter) -> Result<Ev
                 reason: Some(prerequisites.skip_reason()),
                 manual: true,
                 manual_prerequisites: Some(prerequisites),
+                label_resolution: None,
                 scorer_ablations: Vec::new(),
             }],
         });
@@ -259,6 +347,8 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
         };
     let index_load_ms = index_started.elapsed().as_millis();
 
+    let label_resolution_input = resolve_label_references(&labels, request.suite, &workspace_rows, external.as_ref())?;
+    let labels = label_resolution_input.labels;
     let tracked_pairs = tracked_pairs(&labels);
     let retrieval_started = Instant::now();
     let base_output = match &external {
@@ -280,9 +370,11 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
     let scorer_version = output.scoring.version.to_owned();
     let review_policy_version = output.review_policy.version.to_owned();
 
+    let observed_pairs = observed_pairs(&output);
+    let label_resolution = trace_labels(&labels, label_resolution_input.traces, &observed_pairs, request.suite);
     let observed = ObservedRun {
         suite: labels.suite.clone(),
-        pairs: observed_pairs(&output),
+        pairs: observed_pairs,
         visible_groups: CountMetric {
             found: output.visible_groups_found,
             total: output.visible_groups_total,
@@ -328,13 +420,23 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
     } else {
         None
     };
+    let status = if matches!(request.suite, EvalSuite::ManualInternal | EvalSuite::ManualMathlib)
+        && label_resolution.status == LabelResolutionStatus::Blocked
+    {
+        "blocked"
+    } else {
+        "ok"
+    };
+    let label_resolution =
+        matches!(request.suite, EvalSuite::ManualInternal | EvalSuite::ManualMathlib).then_some(label_resolution);
     Ok(EvalOutput {
-        status: "ok".to_owned(),
+        status: status.to_owned(),
         suite: labels.suite,
         scorer_version,
         review_policy_version,
         metrics,
         manual_prerequisites: None,
+        label_resolution,
         search_dataset_artifact,
         scorer_ablation_artifact,
         scorer_ablations,
@@ -355,6 +457,388 @@ fn tracked_pairs(labels: &GoldLabels) -> Vec<SearchTrackedPair> {
     pairs.sort();
     pairs.dedup();
     pairs
+}
+
+struct LabelResolutionInput {
+    labels: GoldLabels,
+    traces: Vec<LabelTraceSeed>,
+}
+
+#[derive(Debug, Clone)]
+struct LabelTraceSeed {
+    label: TypedGoldLabel,
+    original_pair: GoldPair,
+    left_resolution: LabelEndpointResolution,
+    right_resolution: LabelEndpointResolution,
+    canonical_pair: Option<GoldPair>,
+}
+
+fn resolve_label_references(
+    labels: &GoldLabels,
+    suite: EvalSuite,
+    workspace: &[HydratedDeclaration],
+    external: Option<&OpenedIndex>,
+) -> Result<LabelResolutionInput> {
+    let requested = labels
+        .typed_pairs
+        .iter()
+        .flat_map(|label| [label.pair.left.clone(), label.pair.right.clone()])
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let index = LabelDeclarationIndex::build(workspace, external, &requested)?;
+    let mut canonical_by_pair = BTreeMap::<GoldPair, GoldPair>::new();
+    let mut traces = Vec::with_capacity(labels.typed_pairs.len());
+    let mut canonical_typed_pairs = Vec::with_capacity(labels.typed_pairs.len());
+    for typed in &labels.typed_pairs {
+        let left_resolution = index.resolve(&typed.pair.left);
+        let right_resolution = index.resolve(&typed.pair.right);
+        let canonical_pair = canonical_pair(suite, &left_resolution, &right_resolution);
+        let mut canonical = typed.clone();
+        if let Some(pair) = &canonical_pair {
+            canonical.pair = pair.clone();
+            canonical_by_pair.insert(typed.pair.clone(), pair.clone());
+        }
+        canonical_typed_pairs.push(canonical.clone());
+        traces.push(LabelTraceSeed {
+            label: canonical,
+            original_pair: typed.pair.clone(),
+            left_resolution,
+            right_resolution,
+            canonical_pair,
+        });
+    }
+    let mut canonical_label_facts = Vec::with_capacity(labels.label_facts.len());
+    for fact in &labels.label_facts {
+        let mut fact = fact.clone();
+        if let Some(pair) = canonical_by_pair.get(&fact.pair) {
+            fact.pair = pair.clone();
+            if let Some(typed) = fact.typed.as_mut() {
+                typed.pair = pair.clone();
+            }
+        }
+        canonical_label_facts.push(fact);
+    }
+    Ok(LabelResolutionInput {
+        labels: rebuild_labels(&labels.suite, canonical_typed_pairs, canonical_label_facts),
+        traces,
+    })
+}
+
+struct LabelDeclarationIndex {
+    exact: BTreeMap<String, Vec<LabelResolutionCandidate>>,
+    display: BTreeMap<String, Vec<LabelResolutionCandidate>>,
+}
+
+impl LabelDeclarationIndex {
+    fn build(workspace: &[HydratedDeclaration], external: Option<&OpenedIndex>, requested: &[String]) -> Result<Self> {
+        let mut exact = BTreeMap::<String, Vec<LabelResolutionCandidate>>::new();
+        let mut display = BTreeMap::<String, Vec<LabelResolutionCandidate>>::new();
+        for declaration in workspace {
+            insert_candidate(&mut exact, &declaration.qualified_name, declaration);
+            insert_candidate(&mut display, &declaration.display_name, declaration);
+        }
+        if let Some(external) = external {
+            for declaration in external.declarations_named(requested)? {
+                insert_candidate(&mut exact, &declaration.qualified_name, &declaration);
+                insert_candidate(&mut display, &declaration.display_name, &declaration);
+            }
+            for declaration in external.declarations_with_display_names(requested)? {
+                insert_candidate(&mut exact, &declaration.qualified_name, &declaration);
+                insert_candidate(&mut display, &declaration.display_name, &declaration);
+            }
+        }
+        for candidates in exact.values_mut().chain(display.values_mut()) {
+            candidates.sort_by(|left, right| {
+                left.origin
+                    .cmp(&right.origin)
+                    .then_with(|| left.qualified_name.cmp(&right.qualified_name))
+            });
+            candidates
+                .dedup_by(|left, right| left.origin == right.origin && left.qualified_name == right.qualified_name);
+        }
+        Ok(Self { exact, display })
+    }
+
+    fn resolve(&self, name: &str) -> LabelEndpointResolution {
+        if let Some(candidates) = self.exact.get(name) {
+            return endpoint_resolution(name, candidates, LabelEndpointStatus::Exact);
+        }
+        if let Some(candidates) = self.display.get(name) {
+            return if candidates.len() == 1 {
+                endpoint_resolution(name, candidates, LabelEndpointStatus::DisplayUnique)
+            } else {
+                endpoint_resolution(name, candidates, LabelEndpointStatus::Ambiguous)
+            };
+        }
+        LabelEndpointResolution {
+            requested: name.to_owned(),
+            status: LabelEndpointStatus::Missing,
+            candidates: Vec::new(),
+        }
+    }
+}
+
+fn insert_candidate(
+    map: &mut BTreeMap<String, Vec<LabelResolutionCandidate>>,
+    key: &str,
+    declaration: &HydratedDeclaration,
+) {
+    map.entry(key.to_owned()).or_default().push(LabelResolutionCandidate {
+        qualified_name: declaration.qualified_name.clone(),
+        origin: declaration.origin.clone(),
+        kind: declaration.kind.clone(),
+        visibility: declaration.visibility.clone(),
+        skipped: skip_reasons(declaration),
+    });
+}
+
+fn skip_reasons(declaration: &HydratedDeclaration) -> Vec<String> {
+    let mut reasons = Vec::new();
+    if declaration.status_flags.iter().any(|flag| flag == "generated") {
+        reasons.push("generated".to_owned());
+    }
+    if declaration.visibility != "public" {
+        reasons.push("non-public".to_owned());
+    }
+    if !declaration.low_signal_markers.is_empty() {
+        reasons.push("low-signal".to_owned());
+    }
+    if declaration.statement_text.trim().is_empty() {
+        reasons.push("missing-statement".to_owned());
+    }
+    if !matches!(declaration.kind.as_str(), "theorem" | "axiom" | "def" | "instance") {
+        reasons.push("unsupported-kind".to_owned());
+    }
+    reasons
+}
+
+fn endpoint_resolution(
+    requested: &str,
+    candidates: &[LabelResolutionCandidate],
+    status: LabelEndpointStatus,
+) -> LabelEndpointResolution {
+    LabelEndpointResolution {
+        requested: requested.to_owned(),
+        status: if candidates.len() == 1 {
+            status
+        } else {
+            LabelEndpointStatus::Ambiguous
+        },
+        candidates: candidates.iter().take(8).cloned().collect(),
+    }
+}
+
+fn canonical_pair(
+    suite: EvalSuite,
+    left: &LabelEndpointResolution,
+    right: &LabelEndpointResolution,
+) -> Option<GoldPair> {
+    let left = unique_candidate(left)?;
+    let right = unique_candidate(right)?;
+    if suite == EvalSuite::ManualMathlib {
+        let local_count = [left, right]
+            .into_iter()
+            .filter(|candidate| candidate.origin == "workspace")
+            .count();
+        let external_count = [left, right]
+            .into_iter()
+            .filter(|candidate| candidate.origin == "mathlib")
+            .count();
+        if local_count != 1 || external_count != 1 {
+            return None;
+        }
+    }
+    Some(GoldPair::new(left.qualified_name.clone(), right.qualified_name.clone()))
+}
+
+fn unique_candidate(resolution: &LabelEndpointResolution) -> Option<&LabelResolutionCandidate> {
+    matches!(
+        resolution.status,
+        LabelEndpointStatus::Exact | LabelEndpointStatus::DisplayUnique
+    )
+    .then(|| resolution.candidates.first())
+    .flatten()
+}
+
+fn rebuild_labels(suite: &str, typed_pairs: Vec<TypedGoldLabel>, mut label_facts: Vec<GoldLabelFact>) -> GoldLabels {
+    if label_facts.is_empty() {
+        label_facts = typed_pairs
+            .iter()
+            .cloned()
+            .map(|typed| GoldLabelFact {
+                pair: typed.pair.clone(),
+                polarity: typed.polarity,
+                source: LabelFactSource::TypedPair,
+                typed: Some(typed),
+            })
+            .collect();
+    }
+    let positives = typed_pairs
+        .iter()
+        .filter(|label| label.polarity == LabelPolarity::Positive)
+        .map(|label| label.pair.clone())
+        .collect();
+    let hard_negatives = typed_pairs
+        .iter()
+        .filter(|label| label.polarity == LabelPolarity::HardNegative)
+        .map(|label| label.pair.clone())
+        .collect();
+    GoldLabels {
+        suite: suite.to_owned(),
+        positives,
+        hard_negatives,
+        typed_pairs,
+        label_facts,
+    }
+}
+
+fn trace_labels(
+    labels: &GoldLabels,
+    seeds: Vec<LabelTraceSeed>,
+    observed_pairs: &[ObservedPair],
+    suite: EvalSuite,
+) -> LabelResolutionReport {
+    let observed = observed_pairs
+        .iter()
+        .map(|pair| (pair.pair.clone(), pair))
+        .collect::<BTreeMap<_, _>>();
+    let mut blockers = BTreeSet::new();
+    let traces = seeds
+        .into_iter()
+        .map(|seed| {
+            let observed = seed
+                .canonical_pair
+                .as_ref()
+                .and_then(|pair| observed.get(pair))
+                .copied();
+            let (generated, ranked, rank, visible) = observed.map_or((false, false, None, false), |pair| {
+                (pair.generated, pair.ranked, pair.rank, pair.survived_shown_filter)
+            });
+            let (lost_layer, reason) = loss_reason(suite, &seed, generated, ranked, visible);
+            if matches!(suite, EvalSuite::ManualInternal | EvalSuite::ManualMathlib)
+                && seed.label.polarity == LabelPolarity::Positive
+                && lost_layer != LabelLossLayer::None
+            {
+                blockers.insert(format!(
+                    "{} / {} lost at {:?}: {}",
+                    seed.original_pair.left, seed.original_pair.right, lost_layer, reason
+                ));
+            }
+            LabelTrace {
+                left: seed.original_pair.left,
+                right: seed.original_pair.right,
+                polarity: seed.label.polarity,
+                match_class: seed.label.match_class,
+                left_resolution: seed.left_resolution,
+                right_resolution: seed.right_resolution,
+                canonical_pair: seed.canonical_pair,
+                generated,
+                ranked,
+                rank,
+                visible,
+                lost_layer,
+                reason,
+            }
+        })
+        .collect::<Vec<_>>();
+    let positives_total = traces
+        .iter()
+        .filter(|trace| trace.polarity == LabelPolarity::Positive)
+        .count();
+    let hard_total = traces
+        .iter()
+        .filter(|trace| trace.polarity == LabelPolarity::HardNegative)
+        .count();
+    let positives_resolved = traces
+        .iter()
+        .filter(|trace| trace.polarity == LabelPolarity::Positive && trace.canonical_pair.is_some())
+        .count();
+    let hard_resolved = traces
+        .iter()
+        .filter(|trace| trace.polarity == LabelPolarity::HardNegative && trace.canonical_pair.is_some())
+        .count();
+    if matches!(suite, EvalSuite::ManualInternal | EvalSuite::ManualMathlib)
+        && labels.positives.len() != positives_resolved
+    {
+        blockers.insert(format!(
+            "manual suite has unresolved positive labels: {positives_resolved}/{positives_total} resolved"
+        ));
+    }
+    let blockers = blockers.into_iter().collect::<Vec<_>>();
+    LabelResolutionReport {
+        status: if blockers.is_empty() {
+            LabelResolutionStatus::Ok
+        } else {
+            LabelResolutionStatus::Blocked
+        },
+        positives: LabelTraceCount {
+            resolved: positives_resolved,
+            total: positives_total,
+        },
+        hard_negatives: LabelTraceCount {
+            resolved: hard_resolved,
+            total: hard_total,
+        },
+        blockers,
+        traces,
+    }
+}
+
+fn loss_reason(
+    suite: EvalSuite,
+    seed: &LabelTraceSeed,
+    generated: bool,
+    ranked: bool,
+    visible: bool,
+) -> (LabelLossLayer, String) {
+    let left = unique_candidate(&seed.left_resolution);
+    let right = unique_candidate(&seed.right_resolution);
+    if left.is_none() || right.is_none() {
+        return (
+            LabelLossLayer::LabelResolution,
+            "one or both label endpoints are missing or ambiguous".to_owned(),
+        );
+    }
+    if suite == EvalSuite::ManualMathlib && seed.canonical_pair.is_none() {
+        return (
+            LabelLossLayer::LabelResolution,
+            "manual-mathlib labels must resolve to one workspace declaration and one mathlib declaration".to_owned(),
+        );
+    }
+    let skipped = left
+        .into_iter()
+        .chain(right)
+        .flat_map(|candidate| candidate.skipped.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    if !skipped.is_empty() {
+        return (
+            LabelLossLayer::Eligibility,
+            format!(
+                "resolved declaration is ineligible: {}",
+                skipped.into_iter().collect::<Vec<_>>().join(", ")
+            ),
+        );
+    }
+    if !generated {
+        return (
+            LabelLossLayer::CandidateGeneration,
+            "no symbolic retrieval feature generated this labeled pair".to_owned(),
+        );
+    }
+    if !ranked {
+        return (
+            LabelLossLayer::Ranking,
+            "pair was generated but did not enter the ranked queue".to_owned(),
+        );
+    }
+    if !visible {
+        return (
+            LabelLossLayer::Visibility,
+            "pair was ranked but hidden by review policy".to_owned(),
+        );
+    }
+    (LabelLossLayer::None, "visible".to_owned())
 }
 
 fn scorer_ablation_variants(
@@ -450,6 +934,8 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
     let metrics = aggregate_metrics("production-gate", &completed_metrics);
     let status = if runs.iter().any(|run| run.status == "failed") {
         "failed"
+    } else if runs.iter().any(|run| run.status == "blocked") {
+        "blocked"
     } else if runs.iter().any(|run| run.status == "skipped") {
         "incomplete"
     } else {
@@ -507,6 +993,7 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
         review_policy_version,
         metrics,
         manual_prerequisites: None,
+        label_resolution: None,
         search_dataset_artifact: None,
         scorer_ablation_artifact,
         scorer_ablations,
@@ -528,6 +1015,7 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
             reason: Some(prerequisites.skip_reason()),
             manual,
             manual_prerequisites,
+            label_resolution: None,
             scorer_ablations: Vec::new(),
         };
     }
@@ -543,6 +1031,7 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
             reason: None,
             manual,
             manual_prerequisites,
+            label_resolution: report.label_resolution,
             scorer_ablations: report.scorer_ablations,
         },
         Err(error) => {
@@ -567,6 +1056,7 @@ fn run_child_suite(request: EvalRequest, manual: bool, reporter: &mut Reporter) 
                         prerequisites
                     }
                 }),
+                label_resolution: None,
                 scorer_ablations: Vec::new(),
             }
         }
@@ -1131,9 +1621,16 @@ mod tests {
 
     use super::{EvalRequest, aggregate_metrics, run, run_child_suite};
     use crate::EvalSuite;
+    use crate::eval::labels::{
+        AdjudicationSource, ExpectedStageVisibility, GoldLabelFact, GoldLabels, LabelConfidence, LabelFactSource,
+        LabelPolarity, MatchClass, TypedGoldLabel,
+    };
     use crate::eval::scoring::{CountMetric, EvaluationMetrics, RecallAtK, TimingMetrics};
     use crate::eval::stage_metrics::{SearchStageMetrics, SemanticVerificationStageMetrics};
     use lean_dup_diagnostics::progress::Reporter;
+    use lean_dup_index::{DeclarationHandle, HydratedDeclaration};
+    use lean_dup_worker::Fingerprints;
+    use rustc_hash::FxHashSet;
 
     #[test]
     fn default_suite_computes_metrics_and_enforces_gates() {
@@ -1281,6 +1778,52 @@ mod tests {
     }
 
     #[test]
+    fn manual_label_resolution_blocks_unresolved_positive_labels() {
+        let labels = GoldLabels {
+            suite: "manual-internal".to_owned(),
+            positives: FxHashSet::default(),
+            hard_negatives: FxHashSet::default(),
+            typed_pairs: vec![
+                typed_label("alpha", "beta", LabelPolarity::Positive),
+                typed_label("dup", "missing", LabelPolarity::Positive),
+            ],
+            label_facts: vec![
+                label_fact("alpha", "beta", LabelPolarity::Positive),
+                label_fact("dup", "missing", LabelPolarity::Positive),
+            ],
+        };
+        let workspace = vec![
+            declaration("Pkg.A.alpha", "alpha", "workspace", &[]),
+            declaration("Pkg.B.beta", "beta", "workspace", &[]),
+            declaration("Pkg.C.dup", "dup", "workspace", &[]),
+            declaration("Pkg.D.dup", "dup", "workspace", &[]),
+        ];
+
+        let resolved = super::resolve_label_references(&labels, EvalSuite::ManualInternal, &workspace, None).unwrap();
+        let report = super::trace_labels(&resolved.labels, resolved.traces, &[], EvalSuite::ManualInternal);
+
+        assert_eq!(report.status, super::LabelResolutionStatus::Blocked);
+        assert_eq!(report.positives.resolved, 1);
+        assert_eq!(report.positives.total, 2);
+        assert!(
+            report
+                .blockers
+                .iter()
+                .any(|blocker| blocker.contains("manual suite has unresolved positive labels: 1/2 resolved"))
+        );
+        assert!(report.traces.iter().any(|trace| {
+            trace.left == "alpha"
+                && trace
+                    .canonical_pair
+                    .as_ref()
+                    .is_some_and(|pair| pair.left == "Pkg.A.alpha" && pair.right == "Pkg.B.beta")
+        }));
+        assert!(report.traces.iter().any(|trace| trace.left == "dup"
+            && trace.left_resolution.status == super::LabelEndpointStatus::Ambiguous
+            && trace.lost_layer == super::LabelLossLayer::LabelResolution));
+    }
+
+    #[test]
     #[ignore = "manual slow suite over private corpus"]
     fn manual_internal_suite_runs_when_requested() {
         let report = run(
@@ -1365,6 +1908,67 @@ mod tests {
                 total_ms: total as u128,
             },
             peak_memory_bytes,
+        }
+    }
+
+    fn typed_label(left: &str, right: &str, polarity: LabelPolarity) -> TypedGoldLabel {
+        TypedGoldLabel {
+            pair: super::GoldPair::new(left.to_owned(), right.to_owned()),
+            polarity,
+            match_class: if polarity == LabelPolarity::HardNegative {
+                MatchClass::HardNegative
+            } else {
+                MatchClass::ExactTheoremDuplicate
+            },
+            expected_stage_visibility: ExpectedStageVisibility::Visible,
+            adjudication_source: AdjudicationSource::ManualInspection,
+            confidence: LabelConfidence::High,
+            semantic_verification_required: true,
+            static_evidence_acceptable: true,
+        }
+    }
+
+    fn label_fact(left: &str, right: &str, polarity: LabelPolarity) -> GoldLabelFact {
+        let typed = typed_label(left, right, polarity);
+        GoldLabelFact {
+            pair: typed.pair.clone(),
+            polarity,
+            source: LabelFactSource::TypedPair,
+            typed: Some(typed),
+        }
+    }
+
+    fn declaration(
+        qualified_name: &str,
+        display_name: &str,
+        origin: &str,
+        skipped_markers: &[&str],
+    ) -> HydratedDeclaration {
+        HydratedDeclaration {
+            handle: DeclarationHandle::from_fixture_id(qualified_name),
+            declaration_id: qualified_name.to_owned(),
+            origin: origin.to_owned(),
+            module: "Pkg".to_owned(),
+            qualified_name: qualified_name.to_owned(),
+            display_name: display_name.to_owned(),
+            kind: "theorem".to_owned(),
+            visibility: "public".to_owned(),
+            modifiers: Vec::new(),
+            source_span: None,
+            statement_text: "∀ x, x = x".to_owned(),
+            docstring_text: None,
+            definition_body_summary: None,
+            status_flags: Vec::new(),
+            feature_version: "fixture".to_owned(),
+            fingerprints: Fingerprints {
+                statement: qualified_name.to_owned(),
+                safe_binder_permutation: qualified_name.to_owned(),
+                connective_shape: qualified_name.to_owned(),
+                conclusion_shape: qualified_name.to_owned(),
+            },
+            role_features: Vec::new(),
+            binder_count: 0,
+            low_signal_markers: skipped_markers.iter().map(|marker| (*marker).to_owned()).collect(),
         }
     }
 }

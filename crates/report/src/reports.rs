@@ -40,6 +40,8 @@ pub struct EvalReportDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub manual_prerequisites: Option<ManualSuitePrerequisitesDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub label_resolution: Option<LabelResolutionReportDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub search_dataset_artifact: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scorer_ablation_artifact: Option<PathBuf>,
@@ -62,6 +64,63 @@ pub struct EvalRunReportDto {
     pub manual: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub manual_prerequisites: Option<ManualSuitePrerequisitesDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label_resolution: Option<LabelResolutionReportDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LabelResolutionReportDto {
+    pub status: lean_dup_eval::LabelResolutionStatus,
+    pub positives: LabelTraceCountDto,
+    pub hard_negatives: LabelTraceCountDto,
+    pub blockers: Vec<String>,
+    pub traces: Vec<LabelTraceDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LabelTraceCountDto {
+    pub resolved: usize,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LabelTraceDto {
+    pub left: String,
+    pub right: String,
+    pub polarity: lean_dup_eval::LabelPolarity,
+    pub match_class: lean_dup_eval::MatchClass,
+    pub left_resolution: LabelEndpointResolutionDto,
+    pub right_resolution: LabelEndpointResolutionDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub canonical_pair: Option<LabelPairDto>,
+    pub generated: bool,
+    pub ranked: bool,
+    pub rank: Option<usize>,
+    pub visible: bool,
+    pub lost_layer: lean_dup_eval::LabelLossLayer,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LabelPairDto {
+    pub left: String,
+    pub right: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LabelEndpointResolutionDto {
+    pub requested: String,
+    pub status: lean_dup_eval::LabelEndpointStatus,
+    pub candidates: Vec<LabelResolutionCandidateDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LabelResolutionCandidateDto {
+    pub qualified_name: String,
+    pub origin: String,
+    pub kind: String,
+    pub visibility: String,
+    pub skipped: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -663,6 +722,7 @@ pub fn eval_report(report: EvalOutput) -> EvalReportDto {
         metrics: eval_metrics_dto(report.metrics),
         artifact_path: None,
         manual_prerequisites: report.manual_prerequisites.map(manual_prerequisites_dto),
+        label_resolution: report.label_resolution.map(label_resolution_dto),
         search_dataset_artifact: report.search_dataset_artifact,
         scorer_ablation_artifact: report.scorer_ablation_artifact,
         runs: report
@@ -677,6 +737,63 @@ pub fn eval_report(report: EvalOutput) -> EvalReportDto {
                 reason: run.reason,
                 manual: run.manual,
                 manual_prerequisites: run.manual_prerequisites.map(manual_prerequisites_dto),
+                label_resolution: run.label_resolution.map(label_resolution_dto),
+            })
+            .collect(),
+    }
+}
+
+fn label_resolution_dto(report: lean_dup_eval::LabelResolutionReport) -> LabelResolutionReportDto {
+    LabelResolutionReportDto {
+        status: report.status,
+        positives: label_trace_count_dto(report.positives),
+        hard_negatives: label_trace_count_dto(report.hard_negatives),
+        blockers: report.blockers,
+        traces: report.traces.into_iter().map(label_trace_dto).collect(),
+    }
+}
+
+fn label_trace_count_dto(count: lean_dup_eval::LabelTraceCount) -> LabelTraceCountDto {
+    LabelTraceCountDto {
+        resolved: count.resolved,
+        total: count.total,
+    }
+}
+
+fn label_trace_dto(trace: lean_dup_eval::LabelTrace) -> LabelTraceDto {
+    LabelTraceDto {
+        left: trace.left,
+        right: trace.right,
+        polarity: trace.polarity,
+        match_class: trace.match_class,
+        left_resolution: label_endpoint_resolution_dto(trace.left_resolution),
+        right_resolution: label_endpoint_resolution_dto(trace.right_resolution),
+        canonical_pair: trace.canonical_pair.map(|pair| LabelPairDto {
+            left: pair.left,
+            right: pair.right,
+        }),
+        generated: trace.generated,
+        ranked: trace.ranked,
+        rank: trace.rank,
+        visible: trace.visible,
+        lost_layer: trace.lost_layer,
+        reason: trace.reason,
+    }
+}
+
+fn label_endpoint_resolution_dto(resolution: lean_dup_eval::LabelEndpointResolution) -> LabelEndpointResolutionDto {
+    LabelEndpointResolutionDto {
+        requested: resolution.requested,
+        status: resolution.status,
+        candidates: resolution
+            .candidates
+            .into_iter()
+            .map(|candidate| LabelResolutionCandidateDto {
+                qualified_name: candidate.qualified_name,
+                origin: candidate.origin,
+                kind: candidate.kind,
+                visibility: candidate.visibility,
+                skipped: candidate.skipped,
             })
             .collect(),
     }

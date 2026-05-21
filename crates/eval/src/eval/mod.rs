@@ -14,6 +14,7 @@ pub use scoring::{
 };
 pub use stage_metrics::{CandidateStageSurvival, HardNegativeSurvival, SearchStageMetrics};
 pub use suites::{
-    EvalOutput, EvalRequest, EvaluationRunReport, ManualMathlibPrerequisites, ManualSuitePrerequisites,
-    PrerequisiteCheck, PrerequisiteStatus, run,
+    EvalOutput, EvalRequest, EvaluationRunReport, LabelEndpointResolution, LabelEndpointStatus, LabelLossLayer,
+    LabelResolutionCandidate, LabelResolutionReport, LabelResolutionStatus, LabelTrace, LabelTraceCount,
+    ManualMathlibPrerequisites, ManualSuitePrerequisites, PrerequisiteCheck, PrerequisiteStatus, run,
 };

@@ -742,6 +742,39 @@ impl OpenedIndex {
         })
     }
 
+    /// Hydrate declarations whose display name matches one of the requested names.
+    ///
+    /// This is intended for label and diagnostic resolution when a corpus uses
+    /// user-facing declaration names instead of fully-qualified Lean names. The
+    /// index still owns storage layout and returns ordinary hydrated
+    /// declarations; callers do not inspect tables or cache files.
+    pub fn declarations_with_display_names(&self, display_names: &[String]) -> Result<Vec<HydratedDeclaration>> {
+        if display_names.is_empty() {
+            return Ok(Vec::new());
+        }
+        perf::record_count(
+            CostClass::SqliteIndex,
+            "sqlite.hydrate.display_name_declarations",
+            display_names.len() as u64,
+        );
+        perf::measure_result(CostClass::SqliteIndex, "sqlite.hydrate_display_names", || {
+            let connection = open_readonly(&self.path)?;
+            let mut names = display_names.to_vec();
+            names.sort();
+            names.dedup();
+            let mut handles = Vec::new();
+            let mut statement = connection
+                .prepare("SELECT handle FROM declarations WHERE display_name = ?1 ORDER BY declaration_id")?;
+            for name in names {
+                let rows = statement.query_map(params![name], |row| row.get::<_, String>(0))?;
+                for row in rows {
+                    handles.push(DeclarationHandle(row?));
+                }
+            }
+            self.hydrate(&handles)
+        })
+    }
+
     pub fn cache_probe_results(&self, entries: &[ProbeCacheEntry]) -> Result<()> {
         if entries.is_empty() {
             return Ok(());

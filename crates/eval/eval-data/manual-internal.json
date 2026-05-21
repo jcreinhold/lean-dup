@@ -24,7 +24,7 @@
       "static_evidence_acceptable": true
     },
     {
-      "left": "omega_map",
+      "left": "FirstOrder.SetTheory.ZFC.Grothendieck.NaturalNumbers.omega_map",
       "right": "integer_omega_map",
       "polarity": "positive",
       "match_class": "exact-theorem-duplicate",
@@ -35,8 +35,8 @@
       "static_evidence_acceptable": true
     },
     {
-      "left": "zfSet_models_delta0Theory",
-      "right": "instZFSetModelsDelta0Theory",
+      "left": "FirstOrder.SetTheory.ZFC.ZFCModel.models_delta0Theory",
+      "right": "FirstOrder.SetTheory.ZFC.instZFSetModelsDelta0Theory",
       "polarity": "positive",
       "match_class": "replacement-candidate",
       "expected_stage_visibility": "visible",
@@ -46,7 +46,7 @@
       "static_evidence_acceptable": true
     },
     {
-      "left": "naturality_component",
+      "left": "IUT.Foundation.MorphismOfMutations.naturality_component",
       "right": "naturality_component_source_order",
       "polarity": "positive",
       "match_class": "binder-permutation-duplicate",
@@ -68,8 +68,8 @@
       "static_evidence_acceptable": true
     },
     {
-      "left": "omegaRecursiveGraph_functional",
-      "right": "naturality_component",
+      "left": "_private.KanProofs.ModelTheory.SetTheory.ZFC.Arithmetic.Nat.Recursion.0.FirstOrder.SetTheory.ZFC.omegaRecursiveGraph_functional",
+      "right": "IUT.Foundation.MorphismOfMutations.naturality_component",
       "polarity": "hard-negative",
       "match_class": "hard-negative",
       "expected_stage_visibility": "hidden",
