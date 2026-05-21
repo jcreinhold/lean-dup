@@ -814,6 +814,11 @@ fn audit_json_keeps_progress_and_profile_off_stdout() {
     if let Some(first_group) = payload["visible_groups"].as_array().unwrap().first() {
         assert!(first_group["id"].as_str().unwrap().contains('-'));
         assert!(!first_group["id"].as_str().unwrap().starts_with("review-"));
+        assert_eq!(first_group["family_id"], first_group["id"]);
+        assert!(first_group["pair_count"].as_u64().unwrap() >= 1);
+        assert!(first_group["pair_ids"].is_array());
+        assert!(first_group["pair_evidence"].is_array());
+        assert!(first_group["pair_evidence_truncated"].is_boolean());
         assert!(first_group["evidence"].is_array());
         if let Some(first_member) = first_group["members"].as_array().unwrap().first()
             && !first_member["source_span"].is_null()
@@ -994,7 +999,7 @@ fn audit_text_reports_queue_probe_and_provenance_explanations() {
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
 
     assert!(stdout.contains("report schema: lean-dup.report.v3"));
-    assert!(stdout.contains("visible groups emitted:"));
+    assert!(stdout.contains("visible families emitted:"));
     assert!(stdout.contains("visible queue:"));
     assert!(stdout.contains("hidden groups: total="));
     assert!(stdout.contains("probe summary: semantic probes disabled"));

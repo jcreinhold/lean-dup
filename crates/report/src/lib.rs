@@ -22,8 +22,8 @@ pub use reports::{
     EvalSemanticVerificationStageMetricsDto, EvalStageMetricsDto, EvalTimingMetricsDto, IndexReport,
     ManualMathlibPrerequisitesDto, ManualSuitePrerequisitesDto, PathReferenceReport, PerfReport, PerfWorkloadReport,
     PrerequisiteCheckDto, ReleaseIdentityReport, Report, RetrievalReport, ReviewDiagnosticsReport,
-    ReviewEvidenceReport, ReviewGroupReport, ReviewMemberReport, ReviewQueueCounts, ReviewReport,
-    SemanticVerificationReport, ShowReport, SourcePointReport, SourceReferenceReport, SourceSpanReport,
+    ReviewEvidenceReport, ReviewGroupReport, ReviewMemberReport, ReviewPairEvidenceReport, ReviewQueueCounts,
+    ReviewReport, SemanticVerificationReport, ShowReport, SourcePointReport, SourceReferenceReport, SourceSpanReport,
     WorkerDiagnosticsReport, audit_report, cache_cleanup_report, cache_diagnostics_report, diff_report, eval_report,
     show_report,
 };

@@ -448,8 +448,13 @@ mod tests {
 
     fn group(id: &str, evidence_mode: &str, visible: bool) -> AuditGroup {
         AuditGroup {
+            family_id: id.to_owned(),
             id: id.to_owned(),
             pair_id: id.to_owned(),
+            pair_count: 1,
+            pair_ids: vec![id.to_owned()],
+            pair_evidence: Vec::new(),
+            pair_evidence_truncated: false,
             relation: "exact-statement".to_owned(),
             members: Vec::new(),
             evidence: Vec::new(),

@@ -21,9 +21,9 @@ mod semantic_verification;
 mod source_refs;
 
 pub use audit::{
-    AuditEvidence, AuditGroup, AuditHiddenGroupCounts, AuditHiddenReason, AuditMember, AuditOutput, AuditProbeSummary,
-    AuditQueueCounts, AuditQueueSummary, AuditReplacementHint, AuditRequest, AuditRetrievalSummary, AuditReview,
-    AuditReviewDiagnostics, AuditSourceReference, AuditVisibility, AuditVisibilityOptions, DiffOutput,
+    AuditEvidence, AuditGroup, AuditHiddenGroupCounts, AuditHiddenReason, AuditMember, AuditOutput, AuditPairEvidence,
+    AuditProbeSummary, AuditQueueCounts, AuditQueueSummary, AuditReplacementHint, AuditRequest, AuditRetrievalSummary,
+    AuditReview, AuditReviewDiagnostics, AuditSourceReference, AuditVisibility, AuditVisibilityOptions, DiffOutput,
     SearchBaselineChange, SearchBaselineDiff, SearchBaselineGroup, ShowOutput, run_audit, run_diff, run_show,
 };
 pub use error::{Error, Result};

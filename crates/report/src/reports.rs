@@ -637,8 +637,13 @@ pub struct ReviewDiagnosticsReport {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ReviewGroupReport {
+    pub family_id: String,
     pub id: String,
     pub pair_id: String,
+    pub pair_count: usize,
+    pub pair_ids: Vec<String>,
+    pub pair_evidence: Vec<ReviewPairEvidenceReport>,
+    pub pair_evidence_truncated: bool,
     pub relation: String,
     pub members: Vec<ReviewMemberReport>,
     pub evidence: Vec<ReviewEvidenceReport>,
@@ -649,6 +654,26 @@ pub struct ReviewGroupReport {
     pub recommended_action: String,
     pub target_decl: Option<String>,
     pub target_module: Option<String>,
+    pub evidence_mode: String,
+    pub probe_summary: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub semantic_obligations: Vec<SearchSemanticObligationFact>,
+    pub local_caller_count: usize,
+    pub replacement_hint: Option<ReplacementHintReport>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ReviewPairEvidenceReport {
+    pub id: String,
+    pub pair_id: String,
+    pub relation: String,
+    pub members: Vec<ReviewMemberReport>,
+    pub evidence: Vec<ReviewEvidenceReport>,
+    pub signals: Vec<String>,
+    pub blockers: Vec<String>,
+    pub confidence: String,
+    pub review_priority: String,
+    pub recommended_action: String,
     pub evidence_mode: String,
     pub probe_summary: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -1237,8 +1262,13 @@ fn review_report(review: &AuditReview) -> ReviewReport {
 
 fn group_report(group: &AuditGroup) -> ReviewGroupReport {
     ReviewGroupReport {
+        family_id: group.family_id.clone(),
         id: group.id.clone(),
         pair_id: group.pair_id.clone(),
+        pair_count: group.pair_count,
+        pair_ids: group.pair_ids.clone(),
+        pair_evidence: group.pair_evidence.iter().map(pair_evidence_report).collect(),
+        pair_evidence_truncated: group.pair_evidence_truncated,
         relation: group.relation.clone(),
         members: group.members.iter().map(member_report).collect(),
         evidence: group.evidence.iter().map(evidence_report).collect(),
@@ -1254,6 +1284,26 @@ fn group_report(group: &AuditGroup) -> ReviewGroupReport {
         semantic_obligations: group.semantic_obligations.clone(),
         local_caller_count: group.local_caller_count,
         replacement_hint: group.replacement_hint.as_ref().map(replacement_hint_report),
+    }
+}
+
+fn pair_evidence_report(pair: &lean_dup_search::AuditPairEvidence) -> ReviewPairEvidenceReport {
+    ReviewPairEvidenceReport {
+        id: pair.id.clone(),
+        pair_id: pair.pair_id.clone(),
+        relation: pair.relation.clone(),
+        members: pair.members.iter().map(member_report).collect(),
+        evidence: pair.evidence.iter().map(evidence_report).collect(),
+        signals: pair.signals.clone(),
+        blockers: pair.blockers.clone(),
+        confidence: pair.confidence.clone(),
+        review_priority: pair.review_priority.clone(),
+        recommended_action: pair.recommended_action.clone(),
+        evidence_mode: pair.evidence_mode.clone(),
+        probe_summary: pair.probe_summary.clone(),
+        semantic_obligations: pair.semantic_obligations.clone(),
+        local_caller_count: pair.local_caller_count,
+        replacement_hint: pair.replacement_hint.as_ref().map(replacement_hint_report),
     }
 }
 

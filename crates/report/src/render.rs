@@ -298,10 +298,10 @@ fn render_audit(report: &AuditReport) -> String {
             "semantic reranking: {}",
             report.semantic_verification.semantic_reranking.version
         ),
-        format!("review groups: {}", report.review.group_count),
-        format!("visible groups: {}", report.visible_group_count),
+        format!("review pair groups: {}", report.review.group_count),
+        format!("visible families: {}", report.visible_group_count),
         format!(
-            "visible groups emitted: {} / {}{}",
+            "visible families emitted: {} / {}{}",
             report.visible_groups_emitted,
             report.visible_group_limit,
             if report.visible_groups_truncated {
@@ -344,6 +344,17 @@ fn render_audit(report: &AuditReport) -> String {
             "{}: {} {} {}{}",
             group.id, group.review_priority, group.recommended_action, group.relation, target
         ));
+        if group.pair_count > 1 {
+            lines.push(format!(
+                "  family: {} pairs{}",
+                group.pair_count,
+                if group.pair_evidence_truncated {
+                    " (summaries truncated)"
+                } else {
+                    ""
+                }
+            ));
+        }
         if let Some(hint) = &group.replacement_hint {
             lines.push(format!(
                 "  hint: import={} callers={} target_module={}",
@@ -360,6 +371,8 @@ fn render_audit(report: &AuditReport) -> String {
 
 fn push_group_detail(lines: &mut Vec<String>, group: &ReviewGroupReport) {
     lines.push(format!("group: {}", group.id));
+    lines.push(format!("family id: {}", group.family_id));
+    lines.push(format!("pair count: {}", group.pair_count));
     lines.push(format!("priority: {}", group.review_priority));
     lines.push(format!("action: {}", group.recommended_action));
     lines.push(format!("relation: {}", group.relation));
@@ -385,6 +398,24 @@ fn push_group_detail(lines: &mut Vec<String>, group: &ReviewGroupReport) {
     lines.push("evidence:".to_owned());
     for evidence in &group.evidence {
         lines.push(format!("  {}", evidence.summary));
+    }
+    if group.pair_count > 1 {
+        lines.push("pair evidence:".to_owned());
+        for pair in &group.pair_evidence {
+            lines.push(format!(
+                "  {}: {} {} {}",
+                pair.id, pair.review_priority, pair.recommended_action, pair.relation
+            ));
+            for member in &pair.members {
+                lines.push(format!("    member: {} {}", member.origin, member.qualified_name));
+            }
+            for evidence in &pair.evidence {
+                lines.push(format!("    evidence: {}", evidence.summary));
+            }
+        }
+        if group.pair_evidence_truncated {
+            lines.push("  pair evidence truncated in ordinary output; run show for full selected family".to_owned());
+        }
     }
     if !group.signals.is_empty() {
         lines.push(format!("signals: {}", group.signals.join(", ")));

@@ -18,10 +18,10 @@ The smallest public report interface is:
 - schema id `lean-dup.report.v3`;
 - grouped command/config metadata;
 - redacted workspace/cache path references;
-- bounded `visible_groups` plus total/emitted/limit/truncated counts;
+- bounded family-level `visible_groups` plus total/emitted/limit/truncated counts;
 - compact `review` diagnostics without full `review.groups`;
 - stable eval denominators and timing facts;
-- targeted `show` detail for one selected group.
+- targeted `show` detail for one selected family or pair.
 
 Rendering structure, truncation mechanics, raw worker/probe records, private
 paths, cache layout, storage tables, and forensic group assembly do not leak
@@ -53,9 +53,11 @@ visibility reconstruction, cache layout, or worker transport details.
 
 Audit JSON is summary-first. The stable surface is
 `report_schema_version = "lean-dup.report.v3"`, grouped command metadata,
-compact review diagnostics, bounded `visible_groups`, and the `explanations`
-object. Full forensic group detail belongs in targeted `show` output, not in
-ordinary audit JSON.
+compact review diagnostics, bounded family-level `visible_groups`, and the
+`explanations` object. A one-pair finding is represented as a one-pair family.
+When several pairs share one coherent cleanup action and target, search may
+surface them as one family with bounded pair summaries. Full forensic pair
+detail belongs in targeted `show` output, not in ordinary audit JSON.
 
 Representative shape:
 
@@ -167,19 +169,21 @@ When `visible_group_count = 0`, the text report explains why without requiring
 
 ## `show` Contract
 
-`show` explains one ranked group. It includes:
+`show` explains one review family. It accepts a family id, ranked pair-group id,
+or pair id. It includes:
 
 - redacted workspace/cache identity;
-- group id, action, relation, and target;
+- family id, pair count, action, relation, and target;
 - members with redacted source references;
 - bounded evidence facts and signals;
+- pair evidence summaries for a selected family;
 - evidence mode: `static`, `source-backed-not-importable`, or `proof-grade`;
 - typed semantic evidence status or the reason no semantic evidence is attached;
 - blockers, or `none`;
 - replacement target, import status, caller count, and replacement notes;
 - whether the group is visible or hidden under the active filter, and why.
 
-`show` may include full evidence for that selected group. It still does not
+`show` may include full evidence for that selected family. It still does not
 expose worker records, raw proof obligations, SQLite rows, retrieval keys,
 absolute private paths, cache layout, or source-scan implementation details.
 

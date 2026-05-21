@@ -9,6 +9,7 @@ use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexSto
 use lean_dup_project::{ResolvedWorkspace, WorkspaceRequest, resolve, resolve_workspace_mathlib};
 use lean_dup_worker::WorkerClient;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::baseline;
 use crate::ranking::{
@@ -34,6 +35,7 @@ use crate::source_refs::{SourceFactInput, collect_source_facts};
 use crate::{ProbePolicy, ProbeStatusBreakdown, Result};
 
 const DEFAULT_VISIBLE_GROUP_LIMIT: usize = 500;
+const ORDINARY_PAIR_SUMMARY_LIMIT: usize = 8;
 
 /// Request for a complete duplicate-audit computation.
 ///
@@ -204,8 +206,13 @@ pub struct AuditReviewDiagnostics {
 /// One audit group in the stable search workflow output.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AuditGroup {
+    pub family_id: String,
     pub id: String,
     pub pair_id: String,
+    pub pair_count: usize,
+    pub pair_ids: Vec<String>,
+    pub pair_evidence: Vec<AuditPairEvidence>,
+    pub pair_evidence_truncated: bool,
     pub relation: String,
     pub members: Vec<AuditMember>,
     pub evidence: Vec<AuditEvidence>,
@@ -222,6 +229,31 @@ pub struct AuditGroup {
     pub local_caller_count: usize,
     pub replacement_hint: Option<AuditReplacementHint>,
     pub visibility: AuditVisibility,
+}
+
+/// Bounded pair evidence carried by a review family.
+///
+/// Ordinary audit output uses these summaries to show why a family exists
+/// without exposing retrieval rows or forcing users to reconstruct the family
+/// from unbounded pair-shaped findings. `show` may request the full selected
+/// family evidence through the same stable shape.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AuditPairEvidence {
+    pub id: String,
+    pub pair_id: String,
+    pub relation: String,
+    pub members: Vec<AuditMember>,
+    pub evidence: Vec<AuditEvidence>,
+    pub signals: Vec<String>,
+    pub blockers: Vec<String>,
+    pub confidence: String,
+    pub review_priority: String,
+    pub recommended_action: String,
+    pub evidence_mode: String,
+    pub probe_summary: Option<String>,
+    pub semantic_obligations: Vec<SearchSemanticObligationFact>,
+    pub local_caller_count: usize,
+    pub replacement_hint: Option<AuditReplacementHint>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -494,16 +526,25 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
 pub fn run_show(request: AuditRequest, requested_group: &str, reporter: &mut Reporter) -> Result<ShowOutput> {
     let workflow = run_audit_workflow(request, reporter)?;
     let filter = review_filter(workflow.visibility, workflow.include_generated);
-    let group = workflow
-        .review
-        .groups
-        .iter()
-        .find(|group| group.id == requested_group)
-        .cloned()
+    let mut group = audit_families(workflow.review.groups.iter(), filter, usize::MAX)
+        .into_iter()
+        .find(|group| {
+            group.id == requested_group
+                || group.family_id == requested_group
+                || group.pair_id == requested_group
+                || group.pair_ids.iter().any(|pair_id| pair_id == requested_group)
+                || group.pair_evidence.iter().any(|pair| pair.id == requested_group)
+        })
         .ok_or_else(|| crate::Error::Search {
             message: format!("unknown audit group: {requested_group}"),
         })?;
-    let group = audit_group(&group, filter);
+    if group.id != requested_group
+        && (group.pair_id == requested_group
+            || group.pair_ids.iter().any(|pair_id| pair_id == requested_group)
+            || group.pair_evidence.iter().any(|pair| pair.id == requested_group))
+    {
+        group.id = requested_group.to_owned();
+    }
     let audit = project_audit_output(workflow);
     Ok(ShowOutput { audit, group })
 }
@@ -557,14 +598,17 @@ fn search_baseline_group(group: baseline::BaselineGroup) -> SearchBaselineGroup 
 
 fn project_audit_output(workflow: WorkflowOutput) -> AuditOutput {
     let filter = review_filter(workflow.visibility, workflow.include_generated);
-    let visible_ranked_groups = workflow.review.visible_groups(filter);
-    let visible_group_count = visible_ranked_groups.len();
+    let visible_families = audit_families(
+        workflow.review.visible_groups(filter),
+        filter,
+        ORDINARY_PAIR_SUMMARY_LIMIT,
+    );
+    let visible_group_count = visible_families.len();
     let visible_group_limit = DEFAULT_VISIBLE_GROUP_LIMIT;
     let visible_groups_truncated = visible_group_count > visible_group_limit;
-    let visible_groups = visible_ranked_groups
+    let visible_groups = visible_families
         .into_iter()
         .take(visible_group_limit)
-        .map(|group| audit_group(group, filter))
         .collect::<Vec<_>>();
     let queue_summary = audit_queue_summary(&workflow.review, filter, visible_groups.len(), visible_group_limit);
     let queue_counts = audit_queue_counts(&workflow.review);
@@ -674,8 +718,78 @@ fn audit_review_diagnostics(diagnostics: &RankingDiagnostics) -> AuditReviewDiag
     }
 }
 
-fn audit_group(group: &RankedGroup, filter: ReviewFilter) -> AuditGroup {
+fn audit_families<'a, I>(groups: I, filter: ReviewFilter, pair_summary_limit: usize) -> Vec<AuditGroup>
+where
+    I: IntoIterator<Item = &'a RankedGroup>,
+{
+    let mut families: Vec<(String, Vec<&RankedGroup>)> = Vec::new();
+    for group in groups {
+        let key = family_key(group);
+        if let Some((_, grouped)) = families.iter_mut().find(|(existing, _)| existing == &key) {
+            grouped.push(group);
+        } else {
+            families.push((key, vec![group]));
+        }
+    }
+
+    families
+        .into_iter()
+        .map(|(_key, groups)| audit_family(groups, filter, pair_summary_limit))
+        .collect()
+}
+
+fn audit_family(groups: Vec<&RankedGroup>, filter: ReviewFilter, pair_summary_limit: usize) -> AuditGroup {
+    let representative = groups
+        .first()
+        .copied()
+        .expect("audit families are built from non-empty groups");
+    let family_id = family_id(&groups);
+    let pair_count = groups.len();
+    let pair_ids = groups.iter().map(|group| group.pair_id.clone()).collect::<Vec<_>>();
+    let pair_evidence_truncated = pair_summary_limit != usize::MAX && pair_count > pair_summary_limit;
+    let pair_evidence = if pair_count > 1 {
+        groups
+            .iter()
+            .take(pair_summary_limit)
+            .map(|group| audit_pair_evidence(group))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let members = family_members(&groups);
+    let signals = family_strings(&groups, |group| &group.signals);
+    let blockers = family_strings(&groups, |group| &group.blockers);
+    let local_caller_count = groups.iter().map(|group| group.local_caller_count).sum();
+
     AuditGroup {
+        family_id: family_id.clone(),
+        id: family_id,
+        pair_id: representative.pair_id.clone(),
+        pair_count,
+        pair_ids,
+        pair_evidence,
+        pair_evidence_truncated,
+        relation: relation_label(representative.relation).to_owned(),
+        members,
+        evidence: representative.evidence.iter().map(audit_evidence).collect(),
+        signals,
+        blockers,
+        confidence: confidence_label(representative.confidence).to_owned(),
+        review_priority: priority_label(representative.review_priority).to_owned(),
+        recommended_action: action_label(representative.recommended_action).to_owned(),
+        target_decl: representative.target_decl.clone(),
+        target_module: representative.target_module.clone(),
+        evidence_mode: evidence_mode_label(representative.evidence_mode).to_owned(),
+        probe_summary: representative.probe_summary.clone(),
+        semantic_obligations: representative.semantic_obligations.clone(),
+        local_caller_count,
+        replacement_hint: representative.replacement_hint.as_ref().map(audit_replacement_hint),
+        visibility: audit_visibility(representative, filter),
+    }
+}
+
+fn audit_pair_evidence(group: &RankedGroup) -> AuditPairEvidence {
+    AuditPairEvidence {
         id: group.id.clone(),
         pair_id: group.pair_id.clone(),
         relation: relation_label(group.relation).to_owned(),
@@ -686,15 +800,78 @@ fn audit_group(group: &RankedGroup, filter: ReviewFilter) -> AuditGroup {
         confidence: confidence_label(group.confidence).to_owned(),
         review_priority: priority_label(group.review_priority).to_owned(),
         recommended_action: action_label(group.recommended_action).to_owned(),
-        target_decl: group.target_decl.clone(),
-        target_module: group.target_module.clone(),
         evidence_mode: evidence_mode_label(group.evidence_mode).to_owned(),
         probe_summary: group.probe_summary.clone(),
         semantic_obligations: group.semantic_obligations.clone(),
         local_caller_count: group.local_caller_count,
         replacement_hint: group.replacement_hint.as_ref().map(audit_replacement_hint),
-        visibility: audit_visibility(group, filter),
     }
+}
+
+fn family_key(group: &RankedGroup) -> String {
+    if coherent_family_action(group.recommended_action)
+        && let Some(target_decl) = group.target_decl.as_deref().filter(|target| !target.is_empty())
+    {
+        return format!("action:{}:target:{target_decl}", action_label(group.recommended_action));
+    }
+    format!("single:{}", group.id)
+}
+
+fn coherent_family_action(action: ReviewAction) -> bool {
+    matches!(
+        action,
+        ReviewAction::AlreadyInMathlib
+            | ReviewAction::LocalAlias
+            | ReviewAction::ReplaceLocalUses
+            | ReviewAction::InlinePrivateHelper
+    )
+}
+
+fn family_id(groups: &[&RankedGroup]) -> String {
+    if groups.len() == 1 {
+        return groups[0].id.clone();
+    }
+    let representative = groups[0];
+    let mut parts = vec![format!("action={}", action_label(representative.recommended_action))];
+    if let Some(target) = &representative.target_decl {
+        parts.push(format!("target={target}"));
+    }
+    parts.extend(groups.iter().map(|group| format!("pair={}", group.pair_id)));
+    parts.sort();
+    let encoded = serde_json::to_vec(&parts).expect("family id parts serialize");
+    let digest = Sha256::digest(&encoded);
+    let suffix = digest
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("family-{}-{suffix}", action_label(representative.recommended_action))
+}
+
+fn family_members(groups: &[&RankedGroup]) -> Vec<AuditMember> {
+    let mut seen = BTreeSet::new();
+    let mut members = Vec::new();
+    for group in groups {
+        for member in &group.members {
+            if seen.insert(member.declaration_id.clone()) {
+                members.push(audit_member(member));
+            }
+        }
+    }
+    members
+}
+
+fn family_strings<F>(groups: &[&RankedGroup], extract: F) -> Vec<String>
+where
+    F: Fn(&RankedGroup) -> &Vec<String>,
+{
+    let mut values = groups
+        .iter()
+        .flat_map(|group| extract(group).iter().cloned())
+        .collect::<Vec<_>>();
+    values.sort();
+    values.dedup();
+    values
 }
 
 fn audit_member(member: &ReviewMember) -> AuditMember {
@@ -778,7 +955,7 @@ fn audit_queue_summary(
             AuditHiddenReason::OtherBlocker => hidden.other_blockers += 1,
         }
     }
-    let visible = review.visible_groups(filter).len();
+    let visible = audit_families(review.visible_groups(filter), filter, 0).len();
     AuditQueueSummary {
         visible,
         emitted: visible_groups_emitted,
@@ -791,37 +968,41 @@ fn audit_queue_summary(
 
 fn audit_queue_counts(review: &RankedReview) -> AuditQueueCounts {
     AuditQueueCounts {
-        cleanup: review
-            .visible_groups(review_filter(AuditVisibilityOptions::default(), false))
-            .len(),
-        with_private: review
-            .visible_groups(review_filter(
+        cleanup: {
+            let filter = review_filter(AuditVisibilityOptions::default(), false);
+            audit_families(review.visible_groups(filter), filter, 0).len()
+        },
+        with_private: {
+            let filter = review_filter(
                 AuditVisibilityOptions {
                     include_private: true,
                     ..AuditVisibilityOptions::default()
                 },
                 false,
-            ))
-            .len(),
-        with_low_priority: review
-            .visible_groups(review_filter(
+            );
+            audit_families(review.visible_groups(filter), filter, 0).len()
+        },
+        with_low_priority: {
+            let filter = review_filter(
                 AuditVisibilityOptions {
                     include_low_priority: true,
                     ..AuditVisibilityOptions::default()
                 },
                 false,
-            ))
-            .len(),
-        diagnostics: review
-            .visible_groups(review_filter(
+            );
+            audit_families(review.visible_groups(filter), filter, 0).len()
+        },
+        diagnostics: {
+            let filter = review_filter(
                 AuditVisibilityOptions {
                     include_private: true,
                     include_low_priority: true,
                     diagnostics: true,
                 },
                 true,
-            ))
-            .len(),
+            );
+            audit_families(review.visible_groups(filter), filter, 0).len()
+        },
     }
 }
 
@@ -1014,4 +1195,98 @@ fn source_fact_declarations(
         }
     }
     selected.into_values().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn families_cluster_only_when_one_target_action_is_coherent() {
+        let filter = review_filter(AuditVisibilityOptions::default(), false);
+        let groups = [
+            ranked_group("g1", "p1", ReviewAction::ReplaceLocalUses, Some("Tiny.target")),
+            ranked_group("g2", "p2", ReviewAction::ReplaceLocalUses, Some("Tiny.target")),
+            ranked_group("g3", "p3", ReviewAction::LocalAlias, Some("Tiny.target")),
+        ];
+
+        let families = audit_families(groups.iter(), filter, ORDINARY_PAIR_SUMMARY_LIMIT);
+
+        assert_eq!(families.len(), 2);
+        let clustered = families
+            .iter()
+            .find(|family| family.recommended_action == "replace-local-uses")
+            .unwrap();
+        assert_eq!(clustered.pair_count, 2);
+        assert_eq!(clustered.pair_ids, vec!["p1", "p2"]);
+        assert!(clustered.id.starts_with("family-replace-local-uses-"));
+
+        let single = families
+            .iter()
+            .find(|family| family.recommended_action == "local-alias")
+            .unwrap();
+        assert_eq!(single.id, "g3");
+        assert_eq!(single.pair_count, 1);
+    }
+
+    #[test]
+    fn ordinary_family_pair_summaries_are_bounded() {
+        let filter = review_filter(AuditVisibilityOptions::default(), false);
+        let groups = (0..10)
+            .map(|index| {
+                ranked_group(
+                    &format!("g{index}"),
+                    &format!("p{index}"),
+                    ReviewAction::ReplaceLocalUses,
+                    Some("Tiny.target"),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let families = audit_families(groups.iter(), filter, 3);
+
+        assert_eq!(families.len(), 1);
+        assert_eq!(families[0].pair_count, 10);
+        assert_eq!(families[0].pair_evidence.len(), 3);
+        assert!(families[0].pair_evidence_truncated);
+    }
+
+    fn ranked_group(id: &str, pair_id: &str, action: ReviewAction, target_decl: Option<&str>) -> RankedGroup {
+        RankedGroup {
+            id: id.to_owned(),
+            pair_id: pair_id.to_owned(),
+            relation: ReviewRelation::ExactStatement,
+            members: vec![
+                member(&format!("{pair_id}:left"), "Tiny.left"),
+                member(&format!("{pair_id}:right"), "Tiny.right"),
+            ],
+            evidence: Vec::new(),
+            signals: Vec::new(),
+            blockers: Vec::new(),
+            confidence: ConfidenceTier::High,
+            review_priority: ReviewPriority::High,
+            recommended_action: action,
+            target_decl: target_decl.map(str::to_owned),
+            target_module: Some("Tiny".to_owned()),
+            evidence_mode: ReviewEvidenceMode::Static,
+            probe_summary: None,
+            semantic_obligations: Vec::new(),
+            local_caller_count: 0,
+            replacement_hint: None,
+        }
+    }
+
+    fn member(id: &str, name: &str) -> ReviewMember {
+        ReviewMember {
+            declaration_id: id.to_owned(),
+            origin: "workspace".to_owned(),
+            module: "Tiny".to_owned(),
+            qualified_name: name.to_owned(),
+            display_name: name.to_owned(),
+            kind: "theorem".to_owned(),
+            visibility: "public".to_owned(),
+            source_span: None,
+            status_flags: Vec::new(),
+        }
+    }
 }
