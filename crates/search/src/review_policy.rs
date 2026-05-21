@@ -28,7 +28,20 @@ pub(crate) fn symbolic_observation_visible(
     right: &HydratedDeclaration,
     contributions: &[KeyContribution],
 ) -> bool {
-    if !visibility_blockers(left, right, contributions).is_empty() {
+    let blockers = visibility_blockers(left, right, contributions);
+    if blockers.iter().any(|blocker| {
+        matches!(
+            blocker.as_str(),
+            "generated-declaration"
+                | "broad-head-only"
+                | "typeclass-instance-noise"
+                | "non-theorem-static-only"
+                | "non-public-declaration"
+        )
+    }) {
+        return false;
+    }
+    if blockers.contains("low-signal-declaration") {
         return false;
     }
     if theorem_like(left) && theorem_like(right) {
@@ -56,7 +69,9 @@ pub(crate) fn visibility_blockers(
     if broad_head_only(left, right, contributions) {
         blockers.insert("broad-head-only".to_owned());
     }
-    if typeclass_instance_noise(left) || typeclass_instance_noise(right) {
+    if kind_class(left) == DeclarationKindClass::TypeclassInstance
+        || kind_class(right) == DeclarationKindClass::TypeclassInstance
+    {
         blockers.insert("typeclass-instance-noise".to_owned());
     }
     let has_proof_grade_or_source_clone = has_contribution(contributions, "source-fingerprint")
@@ -68,11 +83,38 @@ pub(crate) fn visibility_blockers(
 }
 
 pub(crate) fn theorem_like(declaration: &HydratedDeclaration) -> bool {
-    matches!(declaration.kind.as_str(), "theorem" | "axiom")
+    kind_class(declaration) == DeclarationKindClass::TheoremLike
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DeclarationKindClass {
+    TheoremLike,
+    DefinitionLike,
+    TypeclassInstance,
+    DataType,
+    ConstructorOrProjection,
+    Unsupported,
+}
+
+pub(crate) fn kind_class(declaration: &HydratedDeclaration) -> DeclarationKindClass {
+    if declaration.kind == "instance" || declaration.display_name.starts_with("inst") {
+        return DeclarationKindClass::TypeclassInstance;
+    }
+    match declaration.kind.as_str() {
+        "theorem" | "axiom" => DeclarationKindClass::TheoremLike,
+        "def" | "abbrev" | "opaque" => DeclarationKindClass::DefinitionLike,
+        "inductive" | "structure" | "class" => DeclarationKindClass::DataType,
+        "constructor" | "projection" | "recursor" => DeclarationKindClass::ConstructorOrProjection,
+        _ => DeclarationKindClass::Unsupported,
+    }
 }
 
 fn is_generated(declaration: &HydratedDeclaration) -> bool {
     declaration.status_flags.iter().any(|flag| flag == "generated")
+        || matches!(
+            declaration.display_name.as_str(),
+            "recOn" | "casesOn" | "brecOn" | "binductionOn" | "below" | "noConfusion" | "noConfusionType" | "ctorIdx"
+        )
 }
 
 fn non_public(declaration: &HydratedDeclaration) -> bool {
@@ -81,10 +123,6 @@ fn non_public(declaration: &HydratedDeclaration) -> bool {
 
 fn low_signal(declaration: &HydratedDeclaration) -> bool {
     !declaration.low_signal_markers.is_empty()
-}
-
-fn typeclass_instance_noise(declaration: &HydratedDeclaration) -> bool {
-    declaration.kind == "instance" || declaration.display_name.starts_with("inst")
 }
 
 fn broad_head_only(left: &HydratedDeclaration, right: &HydratedDeclaration, contributions: &[KeyContribution]) -> bool {
@@ -111,12 +149,17 @@ fn has_contribution(contributions: &[KeyContribution], kind: &str) -> bool {
     contributions.iter().any(|contribution| contribution.kind == kind)
 }
 
+pub(crate) fn strong_low_signal_symbolic_support(contributions: &[KeyContribution]) -> bool {
+    has_contribution(contributions, "statement-fingerprint")
+        && has_contribution(contributions, "safe-permutation-fingerprint")
+}
+
 #[cfg(test)]
 mod tests {
     use lean_dup_index::{DeclarationHandle, HydratedDeclaration};
     use lean_dup_worker::{Fingerprints, RoleFeature};
 
-    use super::{symbolic_observation_visible, visibility_blockers};
+    use super::{DeclarationKindClass, kind_class, symbolic_observation_visible, visibility_blockers};
     use crate::retrieval::KeyContribution;
 
     #[test]
@@ -130,19 +173,91 @@ mod tests {
 
     #[test]
     fn default_symbolic_visibility_hides_diagnostic_static_pairs() {
-        let mut low_signal = declaration("Tiny.low", "theorem");
-        low_signal.low_signal_markers.push("broad_head:Eq".to_owned());
         let private = declaration("Tiny.private", "theorem").with_visibility("private");
         let definition = declaration("Tiny.defn", "def");
         let public_theorem = declaration("Tiny.public", "theorem");
         let statement = vec![contribution("statement-fingerprint")];
 
-        assert!(!symbolic_observation_visible(&low_signal, &public_theorem, &statement));
         assert!(!symbolic_observation_visible(&private, &public_theorem, &statement));
         assert!(!symbolic_observation_visible(&definition, &public_theorem, &statement));
 
         let blockers = visibility_blockers(&definition, &public_theorem, &statement);
         assert!(blockers.contains("non-theorem-static-only"));
+    }
+
+    #[test]
+    fn low_signal_theorem_pair_needs_independent_symbolic_support() {
+        let mut left = declaration("Tiny.ext", "theorem");
+        left.low_signal_markers.push("broad_head:Eq".to_owned());
+        let right = declaration("Tiny.ext_of_mem", "theorem");
+        let statement = vec![contribution("statement-fingerprint")];
+        let statement_and_permutation = vec![
+            contribution("statement-fingerprint"),
+            contribution("safe-permutation-fingerprint"),
+        ];
+
+        let blockers = visibility_blockers(&left, &right, &statement);
+
+        assert!(blockers.contains("low-signal-declaration"));
+        assert!(!blockers.contains("broad-head-only"));
+        assert!(!symbolic_observation_visible(&left, &right, &statement));
+        assert!(!symbolic_observation_visible(&left, &right, &statement_and_permutation));
+    }
+
+    #[test]
+    fn declaration_kind_classification_is_stable_and_kind_aware() {
+        assert_eq!(
+            kind_class(&declaration("Tiny.thm", "theorem")),
+            DeclarationKindClass::TheoremLike
+        );
+        assert_eq!(
+            kind_class(&declaration("Tiny.ax", "axiom")),
+            DeclarationKindClass::TheoremLike
+        );
+        assert_eq!(
+            kind_class(&declaration("Tiny.defn", "def")),
+            DeclarationKindClass::DefinitionLike
+        );
+        assert_eq!(
+            kind_class(&declaration("Tiny.abbrev", "abbrev")),
+            DeclarationKindClass::DefinitionLike
+        );
+        assert_eq!(
+            kind_class(&declaration("Tiny.opaque", "opaque")),
+            DeclarationKindClass::DefinitionLike
+        );
+        assert_eq!(
+            kind_class(&declaration("Tiny.Structure", "structure")),
+            DeclarationKindClass::DataType
+        );
+        assert_eq!(
+            kind_class(&declaration("Tiny.Class", "class")),
+            DeclarationKindClass::DataType
+        );
+        assert_eq!(
+            kind_class(&declaration("Tiny.ctor", "constructor")),
+            DeclarationKindClass::ConstructorOrProjection
+        );
+        assert_eq!(
+            kind_class(&declaration("Tiny.proj", "projection")),
+            DeclarationKindClass::ConstructorOrProjection
+        );
+        assert_eq!(
+            kind_class(&declaration("Tiny.instFoo", "def")),
+            DeclarationKindClass::TypeclassInstance
+        );
+    }
+
+    #[test]
+    fn generated_lean_recursors_are_hidden_by_stable_name_shape() {
+        let left = declaration("Tiny.Shape.recOn", "abbrev");
+        let right = declaration("Tiny.Shape.casesOn", "abbrev");
+        let statement = vec![contribution("statement-fingerprint")];
+
+        let blockers = visibility_blockers(&left, &right, &statement);
+
+        assert!(blockers.contains("generated-declaration"));
+        assert!(!symbolic_observation_visible(&left, &right, &statement));
     }
 
     fn declaration(name: &str, kind: &str) -> HydratedDeclaration {

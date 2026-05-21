@@ -299,16 +299,15 @@ fn rank_pair(anchor: &HydratedDeclaration, candidate: &RetrievedCandidate, input
     }
     if source_clone {
         signals.insert("source-clone".to_owned());
-        blockers.remove("non-theorem-static-only");
-    }
-    if verified_exact || specialization || verified_permuted || verified_replacement {
-        blockers.remove("non-theorem-static-only");
     }
     blockers.extend(review_policy::visibility_blockers(
         anchor,
         &candidate.declaration,
         &candidate.explanation.contributions,
     ));
+    if source_clone || verified_exact || specialization || verified_permuted || verified_replacement {
+        blockers.remove("non-theorem-static-only");
+    }
     if !exact && !permuted && !connective && !specialization && !source_clone && !near {
         blockers.insert("weak-feature-overlap".to_owned());
     }
@@ -341,14 +340,17 @@ fn rank_pair(anchor: &HydratedDeclaration, candidate: &RetrievedCandidate, input
         candidate.score,
         input.profile.min_near_score,
     );
+    if blockers.contains("low-signal-declaration") && priority < ReviewPriority::Low {
+        priority = ReviewPriority::Low;
+    }
     let mut confidence = confidence_for(relation, priority);
-    if blockers.contains("generated-declaration")
-        || blockers.contains("broad-head-only")
-        || blockers.contains("low-signal-declaration")
-        || blockers.contains("typeclass-instance-noise")
-        || blockers.contains("non-theorem-static-only")
-        || blockers.contains("unverified-proof-grade-evidence")
-    {
+    if blockers_force_noise(
+        &blockers,
+        relation,
+        source_clone,
+        verified_exact || specialization || verified_permuted || verified_replacement,
+        review_policy::strong_low_signal_symbolic_support(&candidate.explanation.contributions),
+    ) {
         priority = ReviewPriority::Noise;
         confidence = ConfidenceTier::Noise;
     }
@@ -383,6 +385,37 @@ fn rank_pair(anchor: &HydratedDeclaration, candidate: &RetrievedCandidate, input
         local_caller_count,
         replacement_hint: None,
     }
+}
+
+fn blockers_force_noise(
+    blockers: &BTreeSet<String>,
+    relation: ReviewRelation,
+    source_clone: bool,
+    proof_grade: bool,
+    strong_low_signal_symbolic_support: bool,
+) -> bool {
+    if blockers.iter().any(|blocker| {
+        matches!(
+            blocker.as_str(),
+            "generated-declaration"
+                | "broad-head-only"
+                | "typeclass-instance-noise"
+                | "non-theorem-static-only"
+                | "unverified-proof-grade-evidence"
+        )
+    }) {
+        return true;
+    }
+    if blockers.contains("low-signal-declaration") {
+        return !(proof_grade
+            || source_clone
+            || (strong_low_signal_symbolic_support
+                && matches!(
+                    relation,
+                    ReviewRelation::ExactStatement | ReviewRelation::PermutedStatement
+                )));
+    }
+    false
 }
 
 fn review_evidence_mode(
@@ -919,6 +952,140 @@ mod tests {
 
         assert!(review.visible_groups(private_filter).is_empty());
         assert_eq!(review.visible_groups(diagnostics_filter).len(), 1);
+    }
+
+    #[test]
+    fn low_signal_exact_statement_with_permutation_is_low_priority_not_noise() {
+        let mut left = declaration("workspace:Tiny:Tiny.ext", "workspace", "Tiny.ext");
+        left.low_signal_markers.push("short_statement".to_owned());
+        let right = declaration("workspace:Tiny:Tiny.ext_of_mem", "workspace", "Tiny.ext_of_mem");
+        let review = rank_candidates(input(vec![candidate_set(
+            left,
+            candidate_with_many(right, vec!["statement-fingerprint", "safe-permutation-fingerprint"]),
+        )]));
+        let cleanup_filter = ReviewFilter {
+            include_generated: false,
+            include_private: false,
+            include_diagnostics: false,
+            min_priority: ReviewPriority::Medium,
+        };
+        let low_priority_filter = ReviewFilter {
+            include_generated: false,
+            include_private: false,
+            include_diagnostics: false,
+            min_priority: ReviewPriority::Low,
+        };
+
+        let group = &review.groups[0];
+        assert_eq!(group.relation, ReviewRelation::ExactStatement);
+        assert_eq!(group.review_priority, ReviewPriority::Low);
+        assert!(group.blockers.contains(&"low-signal-declaration".to_owned()));
+        assert!(review.visible_groups(cleanup_filter).is_empty());
+        assert_eq!(review.visible_groups(low_priority_filter).len(), 1);
+    }
+
+    #[test]
+    fn low_signal_weak_overlap_remains_diagnostic() {
+        let mut left = declaration("workspace:Tiny:Tiny.left", "workspace", "Tiny.left");
+        left.low_signal_markers.push("short_statement".to_owned());
+        let right = declaration("workspace:Tiny:Tiny.right", "workspace", "Tiny.right");
+        let review = rank_candidates(input(vec![candidate_set(
+            left,
+            candidate_with_display(right, "role-feature", Some("Nat"), 8.0),
+        )]));
+        let broad_filter = ReviewFilter {
+            include_generated: false,
+            include_private: false,
+            include_diagnostics: false,
+            min_priority: ReviewPriority::Low,
+        };
+
+        let group = &review.groups[0];
+        assert_eq!(group.review_priority, ReviewPriority::Noise);
+        assert!(group.blockers.contains(&"low-signal-declaration".to_owned()));
+        assert!(review.visible_groups(broad_filter).is_empty());
+    }
+
+    #[test]
+    fn verified_reducible_definition_pair_is_actionable_kind_case() {
+        let mut left = declaration("workspace:Tiny:Tiny.norm", "workspace", "Tiny.norm");
+        left.kind = "def".to_owned();
+        let mut right = declaration("workspace:Tiny:Tiny.normFast", "workspace", "Tiny.normFast");
+        right.kind = "abbrev".to_owned();
+        let pair_id = "workspace:Tiny:Tiny.norm::workspace:Tiny:Tiny.normFast".to_owned();
+        let mut ranked_candidate = candidate(right, "statement-fingerprint", 100.0);
+        ranked_candidate.pair_id = pair_id.clone();
+        let mut evidence = BTreeMap::new();
+        evidence.insert(
+            pair_id.clone(),
+            SemanticEvidence {
+                pair_id,
+                kind: EvidenceKind::ReducibleDefinition,
+                status: EvidenceStatus::Verified,
+                obligation: crate::SearchSemanticObligationKind::ReducibleDefinition,
+                unavailable_reason: None,
+                summary: None,
+            },
+        );
+
+        let review = rank_candidates(RankingInput {
+            candidate_sets: &[candidate_set(left, ranked_candidate)],
+            semantic_evidence: &evidence,
+            source_facts: &SourceFacts::empty(),
+            profile: RankingProfile::default(),
+            comparison_policy: Box::leak(Box::new(ComparisonEvidencePolicy::default())),
+        });
+
+        let group = &review.groups[0];
+        assert_eq!(group.relation, ReviewRelation::ExactStatement);
+        assert_eq!(group.review_priority, ReviewPriority::High);
+        assert!(!group.blockers.contains(&"non-theorem-static-only".to_owned()));
+    }
+
+    #[test]
+    fn unverified_definition_pair_remains_diagnostic() {
+        let mut left = declaration("workspace:Tiny:Tiny.Shape", "workspace", "Tiny.Shape");
+        left.kind = "def".to_owned();
+        let mut right = declaration("workspace:Tiny:Tiny.Shape2", "workspace", "Tiny.Shape2");
+        right.kind = "abbrev".to_owned();
+        let review = rank_candidates(input(vec![candidate_set(
+            left,
+            candidate(right, "statement-fingerprint", 100.0),
+        )]));
+
+        let group = &review.groups[0];
+        assert_eq!(group.review_priority, ReviewPriority::Noise);
+        assert!(group.blockers.contains(&"non-theorem-static-only".to_owned()));
+    }
+
+    #[test]
+    fn typeclass_instance_noise_remains_diagnostic() {
+        let left = declaration("workspace:Tiny:Tiny.instFoo", "workspace", "Tiny.instFoo");
+        let right = declaration("workspace:Tiny:Tiny.instBar", "workspace", "Tiny.instBar");
+        let review = rank_candidates(input(vec![candidate_set(
+            left,
+            candidate(right, "statement-fingerprint", 100.0),
+        )]));
+
+        let group = &review.groups[0];
+        assert_eq!(group.review_priority, ReviewPriority::Noise);
+        assert!(group.blockers.contains(&"typeclass-instance-noise".to_owned()));
+    }
+
+    #[test]
+    fn broad_predicate_head_only_match_remains_diagnostic() {
+        let mut left = declaration("workspace:Tiny:Tiny.mem_left", "workspace", "Tiny.mem_left");
+        left.low_signal_markers.push("broad_head:Membership".to_owned());
+        let mut right = declaration("workspace:Tiny:Tiny.mem_right", "workspace", "Tiny.mem_right");
+        right.low_signal_markers.push("broad_head:Membership".to_owned());
+        let review = rank_candidates(input(vec![candidate_set(
+            left,
+            candidate_with_display(right, "role-feature", Some("Membership"), 8.0),
+        )]));
+
+        let group = &review.groups[0];
+        assert_eq!(group.review_priority, ReviewPriority::Noise);
+        assert!(group.blockers.contains(&"broad-head-only".to_owned()));
     }
 
     #[test]
