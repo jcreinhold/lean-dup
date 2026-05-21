@@ -1483,6 +1483,7 @@ mod tests {
                     score,
                 }],
             },
+            source_evidence: Vec::new(),
         }
     }
 

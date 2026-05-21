@@ -13,6 +13,7 @@ use lean_dup_index::{
 use crate::Result;
 
 const TOP_K_PER_WORKSPACE_DECLARATION: usize = 80;
+const SEMANTIC_LANE_TOP_K_PER_WORKSPACE_DECLARATION: usize = 24;
 const ROLE_POSTING_LIMIT: usize = 512;
 const BROAD_HEAD_POSTING_LIMIT: usize = 64;
 
@@ -52,6 +53,7 @@ pub struct RetrievedCandidate {
     pub declaration: HydratedDeclaration,
     pub score: f64,
     pub explanation: CandidateExplanation,
+    pub(crate) source_evidence: Vec<CandidateSourceEvidence>,
 }
 
 /// Why retrieval selected a candidate.
@@ -85,6 +87,32 @@ pub struct RetrievalDiagnostics {
 pub(crate) struct GeneratedPairEvidence {
     pub policy: String,
     pub contributions: Vec<KeyContribution>,
+    pub source_evidence: Vec<CandidateSourceEvidence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[allow(dead_code)]
+pub(crate) struct CandidateSourceEvidence {
+    pub source_id: String,
+    pub source_family: CandidateSourceFamily,
+    pub generation_rank: Option<usize>,
+    pub top_k_status: CandidateTopKStatus,
+    pub top_k_saturated: bool,
+    pub feature_families: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum CandidateSourceFamily {
+    Symbolic,
+    LeanSemantic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum CandidateTopKStatus {
+    Selected,
+    GeneratedNotSelected,
 }
 
 /// One semantic key contribution to a retrieved candidate.
@@ -249,6 +277,7 @@ fn retrieve_candidates_inner(workspace: &[HydratedDeclaration], indexes: &[Opene
                 explanation: CandidateExplanation {
                     contributions: candidate.contributions,
                 },
+                source_evidence: candidate.source_evidence,
             });
         }
         if !candidates.is_empty() {
@@ -305,6 +334,39 @@ struct SelectedCandidate {
     id: CandidateId,
     score: f64,
     contributions: Vec<KeyContribution>,
+    source_evidence: Vec<CandidateSourceEvidence>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum SemanticCandidateLane {
+    StatementMeaning,
+    BinderRoleShape,
+}
+
+impl SemanticCandidateLane {
+    fn all() -> [Self; 2] {
+        [Self::StatementMeaning, Self::BinderRoleShape]
+    }
+
+    fn source_id(self) -> &'static str {
+        match self {
+            Self::StatementMeaning => "lean-semantic.statement-meaning.v1",
+            Self::BinderRoleShape => "lean-semantic.binder-role-shape.v1",
+        }
+    }
+
+    fn accepts(self, contribution: &KeyContribution) -> bool {
+        match self {
+            Self::StatementMeaning => matches!(
+                contribution.kind.as_str(),
+                "statement-fingerprint"
+                    | "safe-permutation-fingerprint"
+                    | "connective-fingerprint"
+                    | "conclusion-fingerprint"
+            ),
+            Self::BinderRoleShape => contribution.kind == "role-feature",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -461,8 +523,10 @@ pub(crate) fn generated_pair_evidence(
     if !admitted {
         return Ok(None);
     }
+    let source_evidence = generated_pair_source_evidence(contributions.values());
     Ok(Some(GeneratedPairEvidence {
         policy: policy.label().to_owned(),
+        source_evidence,
         contributions: contributions.into_values().collect(),
     }))
 }
@@ -749,30 +813,68 @@ fn select_top(
         });
     }
 
-    let mut heap: BinaryHeap<Reverse<HeapEntry>> = BinaryHeap::new();
-    for (candidate_index, candidate) in candidates.iter().enumerate() {
-        let entry = HeapEntry {
-            score_micros: (candidate.score * 1_000_000.0).round() as i64,
-            tie_breaker: candidate_sort_key(&candidate.id),
-            candidate_index,
-        };
-        if heap.len() < TOP_K_PER_WORKSPACE_DECLARATION {
-            heap.push(Reverse(entry));
-        } else if let Some(mut smallest) = heap.peek_mut()
-            && entry > smallest.0
-        {
-            *smallest = Reverse(entry);
+    let symbolic_selection = select_by_score(&candidates, TOP_K_PER_WORKSPACE_DECLARATION, |candidate| {
+        candidate.score
+    });
+    let symbolic_saturated = candidates.len() > TOP_K_PER_WORKSPACE_DECLARATION;
+    let mut source_evidence_by_index = BTreeMap::<usize, Vec<CandidateSourceEvidence>>::new();
+    for (rank, candidate_index) in symbolic_selection.iter().enumerate() {
+        let candidate = &candidates[*candidate_index];
+        source_evidence_by_index
+            .entry(*candidate_index)
+            .or_default()
+            .push(selected_source_evidence(
+                "symbolic-retrieval",
+                CandidateSourceFamily::Symbolic,
+                rank + 1,
+                symbolic_saturated,
+                candidate.contributions.values(),
+            ));
+    }
+    for lane in SemanticCandidateLane::all() {
+        let lane_candidates = candidates
+            .iter()
+            .enumerate()
+            .filter(|(_, candidate)| semantic_lane_score(candidate, lane) > 0.0)
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        if lane_candidates.is_empty() {
+            continue;
+        }
+        let lane_saturated = lane_candidates.len() > SEMANTIC_LANE_TOP_K_PER_WORKSPACE_DECLARATION;
+        let lane_selection = select_subset_by_score(
+            &candidates,
+            &lane_candidates,
+            SEMANTIC_LANE_TOP_K_PER_WORKSPACE_DECLARATION,
+            |candidate| semantic_lane_score(candidate, lane),
+        );
+        for (rank, candidate_index) in lane_selection.iter().enumerate() {
+            let candidate = &candidates[*candidate_index];
+            source_evidence_by_index
+                .entry(*candidate_index)
+                .or_default()
+                .push(selected_source_evidence(
+                    lane.source_id(),
+                    CandidateSourceFamily::LeanSemantic,
+                    rank + 1,
+                    lane_saturated,
+                    candidate
+                        .contributions
+                        .values()
+                        .filter(|contribution| lane.accepts(contribution)),
+                ));
         }
     }
 
-    let mut selected = heap
+    let mut selected = source_evidence_by_index
         .into_iter()
-        .map(|Reverse(entry)| {
-            let candidate = candidates[entry.candidate_index].clone();
+        .map(|(candidate_index, source_evidence)| {
+            let candidate = candidates[candidate_index].clone();
             SelectedCandidate {
                 id: candidate.id,
                 score: candidate.score,
                 contributions: candidate.contributions.into_values().collect(),
+                source_evidence,
             }
         })
         .collect::<Vec<_>>();
@@ -785,6 +887,115 @@ fn select_top(
     });
     diagnostics.ranked_candidate_count += selected.len();
     selected
+}
+
+fn select_by_score(
+    candidates: &[CandidateAccumulator],
+    limit: usize,
+    score: impl Fn(&CandidateAccumulator) -> f64,
+) -> Vec<usize> {
+    let indices = (0..candidates.len()).collect::<Vec<_>>();
+    select_subset_by_score(candidates, &indices, limit, score)
+}
+
+fn select_subset_by_score(
+    candidates: &[CandidateAccumulator],
+    candidate_indices: &[usize],
+    limit: usize,
+    score: impl Fn(&CandidateAccumulator) -> f64,
+) -> Vec<usize> {
+    let mut heap: BinaryHeap<Reverse<HeapEntry>> = BinaryHeap::new();
+    for candidate_index in candidate_indices {
+        let candidate = &candidates[*candidate_index];
+        let entry = HeapEntry {
+            score_micros: (score(candidate) * 1_000_000.0).round() as i64,
+            tie_breaker: candidate_sort_key(&candidate.id),
+            candidate_index: *candidate_index,
+        };
+        if heap.len() < limit {
+            heap.push(Reverse(entry));
+        } else if let Some(mut smallest) = heap.peek_mut()
+            && entry > smallest.0
+        {
+            *smallest = Reverse(entry);
+        }
+    }
+    let mut selected = heap
+        .into_iter()
+        .map(|Reverse(entry)| entry.candidate_index)
+        .collect::<Vec<_>>();
+    selected.sort_by(|left, right| {
+        score(&candidates[*right])
+            .partial_cmp(&score(&candidates[*left]))
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| candidate_sort_key(&candidates[*left].id).cmp(&candidate_sort_key(&candidates[*right].id)))
+    });
+    selected
+}
+
+fn semantic_lane_score(candidate: &CandidateAccumulator, lane: SemanticCandidateLane) -> f64 {
+    candidate
+        .contributions
+        .values()
+        .filter(|contribution| lane.accepts(contribution))
+        .map(|contribution| contribution.score)
+        .sum()
+}
+
+fn selected_source_evidence<'a>(
+    source_id: &str,
+    source_family: CandidateSourceFamily,
+    generation_rank: usize,
+    top_k_saturated: bool,
+    contributions: impl Iterator<Item = &'a KeyContribution>,
+) -> CandidateSourceEvidence {
+    CandidateSourceEvidence {
+        source_id: source_id.to_owned(),
+        source_family,
+        generation_rank: Some(generation_rank),
+        top_k_status: CandidateTopKStatus::Selected,
+        top_k_saturated,
+        feature_families: feature_families_from_contributions(contributions),
+    }
+}
+
+fn generated_pair_source_evidence<'a>(
+    contributions: impl Iterator<Item = &'a KeyContribution> + Clone,
+) -> Vec<CandidateSourceEvidence> {
+    let mut source_evidence = vec![CandidateSourceEvidence {
+        source_id: "symbolic-retrieval".to_owned(),
+        source_family: CandidateSourceFamily::Symbolic,
+        generation_rank: None,
+        top_k_status: CandidateTopKStatus::GeneratedNotSelected,
+        top_k_saturated: false,
+        feature_families: feature_families_from_contributions(contributions.clone()),
+    }];
+    for lane in SemanticCandidateLane::all() {
+        let feature_families = feature_families_from_contributions(
+            contributions.clone().filter(|contribution| lane.accepts(contribution)),
+        );
+        if !feature_families.is_empty() {
+            source_evidence.push(CandidateSourceEvidence {
+                source_id: lane.source_id().to_owned(),
+                source_family: CandidateSourceFamily::LeanSemantic,
+                generation_rank: None,
+                top_k_status: CandidateTopKStatus::GeneratedNotSelected,
+                top_k_saturated: false,
+                feature_families,
+            });
+        }
+    }
+    source_evidence
+}
+
+fn feature_families_from_contributions<'a>(contributions: impl Iterator<Item = &'a KeyContribution>) -> Vec<String> {
+    let mut families = contributions
+        .map(KeyContribution::feature_family)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    families.sort();
+    families
 }
 
 fn policy_for_external(facts: &lean_dup_index::OpenedIndexFacts) -> CandidateGenerationPolicy {

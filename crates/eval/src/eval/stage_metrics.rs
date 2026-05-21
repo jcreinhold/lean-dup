@@ -14,6 +14,7 @@ use crate::eval::scoring::{CountMetric, GoldPair, ObservedRun, RecallAtK};
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct SearchStageMetrics {
     pub candidate_generation_recall: CountMetric,
+    pub candidate_source_recall: CandidateSourceRecall,
     pub candidate_stage_recall: CandidateStageSurvival,
     pub top_k_recall_before_final_ranking: Vec<RecallAtK>,
     pub ranked_recall: Vec<RecallAtK>,
@@ -36,6 +37,13 @@ pub struct CandidateStageSurvival {
     pub merged_generated: CountMetric,
     pub ranked: CountMetric,
     pub visible: CountMetric,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct CandidateSourceRecall {
+    pub symbolic_only: CountMetric,
+    pub semantic_lane_only: CountMetric,
+    pub merged: CountMetric,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -81,6 +89,24 @@ pub fn score(labels: &GoldLabels, observed: &ObservedRun, k_values: &[usize]) ->
         .iter()
         .filter(|pair| pair.merged_generated)
         .map(|pair| pair.pair.clone())
+        .collect::<FxHashSet<_>>();
+    let semantic_lane_generated_pairs = observed
+        .pairs
+        .iter()
+        .filter(|pair| {
+            pair.candidate_sources
+                .iter()
+                .any(|source| source.source_family == "lean-semantic")
+        })
+        .map(|pair| pair.pair.clone())
+        .collect::<FxHashSet<_>>();
+    let symbolic_only_generated_pairs = symbolic_generated_pairs
+        .difference(&semantic_lane_generated_pairs)
+        .cloned()
+        .collect::<FxHashSet<_>>();
+    let semantic_lane_only_generated_pairs = semantic_lane_generated_pairs
+        .difference(&symbolic_generated_pairs)
+        .cloned()
         .collect::<FxHashSet<_>>();
     let ranked_pairs = observed
         .pairs
@@ -130,6 +156,11 @@ pub fn score(labels: &GoldLabels, observed: &ObservedRun, k_values: &[usize]) ->
                 .filter(|pair| generated_pairs.contains(*pair))
                 .count(),
             total: labels.positives.len(),
+        },
+        candidate_source_recall: CandidateSourceRecall {
+            symbolic_only: count_labeled(&labels.positives, &symbolic_only_generated_pairs),
+            semantic_lane_only: count_labeled(&labels.positives, &semantic_lane_only_generated_pairs),
+            merged: count_labeled(&labels.positives, &merged_generated_pairs),
         },
         candidate_stage_recall: CandidateStageSurvival {
             symbolic_generated: count_labeled(&labels.positives, &symbolic_generated_pairs),
@@ -194,6 +225,11 @@ pub fn aggregate(_suite: &str, runs: &[&SearchStageMetrics]) -> SearchStageMetri
 
     SearchStageMetrics {
         candidate_generation_recall: sum_count(runs, |metrics| &metrics.candidate_generation_recall),
+        candidate_source_recall: CandidateSourceRecall {
+            symbolic_only: sum_count(runs, |metrics| &metrics.candidate_source_recall.symbolic_only),
+            semantic_lane_only: sum_count(runs, |metrics| &metrics.candidate_source_recall.semantic_lane_only),
+            merged: sum_count(runs, |metrics| &metrics.candidate_source_recall.merged),
+        },
         candidate_stage_recall: CandidateStageSurvival {
             symbolic_generated: sum_count(runs, |metrics| &metrics.candidate_stage_recall.symbolic_generated),
             merged_generated: sum_count(runs, |metrics| &metrics.candidate_stage_recall.merged_generated),
@@ -530,6 +566,39 @@ mod tests {
     }
 
     #[test]
+    fn source_recall_distinguishes_symbolic_and_semantic_lane_only_pairs() {
+        let labels = labels(["A:B", "C:D", "E:F"], []);
+        let observed = observed([
+            pair("A", "B", 1, true, "workspace", ["statement_fingerprint"]),
+            semantic_lane_pair("C", "D", 2, true, "workspace", ["role_conclusion_const"]),
+            merged_pair(
+                "E",
+                "F",
+                3,
+                true,
+                "workspace",
+                ["statement_fingerprint", "role_conclusion_const"],
+            ),
+        ]);
+
+        let metrics = score(&labels, &observed, &[3]);
+
+        assert_eq!(metrics.candidate_source_recall.symbolic_only.found, 1);
+        assert_eq!(metrics.candidate_source_recall.symbolic_only.total, 3);
+        assert_eq!(metrics.candidate_source_recall.semantic_lane_only.found, 1);
+        assert_eq!(metrics.candidate_source_recall.semantic_lane_only.total, 3);
+        assert_eq!(metrics.candidate_source_recall.merged.found, 3);
+        assert_eq!(
+            metrics.generated_candidate_count_by_source_family.get("symbolic"),
+            Some(&2)
+        );
+        assert_eq!(
+            metrics.generated_candidate_count_by_source_family.get("lean-semantic"),
+            Some(&2)
+        );
+    }
+
+    #[test]
     fn semantic_obligation_yield_aggregates_by_kind() {
         let mut first = SearchStageMetrics::default();
         first.semantic_verification.obligation_yield = vec![lean_dup_search::SearchSemanticObligationYield {
@@ -633,16 +702,93 @@ mod tests {
         }
     }
 
+    fn semantic_lane_pair<const F: usize>(
+        left: &str,
+        right: &str,
+        rank: usize,
+        shown: bool,
+        origin: &str,
+        families: [&str; F],
+    ) -> ObservedPair {
+        let mut pair = pair(left, right, rank, shown, origin, families);
+        pair.symbolic_generated = false;
+        pair.candidate_sources = candidate_sources_with_family(
+            left,
+            right,
+            origin,
+            "lean-semantic.binder-role-shape.v1",
+            "lean-semantic",
+            families,
+        );
+        pair
+    }
+
+    fn merged_pair<const F: usize>(
+        left: &str,
+        right: &str,
+        rank: usize,
+        shown: bool,
+        origin: &str,
+        families: [&str; F],
+    ) -> ObservedPair {
+        let mut pair = pair(left, right, rank, shown, origin, families);
+        pair.candidate_sources.push(candidate_source(
+            left,
+            right,
+            origin,
+            "lean-semantic.statement-meaning.v1",
+            "lean-semantic",
+            families,
+        ));
+        pair
+    }
+
     fn candidate_sources<const F: usize>(
         left: &str,
         right: &str,
         origin: &str,
         families: [&str; F],
     ) -> Vec<crate::eval::scoring::ObservedCandidateSource> {
+        vec![candidate_source(
+            left,
+            right,
+            origin,
+            "symbolic-retrieval",
+            "symbolic",
+            families,
+        )]
+    }
+
+    fn candidate_sources_with_family<const F: usize>(
+        left: &str,
+        right: &str,
+        origin: &str,
+        source_id: &str,
+        source_family: &str,
+        families: [&str; F],
+    ) -> Vec<crate::eval::scoring::ObservedCandidateSource> {
+        vec![candidate_source(
+            left,
+            right,
+            origin,
+            source_id,
+            source_family,
+            families,
+        )]
+    }
+
+    fn candidate_source<const F: usize>(
+        left: &str,
+        right: &str,
+        origin: &str,
+        source_id: &str,
+        source_family: &str,
+        families: [&str; F],
+    ) -> crate::eval::scoring::ObservedCandidateSource {
         let pair = GoldPair::new(left, right);
-        vec![crate::eval::scoring::ObservedCandidateSource {
-            source_id: "symbolic-retrieval".to_owned(),
-            source_family: "symbolic".to_owned(),
+        crate::eval::scoring::ObservedCandidateSource {
+            source_id: source_id.to_owned(),
+            source_family: source_family.to_owned(),
             pair_id: format!("{}::{}", pair.left, pair.right),
             left_declaration_id: left.to_owned(),
             right_declaration_id: right.to_owned(),
@@ -651,7 +797,7 @@ mod tests {
             top_k_status: "generated-not-selected".to_owned(),
             top_k_saturated: false,
             feature_families: families.into_iter().map(str::to_owned).collect(),
-        }]
+        }
     }
 
     fn gold_pair(text: &str) -> GoldPair {

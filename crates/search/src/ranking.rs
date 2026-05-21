@@ -990,6 +990,7 @@ mod tests {
                     score,
                 }],
             },
+            source_evidence: Vec::new(),
         }
     }
 
@@ -1011,6 +1012,7 @@ mod tests {
                     })
                     .collect(),
             },
+            source_evidence: Vec::new(),
         }
     }
 

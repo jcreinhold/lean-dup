@@ -45,16 +45,16 @@ Prompt 67 recorded these baseline facts:
 | KanProofs review candidate pairs | 13,581 |
 | KanProofs visible groups with `--private` | 5 |
 
-The refactor keeps symbolic retrieval as the only source. `symbolic` and `merged` therefore remain identical until a
-second real source is added. The important change is that this identity is now an explicit source fact, not an implicit
-assumption baked into eval.
+Prompt 69 added `lean-semantic` candidate-source facts behind the same boundary. `symbolic` and `merged` therefore no
+longer have to be identical: a pair can be selected by symbolic retrieval, by a Lean semantic lane, or by both.
 
 ## Source-Fact Contract
 
-Each generated observed pair carries one or more candidate-source facts. The current source fact is:
+Each generated observed pair carries one or more candidate-source facts. Current source ids include:
 
-- `source_id`: `symbolic-retrieval`;
-- `source_family`: `symbolic`;
+- `symbolic-retrieval` with source family `symbolic`;
+- `lean-semantic.statement-meaning.v1` with source family `lean-semantic`;
+- `lean-semantic.binder-role-shape.v1` with source family `lean-semantic`;
 - stable unordered declaration-pair id;
 - left and right declaration ids;
 - candidate origin;
@@ -68,9 +68,9 @@ keys, posting layout, scorer internals, or index storage facts.
 
 ## Verification Baseline
 
-The refactor must preserve default and hard-negative suite denominators unless a focused test records an intentional
-delta. After Prompt 68, eval should still report symbolic and merged source stages as equal, while also exposing
-source-family/source-id counts for future source separation.
+The boundary must preserve default and hard-negative visible behavior unless a focused test records an intentional
+delta. After Prompt 69, eval reports source-family/source-id counts and `candidate_source_recall` so semantic-lane-only,
+symbolic-only, and merged recall are separately measurable.
 
 ## Red Flag Review
 
@@ -80,8 +80,8 @@ source-family/source-id counts for future source separation.
 - Temporal decomposition: the split follows hidden knowledge ownership, not the chronological retrieval/ranking order.
 - Information leakage: feature keys, posting shape, fanout caps, worker rows, raw expressions, paths, and vector facts
   stay private.
-- Special-general mixture: the interface is somewhat general for candidate sources, but current functionality remains
-  symbolic-only.
+- Special-general mixture: the interface is general over candidate sources, while supported source ids remain concrete
+  and versioned.
 - Conjoined methods: source generation, eval denominators, and report projection remain separately owned.
 - Hard-to-describe public API: a candidate-source fact is one stable source explanation for one generated pair.
 - Implementation-detail comments: public comments describe source facts and invariants, not retrieval algorithms.

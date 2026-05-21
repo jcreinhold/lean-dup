@@ -1691,6 +1691,7 @@ fn observed_candidate_sources(
 fn source_family_label(family: SearchCandidateSourceFamily) -> &'static str {
     match family {
         SearchCandidateSourceFamily::Symbolic => "symbolic",
+        SearchCandidateSourceFamily::LeanSemantic => "lean-semantic",
     }
 }
 
@@ -2007,6 +2008,7 @@ mod tests {
             probe_unavailable: CountMetric { found, total },
             stage_metrics: SearchStageMetrics {
                 candidate_generation_recall: CountMetric { found, total },
+                candidate_source_recall: Default::default(),
                 candidate_stage_recall: Default::default(),
                 top_k_recall_before_final_ranking: vec![RecallAtK { k: 10, found, total }],
                 ranked_recall: vec![RecallAtK { k: 10, found, total }],

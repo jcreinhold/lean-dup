@@ -5,7 +5,9 @@ use serde::Serialize;
 use lean_dup_index::{HydratedDeclaration, OpenedIndex};
 
 use crate::pair_features::{SearchPairFeatures, feature_families, pair_features};
-use crate::retrieval::{GeneratedPairEvidence, RetrievalDiagnostics, generated_pair_evidence, retrieve_candidates};
+use crate::retrieval::{
+    CandidateSourceEvidence, GeneratedPairEvidence, RetrievalDiagnostics, generated_pair_evidence, retrieve_candidates,
+};
 use crate::review_policy;
 use crate::scorer::{
     SearchPairScoring, SearchScoringSummary, SearchScoringVariant, default_summary, score_observation,
@@ -107,6 +109,7 @@ pub struct SearchCandidateSourceFact {
 #[serde(rename_all = "kebab-case")]
 pub enum SearchCandidateSourceFamily {
     Symbolic,
+    LeanSemantic,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -164,7 +167,6 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
     let output = retrieve_candidates(request.workspace, request.comparison_indexes)?;
     let mut pairs = Vec::new();
     let mut ranked_pair_ids = BTreeSet::new();
-    let top_k_saturated = top_k_saturation_by_anchor(&output.diagnostics);
     for set in &output.candidate_sets {
         for (index, candidate) in set.candidates.iter().enumerate() {
             let shown = review_policy::symbolic_observation_visible(
@@ -190,7 +192,10 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
                 left_declaration_id: set.anchor.declaration_id.clone(),
                 right_declaration_id: candidate.declaration.declaration_id.clone(),
                 generated: true,
-                symbolic_generated: true,
+                symbolic_generated: candidate_has_source_family(
+                    &candidate.source_evidence,
+                    crate::retrieval::CandidateSourceFamily::Symbolic,
+                ),
                 merged_generated: true,
                 ranked: scored.ranked,
                 generation_policy: generation_policy_for_ranked(&candidate.declaration),
@@ -198,15 +203,12 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
                 shown: scored.shown,
                 origin: candidate.declaration.origin.clone(),
                 feature_families: feature_families.clone(),
-                candidate_sources: vec![symbolic_source_fact(
+                candidate_sources: source_facts(
                     &set.anchor,
                     &candidate.declaration,
                     &candidate.declaration.origin,
-                    Some(rank),
-                    SearchCandidateTopKStatus::Selected,
-                    top_k_saturated.contains(&set.anchor.declaration_id),
-                    feature_families,
-                )],
+                    &candidate.source_evidence,
+                ),
                 survived_shown_filter: scored.survived_shown_filter,
                 features,
                 scoring: scored.scoring,
@@ -264,7 +266,6 @@ pub fn observe_search_stages(request: SearchObservationRequest<'_>) -> Result<Se
     let output = retrieve_candidates(request.workspace, request.comparison_indexes)?;
     let mut pairs = Vec::new();
     let mut ranked_pair_ids = BTreeSet::new();
-    let top_k_saturated = top_k_saturation_by_anchor(&output.diagnostics);
     for set in &output.candidate_sets {
         for (index, candidate) in set.candidates.iter().enumerate() {
             let shown = review_policy::symbolic_observation_visible(
@@ -284,7 +285,10 @@ pub fn observe_search_stages(request: SearchObservationRequest<'_>) -> Result<Se
                 left_declaration_id: set.anchor.declaration_id.clone(),
                 right_declaration_id: candidate.declaration.declaration_id.clone(),
                 generated: true,
-                symbolic_generated: true,
+                symbolic_generated: candidate_has_source_family(
+                    &candidate.source_evidence,
+                    crate::retrieval::CandidateSourceFamily::Symbolic,
+                ),
                 merged_generated: true,
                 ranked: true,
                 generation_policy: generation_policy_for_ranked(&candidate.declaration),
@@ -292,15 +296,12 @@ pub fn observe_search_stages(request: SearchObservationRequest<'_>) -> Result<Se
                 shown,
                 origin: candidate.declaration.origin.clone(),
                 feature_families: feature_families.clone(),
-                candidate_sources: vec![symbolic_source_fact(
+                candidate_sources: source_facts(
                     &set.anchor,
                     &candidate.declaration,
                     &candidate.declaration.origin,
-                    Some(rank),
-                    SearchCandidateTopKStatus::Selected,
-                    top_k_saturated.contains(&set.anchor.declaration_id),
-                    feature_families,
-                )],
+                    &candidate.source_evidence,
+                ),
                 survived_shown_filter: shown,
             });
         }
@@ -448,35 +449,48 @@ fn retrieval_observation(
     }
 }
 
-fn top_k_saturation_by_anchor(diagnostics: &RetrievalDiagnostics) -> BTreeSet<String> {
-    diagnostics
-        .heap_truncations
-        .iter()
-        .map(|truncation| truncation.anchor_declaration_id.clone())
-        .collect()
-}
-
-fn symbolic_source_fact(
+fn source_facts(
     anchor: &HydratedDeclaration,
     candidate: &HydratedDeclaration,
     origin: &str,
-    generation_rank: Option<usize>,
-    top_k_status: SearchCandidateTopKStatus,
-    top_k_saturated: bool,
-    feature_families: Vec<String>,
-) -> SearchCandidateSourceFact {
-    SearchCandidateSourceFact {
-        source_id: "symbolic-retrieval".to_owned(),
-        source_family: SearchCandidateSourceFamily::Symbolic,
-        pair_id: stable_declaration_pair_id(&anchor.declaration_id, &candidate.declaration_id),
-        left_declaration_id: anchor.declaration_id.clone(),
-        right_declaration_id: candidate.declaration_id.clone(),
-        origin: origin.to_owned(),
-        generation_rank,
-        top_k_status,
-        top_k_saturated,
-        feature_families,
+    source_evidence: &[CandidateSourceEvidence],
+) -> Vec<SearchCandidateSourceFact> {
+    source_evidence
+        .iter()
+        .map(|source| SearchCandidateSourceFact {
+            source_id: source.source_id.clone(),
+            source_family: source_family(source.source_family),
+            pair_id: stable_declaration_pair_id(&anchor.declaration_id, &candidate.declaration_id),
+            left_declaration_id: anchor.declaration_id.clone(),
+            right_declaration_id: candidate.declaration_id.clone(),
+            origin: origin.to_owned(),
+            generation_rank: source.generation_rank,
+            top_k_status: top_k_status(source.top_k_status),
+            top_k_saturated: source.top_k_saturated,
+            feature_families: source.feature_families.clone(),
+        })
+        .collect()
+}
+
+fn source_family(family: crate::retrieval::CandidateSourceFamily) -> SearchCandidateSourceFamily {
+    match family {
+        crate::retrieval::CandidateSourceFamily::Symbolic => SearchCandidateSourceFamily::Symbolic,
+        crate::retrieval::CandidateSourceFamily::LeanSemantic => SearchCandidateSourceFamily::LeanSemantic,
     }
+}
+
+fn top_k_status(status: crate::retrieval::CandidateTopKStatus) -> SearchCandidateTopKStatus {
+    match status {
+        crate::retrieval::CandidateTopKStatus::Selected => SearchCandidateTopKStatus::Selected,
+        crate::retrieval::CandidateTopKStatus::GeneratedNotSelected => SearchCandidateTopKStatus::GeneratedNotSelected,
+    }
+}
+
+fn candidate_has_source_family(
+    source_evidence: &[CandidateSourceEvidence],
+    family: crate::retrieval::CandidateSourceFamily,
+) -> bool {
+    source_evidence.iter().any(|source| source.source_family == family)
 }
 
 fn stable_declaration_pair_id(left: &str, right: &str) -> String {
@@ -683,15 +697,7 @@ fn generated_observed_pair(
         shown: scored.shown,
         origin: candidate.origin.clone(),
         feature_families: feature_families.clone(),
-        candidate_sources: vec![symbolic_source_fact(
-            anchor,
-            candidate,
-            &candidate.origin,
-            None,
-            SearchCandidateTopKStatus::GeneratedNotSelected,
-            false,
-            feature_families,
-        )],
+        candidate_sources: source_facts(anchor, candidate, &candidate.origin, &evidence.source_evidence),
         survived_shown_filter: scored.survived_shown_filter,
         features,
         scoring: scored.scoring,
@@ -719,15 +725,7 @@ fn generated_stage_pair(
         shown: default_shown,
         origin: candidate.origin.clone(),
         feature_families: feature_families.clone(),
-        candidate_sources: vec![symbolic_source_fact(
-            anchor,
-            candidate,
-            &candidate.origin,
-            None,
-            SearchCandidateTopKStatus::GeneratedNotSelected,
-            false,
-            feature_families,
-        )],
+        candidate_sources: source_facts(anchor, candidate, &candidate.origin, &evidence.source_evidence),
         survived_shown_filter: default_shown,
     }
 }
@@ -799,8 +797,11 @@ mod tests {
         assert_eq!(pair.rank, None);
         assert_eq!(pair.generation_policy, "local_duplicate_audit");
         assert!(pair.feature_families.contains(&"statement_fingerprint".to_owned()));
-        assert_eq!(pair.candidate_sources.len(), 1);
-        let source = &pair.candidate_sources[0];
+        let source = pair
+            .candidate_sources
+            .iter()
+            .find(|source| source.source_family == SearchCandidateSourceFamily::Symbolic)
+            .expect("symbolic source fact");
         assert_eq!(source.source_id, "symbolic-retrieval");
         assert_eq!(source.source_family, SearchCandidateSourceFamily::Symbolic);
         assert_eq!(source.top_k_status, SearchCandidateTopKStatus::GeneratedNotSelected);
@@ -916,6 +917,47 @@ mod tests {
     }
 
     #[test]
+    fn lean_semantic_lane_can_rescue_candidate_outside_symbolic_top_k() {
+        let rows = semantic_lane_rescue_rows();
+        let observation = observe_search_stages(SearchObservationRequest {
+            workspace: &rows,
+            comparison_indexes: &[],
+            tracked_pairs: &[],
+            scoring_variant: SearchScoringVariant::SymbolicOnly,
+        })
+        .unwrap();
+
+        let rescued = observation
+            .pairs
+            .iter()
+            .find(|pair| {
+                (pair.left == "Synthetic.anchor" && pair.right == "Synthetic.role_only")
+                    || (pair.left == "Synthetic.role_only" && pair.right == "Synthetic.anchor")
+            })
+            .expect("role lane rescued pair");
+
+        assert!(rescued.generated);
+        assert!(rescued.ranked);
+        assert!(!rescued.symbolic_generated);
+        assert!(rescued.merged_generated);
+        assert!(
+            rescued
+                .candidate_sources
+                .iter()
+                .all(|source| !source.feature_families.contains(&"statement_fingerprint".to_owned()))
+        );
+        let lane = rescued
+            .candidate_sources
+            .iter()
+            .find(|source| source.source_id == "lean-semantic.binder-role-shape.v1")
+            .expect("binder-role lane source");
+        assert_eq!(lane.source_family, SearchCandidateSourceFamily::LeanSemantic);
+        assert_eq!(lane.top_k_status, SearchCandidateTopKStatus::Selected);
+        assert_eq!(lane.generation_rank, Some(1));
+        assert!(lane.feature_families.contains(&"role_conclusion_const".to_owned()));
+    }
+
+    #[test]
     fn compact_stage_observation_rejects_ablation_variants() {
         let rows = generated_rows(3);
         let error = observe_search_stages(SearchObservationRequest {
@@ -962,5 +1004,38 @@ mod tests {
                 low_signal_markers: Vec::new(),
             })
             .collect()
+    }
+
+    fn semantic_lane_rescue_rows() -> Vec<HydratedDeclaration> {
+        let mut rows = Vec::new();
+        let mut anchor = generated_rows(1).remove(0);
+        anchor.declaration_id = "synthetic:anchor".to_owned();
+        anchor.qualified_name = "Synthetic.anchor".to_owned();
+        anchor.display_name = "anchor".to_owned();
+        anchor.handle = DeclarationHandle::from_fixture_id(anchor.declaration_id.clone());
+        anchor.fingerprints.statement = "anchor-statement".to_owned();
+        anchor.role_features[0].key = "rescue-role".to_owned();
+        rows.push(anchor.clone());
+
+        for index in 0..90 {
+            let mut row = anchor.clone();
+            row.declaration_id = format!("synthetic:statement:{index}");
+            row.qualified_name = format!("Synthetic.statement_{index}");
+            row.display_name = format!("statement_{index}");
+            row.handle = DeclarationHandle::from_fixture_id(row.declaration_id.clone());
+            row.fingerprints.statement = "anchor-statement".to_owned();
+            row.role_features[0].key = format!("other-role-{index}");
+            rows.push(row);
+        }
+
+        let mut role_only = anchor;
+        role_only.declaration_id = "synthetic:role-only".to_owned();
+        role_only.qualified_name = "Synthetic.role_only".to_owned();
+        role_only.display_name = "role_only".to_owned();
+        role_only.handle = DeclarationHandle::from_fixture_id(role_only.declaration_id.clone());
+        role_only.fingerprints.statement = "role-only-statement".to_owned();
+        role_only.role_features[0].key = "rescue-role".to_owned();
+        rows.push(role_only);
+        rows
     }
 }

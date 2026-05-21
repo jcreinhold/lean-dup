@@ -711,6 +711,7 @@ fn observed_from_symbolic(suite: &str, output: &SearchObservation, timings: Timi
                         source_id: source.source_id.clone(),
                         source_family: match source.source_family {
                             lean_dup_search::SearchCandidateSourceFamily::Symbolic => "symbolic".to_owned(),
+                            lean_dup_search::SearchCandidateSourceFamily::LeanSemantic => "lean-semantic".to_owned(),
                         },
                         pair_id: source.pair_id.clone(),
                         left_declaration_id: source.left_declaration_id.clone(),

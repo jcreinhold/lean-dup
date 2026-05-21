@@ -188,6 +188,7 @@ pub struct EvalTimingMetricsDto {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct EvalStageMetricsDto {
     pub candidate_generation_recall: EvalCountMetricDto,
+    pub candidate_source_recall: EvalCandidateSourceRecallDto,
     pub candidate_stage_recall: EvalCandidateStageSurvivalDto,
     pub top_k_recall_before_final_ranking: Vec<EvalRecallAtKDto>,
     pub ranked_recall: Vec<EvalRecallAtKDto>,
@@ -210,6 +211,13 @@ pub struct EvalCandidateStageSurvivalDto {
     pub merged_generated: EvalCountMetricDto,
     pub ranked: EvalCountMetricDto,
     pub visible: EvalCountMetricDto,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct EvalCandidateSourceRecallDto {
+    pub symbolic_only: EvalCountMetricDto,
+    pub semantic_lane_only: EvalCountMetricDto,
+    pub merged: EvalCountMetricDto,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -843,6 +851,13 @@ fn eval_metrics_dto(metrics: lean_dup_eval::EvaluationMetrics) -> EvalMetricsDto
         probe_unavailable: eval_count_metric_dto(metrics.probe_unavailable),
         stage_metrics: EvalStageMetricsDto {
             candidate_generation_recall: eval_count_metric_dto(metrics.stage_metrics.candidate_generation_recall),
+            candidate_source_recall: EvalCandidateSourceRecallDto {
+                symbolic_only: eval_count_metric_dto(metrics.stage_metrics.candidate_source_recall.symbolic_only),
+                semantic_lane_only: eval_count_metric_dto(
+                    metrics.stage_metrics.candidate_source_recall.semantic_lane_only,
+                ),
+                merged: eval_count_metric_dto(metrics.stage_metrics.candidate_source_recall.merged),
+            },
             candidate_stage_recall: EvalCandidateStageSurvivalDto {
                 symbolic_generated: eval_count_metric_dto(
                     metrics.stage_metrics.candidate_stage_recall.symbolic_generated,
