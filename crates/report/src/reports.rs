@@ -300,11 +300,15 @@ pub fn path_reference(path: &Path) -> PathReferenceReport {
 
 pub(crate) fn path_diagnostic_label(path: &Path) -> String {
     let reference = path_reference(path);
-    format!("{} {}", reference.kind, reference.fingerprint)
+    path_reference_label(&reference)
 }
 
 pub(crate) fn cache_root_diagnostic_label(path: &Path) -> String {
     format!("cache-root {}", path_fingerprint(path))
+}
+
+pub(crate) fn path_reference_label(reference: &PathReferenceReport) -> String {
+    format!("{} {}", reference.kind, reference.fingerprint)
 }
 
 fn serialize_path_ref<S>(path: &Path, serializer: S) -> Result<S::Ok, S::Error>
@@ -385,7 +389,9 @@ pub struct AuditReport {
 
 #[derive(Debug, Serialize)]
 pub struct AuditWorkspaceReport {
+    #[serde(serialize_with = "serialize_path_ref")]
     pub requested_workspace: PathBuf,
+    #[serde(serialize_with = "serialize_path_ref")]
     pub lake_root: PathBuf,
     pub selected_roots: Vec<String>,
     pub source_count: usize,
@@ -393,6 +399,7 @@ pub struct AuditWorkspaceReport {
 
 #[derive(Debug, Serialize)]
 pub struct AuditCacheReport {
+    #[serde(serialize_with = "serialize_cache_root_ref")]
     pub root: PathBuf,
     pub fingerprint: String,
 }
@@ -418,10 +425,13 @@ pub struct ReviewProfileCounts {
 #[derive(Debug, Serialize)]
 pub struct ShowReport {
     pub status: &'static str,
+    #[serde(serialize_with = "serialize_path_ref")]
     pub requested_workspace: PathBuf,
+    #[serde(serialize_with = "serialize_path_ref")]
     pub lake_root: PathBuf,
     pub selected_roots: Vec<String>,
     pub source_count: usize,
+    #[serde(serialize_with = "serialize_cache_root_ref")]
     pub cache_root: PathBuf,
     pub cache_fingerprint: String,
     pub group: ReviewGroupReport,
@@ -431,10 +441,13 @@ pub struct ShowReport {
 #[derive(Debug, Serialize)]
 pub struct DiffReport {
     pub status: &'static str,
+    #[serde(serialize_with = "serialize_path_ref")]
     pub requested_workspace: PathBuf,
+    #[serde(serialize_with = "serialize_path_ref")]
     pub lake_root: PathBuf,
     pub selected_roots: Vec<String>,
     pub source_count: usize,
+    #[serde(serialize_with = "serialize_cache_root_ref")]
     pub cache_root: PathBuf,
     pub cache_fingerprint: String,
     pub diff: BaselineDiffReport,
@@ -444,7 +457,7 @@ pub struct DiffReport {
 pub struct RetrievalReport {
     pub candidate_count: usize,
     pub hydrated_external_count: usize,
-    pub pruned_postings: usize,
+    pub pruned_feature_fanouts: usize,
     pub heap_truncations: usize,
 }
 
@@ -526,6 +539,7 @@ pub struct ReviewGroupReport {
     pub target_module: Option<String>,
     pub evidence_mode: String,
     pub probe_summary: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub semantic_obligations: Vec<SearchSemanticObligationFact>,
     pub local_caller_count: usize,
     pub replacement_hint: Option<ReplacementHintReport>,
@@ -546,7 +560,7 @@ pub struct ReviewMemberReport {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SourceSpanReport {
-    pub file: String,
+    pub file: PathReferenceReport,
     pub start: SourcePointReport,
     pub end: SourcePointReport,
 }
@@ -579,7 +593,7 @@ pub struct ReplacementHintReport {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SourceReferenceReport {
-    pub file: PathBuf,
+    pub file: PathReferenceReport,
     pub line: usize,
     pub column: usize,
     pub text: String,
@@ -588,6 +602,7 @@ pub struct SourceReferenceReport {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BaselineDiffReport {
     pub baseline: String,
+    #[serde(serialize_with = "serialize_path_ref")]
     pub baseline_path: PathBuf,
     pub appeared: Vec<BaselineGroupReport>,
     pub disappeared: Vec<BaselineGroupReport>,
@@ -614,7 +629,7 @@ pub struct BaselineChangeReport {
 
 pub fn eval_report(report: EvalOutput) -> EvalReportDto {
     EvalReportDto {
-        report_schema_version: "lean-dup.eval-report.v1",
+        report_schema_version: crate::report_contract::REPORT_SCHEMA_VERSION,
         status: report.status,
         suite: report.suite,
         scorer_version: report.scorer_version,
@@ -793,7 +808,7 @@ pub fn audit_report(output: AuditOutput) -> AuditReport {
     let retrieval = RetrievalReport {
         candidate_count: output.retrieval.candidate_count,
         hydrated_external_count: output.retrieval.hydrated_external_count,
-        pruned_postings: output.retrieval.pruned_feature_fanout_count,
+        pruned_feature_fanouts: output.retrieval.pruned_feature_fanout_count,
         heap_truncations: output.retrieval.heap_truncations,
     };
     let comparison_provenance = output
@@ -1034,7 +1049,7 @@ fn member_report(member: &AuditMember) -> ReviewMemberReport {
         kind: member.kind.clone(),
         visibility: member.visibility.clone(),
         source_span: member.source_span.as_ref().map(|span| SourceSpanReport {
-            file: span.file.clone(),
+            file: path_reference(Path::new(&span.file)),
             start: SourcePointReport {
                 line: span.start.line as usize,
                 column: span.start.column as usize,
@@ -1068,7 +1083,7 @@ fn replacement_hint_report(hint: &AuditReplacementHint) -> ReplacementHintReport
             .displayed_callers
             .iter()
             .map(|caller| SourceReferenceReport {
-                file: caller.file.clone(),
+                file: path_reference(&caller.file),
                 line: caller.line,
                 column: caller.column,
                 text: caller.text.clone(),

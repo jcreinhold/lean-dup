@@ -3,7 +3,7 @@ use lean_dup_search::ReviewProfile;
 use crate::report_contract::GroupExplanation;
 use crate::reports::{
     AuditReport, CacheCleanupReportDto, DiffReport, DoctorReport, EvalReportDto, IndexReport, PerfReport, Report,
-    ReviewGroupReport, ShowReport, cache_root_diagnostic_label, path_diagnostic_label,
+    ReviewGroupReport, ShowReport, cache_root_diagnostic_label, path_diagnostic_label, path_reference_label,
 };
 
 pub fn render_text(report: &Report) -> String {
@@ -173,11 +173,14 @@ fn render_show(report: &ShowReport) -> String {
     let mut lines = vec![
         "command: show".to_owned(),
         format!("status: {}", report.status),
-        format!("requested workspace: {}", report.requested_workspace.display()),
-        format!("resolved Lake root: {}", report.lake_root.display()),
+        format!(
+            "requested workspace: {}",
+            path_diagnostic_label(&report.requested_workspace)
+        ),
+        format!("resolved Lake root: {}", path_diagnostic_label(&report.lake_root)),
         format!("selected roots: {}", report.selected_roots.join(", ")),
         format!("source files: {}", report.source_count),
-        format!("cache root: {}", report.cache_root.display()),
+        format!("cache root: {}", cache_root_diagnostic_label(&report.cache_root)),
         format!("cache fingerprint: {}", report.cache_fingerprint),
     ];
     lines.push(String::new());
@@ -190,14 +193,17 @@ fn render_diff(report: &DiffReport) -> String {
     let mut lines = vec![
         "command: diff".to_owned(),
         format!("status: {}", report.status),
-        format!("requested workspace: {}", report.requested_workspace.display()),
-        format!("resolved Lake root: {}", report.lake_root.display()),
+        format!(
+            "requested workspace: {}",
+            path_diagnostic_label(&report.requested_workspace)
+        ),
+        format!("resolved Lake root: {}", path_diagnostic_label(&report.lake_root)),
         format!("selected roots: {}", report.selected_roots.join(", ")),
         format!("source files: {}", report.source_count),
-        format!("cache root: {}", report.cache_root.display()),
+        format!("cache root: {}", cache_root_diagnostic_label(&report.cache_root)),
         format!("cache fingerprint: {}", report.cache_fingerprint),
         format!("baseline: {}", report.diff.baseline),
-        format!("baseline path: {}", report.diff.baseline_path.display()),
+        format!("baseline path: {}", path_diagnostic_label(&report.diff.baseline_path)),
         format!("appeared: {}", report.diff.appeared.len()),
         format!("disappeared: {}", report.diff.disappeared.len()),
         format!("changed: {}", report.diff.changed.len()),
@@ -246,12 +252,15 @@ fn render_audit(report: &AuditReport) -> String {
         format!("status: {}", report.status),
         format!(
             "requested workspace: {}",
-            report.workspace.requested_workspace.display()
+            path_diagnostic_label(&report.workspace.requested_workspace)
         ),
-        format!("resolved Lake root: {}", report.workspace.lake_root.display()),
+        format!(
+            "resolved Lake root: {}",
+            path_diagnostic_label(&report.workspace.lake_root)
+        ),
         format!("selected roots: {}", report.workspace.selected_roots.join(", ")),
         format!("source files: {}", report.workspace.source_count),
-        format!("cache root: {}", report.cache.root.display()),
+        format!("cache root: {}", cache_root_diagnostic_label(&report.cache.root)),
         format!("cache fingerprint: {}", report.cache.fingerprint),
         format!("include private: {}", report.options.include_private),
         format!("compare mathlib: {}", report.options.compare_mathlib),
@@ -354,7 +363,7 @@ fn push_group_detail(lines: &mut Vec<String>, group: &ReviewGroupReport) {
         let span = member
             .source_span
             .as_ref()
-            .map(|span| format!(" {}:{}", span.file, span.start.line))
+            .map(|span| format!(" {}:{}", path_reference_label(&span.file), span.start.line))
             .unwrap_or_default();
         lines.push(format!(
             "  {} {} {}{}",
@@ -385,7 +394,7 @@ fn push_group_detail(lines: &mut Vec<String>, group: &ReviewGroupReport) {
         for caller in &hint.displayed_callers {
             lines.push(format!(
                 "  caller {}:{}:{} {}",
-                caller.file.display(),
+                path_reference_label(&caller.file),
                 caller.line,
                 caller.column,
                 caller.text

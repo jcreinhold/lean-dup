@@ -392,7 +392,7 @@ fn eval_default_json_contains_raw_metric_counts() {
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let payload: Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(payload["command"], "eval");
-    assert_eq!(payload["report_schema_version"], "lean-dup.eval-report.v1");
+    assert_eq!(payload["report_schema_version"], "lean-dup.report.v3");
     assert_eq!(payload["status"], "ok");
     assert_eq!(payload["scorer_version"], "lean-dup.symbolic-scorer.v1");
     assert_eq!(payload["metrics"]["suite"], "default");
@@ -755,6 +755,8 @@ fn audit_json_keeps_progress_and_profile_off_stdout() {
     assert!(payload["review"]["groups"].is_null());
     assert!(payload["review"]["group_count"].as_u64().unwrap() >= payload["visible_groups_emitted"].as_u64().unwrap());
     assert!(payload["visible_groups"].is_array());
+    assert!(!stdout.contains(repo_root().to_string_lossy().as_ref()));
+    assert!(!stdout.contains("pruned_postings"));
     assert_eq!(
         payload["review_policy"]["version"],
         "lean-dup.symbolic-review-policy.v2"
@@ -763,6 +765,17 @@ fn audit_json_keeps_progress_and_profile_off_stdout() {
         assert!(first_group["id"].as_str().unwrap().contains('-'));
         assert!(!first_group["id"].as_str().unwrap().starts_with("review-"));
         assert!(first_group["evidence"].is_array());
+        if let Some(first_member) = first_group["members"].as_array().unwrap().first()
+            && !first_member["source_span"].is_null()
+        {
+            assert_eq!(first_member["source_span"]["file"]["kind"], "workspace-root");
+            assert!(
+                first_member["source_span"]["file"]["fingerprint"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("sha256:")
+            );
+        }
     } else {
         assert_eq!(payload["visible_group_count"], 0);
         assert!(
@@ -1113,6 +1126,7 @@ fn show_renders_evidence_blockers_probe_hint_and_callers_for_group() {
     assert!(!stdout.contains("feature_row"));
     assert!(!stdout.contains("declaration_row"));
     assert!(!stdout.contains("probe_result"));
+    assert!(!stdout.contains(tiny.to_string_lossy().as_ref()));
 }
 
 #[test]
