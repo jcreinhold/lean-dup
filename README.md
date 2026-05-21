@@ -46,6 +46,9 @@ audit to one root and its descendants.
 | Flag                    | Effect                                                                        |
 | ----------------------- | ----------------------------------------------------------------------------- |
 | `--public-only`         | exclude private declarations                                                  |
+| `--private`             | show otherwise-actionable private helper findings                             |
+| `--low-priority`        | include lower-priority structural/API-design findings                         |
+| `--diagnostics`         | show broad diagnostic findings, including noise/debug groups                   |
 | `--compare-mathlib`     | compare against the project's pinned mathlib index                            |
 | `--compare-index LABEL` | compare against a named cached external index                                 |
 | `--profile`             | include extraction and classification timings                                 |

@@ -5,7 +5,7 @@ use lean_dup_eval::EvalOutput;
 use lean_dup_index::{CacheCleanupReport, CacheDiagnostics, CacheStatus, ComparisonEvidenceMode};
 use lean_dup_search::{
     AuditEvidence, AuditGroup, AuditMember, AuditOutput, AuditProbeSummary, AuditReplacementHint, AuditReview,
-    DiffOutput, ReviewProfile, SearchBaselineDiff, SearchBaselineGroup, SearchScoringSummary,
+    AuditVisibilityOptions, DiffOutput, SearchBaselineDiff, SearchBaselineGroup, SearchScoringSummary,
     SearchSemanticObligationFact, SearchSemanticObligationYield, SearchSemanticRerankingSummary, ShowOutput,
 };
 use serde::{Deserialize, Serialize};
@@ -457,7 +457,7 @@ pub struct AuditReport {
     pub options: AuditOptionsReport,
     pub scoring: SearchScoringSummary,
     pub review_policy: lean_dup_search::SearchReviewPolicySummary,
-    pub profile_counts: ReviewProfileCounts,
+    pub queue_counts: ReviewQueueCounts,
     pub retrieval: RetrievalReport,
     pub comparison_provenance: Vec<ComparisonProvenanceReportDto>,
     pub semantic_verification: SemanticVerificationReport,
@@ -495,16 +495,15 @@ pub struct AuditOptionsReport {
     pub compare_indexes: Vec<String>,
     pub compare_mathlib: bool,
     pub include_generated: bool,
-    pub show_noise: bool,
-    pub review_profile: ReviewProfile,
+    pub visibility: AuditVisibilityOptions,
 }
 
 #[derive(Debug, Serialize)]
-pub struct ReviewProfileCounts {
-    pub mathlib: usize,
-    pub internal: usize,
-    pub api_design: usize,
-    pub noise: usize,
+pub struct ReviewQueueCounts {
+    pub cleanup: usize,
+    pub with_private: usize,
+    pub with_low_priority: usize,
+    pub diagnostics: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -935,11 +934,11 @@ fn eval_count_metric_dto(metric: lean_dup_eval::CountMetric) -> EvalCountMetricD
 pub fn audit_report(output: AuditOutput) -> AuditReport {
     let visible_group_count = output.visible_group_count;
     let visible_groups_emitted = output.visible_groups.len();
-    let profile_counts = ReviewProfileCounts {
-        mathlib: output.profile_counts.mathlib,
-        internal: output.profile_counts.internal,
-        api_design: output.profile_counts.api_design,
-        noise: output.profile_counts.noise,
+    let queue_counts = ReviewQueueCounts {
+        cleanup: output.queue_counts.cleanup,
+        with_private: output.queue_counts.with_private,
+        with_low_priority: output.queue_counts.with_low_priority,
+        diagnostics: output.queue_counts.diagnostics,
     };
     let explanations = crate::report_contract::explain_audit(
         &output.review,
@@ -980,12 +979,11 @@ pub fn audit_report(output: AuditOutput) -> AuditReport {
             compare_indexes: output.compare_indexes,
             compare_mathlib: output.compare_mathlib,
             include_generated: output.include_generated,
-            show_noise: output.show_noise,
-            review_profile: output.review_profile,
+            visibility: output.visibility,
         },
         scoring: output.scoring,
         review_policy: output.review_policy,
-        profile_counts,
+        queue_counts,
         retrieval,
         comparison_provenance,
         semantic_verification,

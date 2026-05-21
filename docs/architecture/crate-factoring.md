@@ -43,7 +43,7 @@ Each crate root is the supported public facade. Submodules and internals stay pr
   opaque `VectorCorpus`, nearest-declaration query DTOs, corpus summaries, provenance facts,
   and stable vector-index errors. LanceDB/Arrow rows, vector database layout, index parameters,
   score conversion, cache paths, and backend fallback rules are private.
-- **`lean-dup-search`**: `ReviewProfile`, `ProbePolicy`, `AuditRequest`, `AuditOutput`,
+- **`lean-dup-search`**: `AuditVisibilityOptions`, `ProbePolicy`, `AuditRequest`, `AuditOutput`,
   `ShowOutput`, `DiffOutput`, `run_audit`, `run_show`, `run_diff`, `observe_search`. Retrieval
   keys, ranking constants, probe obligations, source-scan policy, and replacement-hint internals
   stay private. Search does not expose vector candidate DTOs, embedding-document DTOs, vector

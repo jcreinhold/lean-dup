@@ -226,12 +226,20 @@ fn audit_help_omits_removed_noop_flags_and_rejects_them() {
         .assert()
         .success();
     let stdout = String::from_utf8(help.get_output().stdout.clone()).unwrap();
+    for present in ["--private", "--low-priority", "--diagnostics"] {
+        assert!(
+            stdout.contains(present),
+            "audit help did not mention visibility flag {present}"
+        );
+    }
     for removed in [
         "--threshold",
         "--include-imports",
         "--import-root",
         "--min-priority",
         "--replacement-hints",
+        "--review-profile",
+        "--show-noise",
     ] {
         assert!(
             !stdout.contains(removed),
@@ -245,6 +253,15 @@ fn audit_help_omits_removed_noop_flags_and_rejects_them() {
         .args(["audit", "--workspace"])
         .arg(tiny)
         .args(["--threshold", "0.8"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unexpected argument"));
+
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .args(["audit", "--workspace"])
+        .arg(repo_root().join("tests/fixtures/tiny"))
+        .args(["--review-profile", "noise"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("unexpected argument"));
@@ -825,7 +842,7 @@ fn audit_json_keeps_progress_and_profile_off_stdout() {
 }
 
 #[test]
-fn review_profiles_filter_one_ranked_audit_result() {
+fn composable_visibility_flags_filter_ranked_audit_results() {
     let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();
     let root = repo_root();
@@ -842,20 +859,21 @@ fn review_profiles_filter_one_ranked_audit_result() {
             "--no-semantic-probes",
             "--format",
             "json",
-            "--review-profile",
-            "api-design",
+            "--low-priority",
         ])
         .assert()
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let payload: Value = serde_json::from_str(&stdout).unwrap();
-    let counts = &payload["profile_counts"];
+    let counts = &payload["queue_counts"];
 
-    assert_eq!(payload["options"]["review_profile"], "api-design");
-    assert_eq!(payload["visible_group_count"], counts["api_design"]);
-    assert!(counts["mathlib"].as_u64().unwrap() <= counts["internal"].as_u64().unwrap());
-    assert!(counts["internal"].as_u64().unwrap() <= counts["api_design"].as_u64().unwrap());
-    assert!(counts["api_design"].as_u64().unwrap() <= counts["noise"].as_u64().unwrap());
+    assert_eq!(payload["options"]["visibility"]["include_low_priority"], true);
+    assert_eq!(payload["options"]["visibility"]["include_private"], false);
+    assert_eq!(payload["options"]["visibility"]["diagnostics"], false);
+    assert_eq!(payload["visible_group_count"], counts["with_low_priority"]);
+    assert!(counts["cleanup"].as_u64().unwrap() <= counts["with_private"].as_u64().unwrap());
+    assert!(counts["cleanup"].as_u64().unwrap() <= counts["with_low_priority"].as_u64().unwrap());
+    assert!(counts["with_low_priority"].as_u64().unwrap() <= counts["diagnostics"].as_u64().unwrap());
     assert!(payload["review"]["groups"].is_null());
     assert!(payload["review"]["group_count"].is_u64());
     assert_eq!(
@@ -863,6 +881,57 @@ fn review_profiles_filter_one_ranked_audit_result() {
         payload["visible_groups"].as_array().unwrap().len() as u64
     );
     assert!(payload["visible_groups_emitted"].as_u64().unwrap() <= payload["visible_group_limit"].as_u64().unwrap());
+}
+
+#[test]
+fn audit_visibility_flags_compose_in_json_options() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let tiny = repo_root().join("tests/fixtures/tiny");
+
+    let assert = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&tiny)
+        .args([
+            "--module",
+            "Tiny",
+            "--no-semantic-probes",
+            "--format",
+            "json",
+            "--private",
+            "--low-priority",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["options"]["visibility"]["include_private"], true);
+    assert_eq!(payload["options"]["visibility"]["include_low_priority"], true);
+    assert_eq!(payload["options"]["visibility"]["diagnostics"], false);
+
+    let assert = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(tiny)
+        .args([
+            "--module",
+            "Tiny",
+            "--no-semantic-probes",
+            "--format",
+            "json",
+            "--diagnostics",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["options"]["visibility"]["include_private"], false);
+    assert_eq!(payload["options"]["visibility"]["include_low_priority"], false);
+    assert_eq!(payload["options"]["visibility"]["diagnostics"], true);
+    assert_eq!(payload["visible_group_count"], payload["queue_counts"]["diagnostics"]);
 }
 
 #[test]
@@ -1061,8 +1130,7 @@ fn source_backed_external_index_gets_proof_grade_probe_evidence() {
             "linked",
             "--format",
             "json",
-            "--review-profile",
-            "api-design",
+            "--low-priority",
         ])
         .assert()
         .success();
@@ -1126,8 +1194,7 @@ fn show_renders_evidence_blockers_probe_hint_and_callers_for_group() {
             "--no-semantic-probes",
             "--format",
             "json",
-            "--review-profile",
-            "api-design",
+            "--low-priority",
         ])
         .assert()
         .success();

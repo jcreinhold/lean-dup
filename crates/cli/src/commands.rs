@@ -273,6 +273,7 @@ fn audit(args: AuditArgs, reporter: &mut Reporter) -> Result<AuditReport> {
 
 fn audit_request(args: AuditArgs) -> AuditRequest {
     let include_private = args.effective_include_private();
+    let visibility = args.visibility_options();
     AuditRequest {
         workspace: args.workspace,
         module_root: args.module_root,
@@ -281,8 +282,7 @@ fn audit_request(args: AuditArgs) -> AuditRequest {
         compare_mathlib: args.compare_mathlib,
         mathlib_workspace: args.mathlib_workspace,
         include_generated: args.include_generated,
-        show_noise: args.show_noise,
-        review_profile: args.review_profile.into(),
+        visibility,
         save_baseline: args.save_baseline,
         semantic_probes: args.semantic_probes,
         probe_budget: args.probe_budget,
@@ -409,8 +409,9 @@ fn default_audit_args(workspace: PathBuf, module_root: Option<String>) -> AuditA
         compare_mathlib: false,
         mathlib_workspace: None,
         include_generated: false,
-        show_noise: false,
-        review_profile: crate::cli::CliReviewProfile::Mathlib,
+        show_private: false,
+        low_priority: false,
+        diagnostics: false,
         save_baseline: None,
         semantic_probes: true,
         probe_budget: 500,

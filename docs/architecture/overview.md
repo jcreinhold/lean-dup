@@ -65,7 +65,7 @@ Each boundary owns one decision that changes.
 | External provenance       | source-root mapping, execution-root policy, importability, static fallback                         |
 | Retrieval                 | rare-key weighting, broad-key suppression, top-k heap maintenance, origin-aware pairing            |
 | Semantic verification     | probe obligations, budgets, module planning, private/generated filters, cache keys                 |
-| Ranking                   | confidence adjustment, blockers, suppression, review profiles, recommended actions                 |
+| Ranking                   | confidence adjustment, blockers, suppression, audit visibility, recommended actions                 |
 | Reporting                 | terminal layout, JSON shaping, `show` expansion, baseline diff presentation                        |
 | Evaluation and performance | suite/workload definitions, manual private-path policy, artifact names, cost-class extraction      |
 

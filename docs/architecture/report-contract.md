@@ -10,7 +10,7 @@ symbolic auditor.
 Report projection owns schema stability, truncation, path redaction, bounded
 group summaries, compact diagnostics, and renderer-specific formatting. Search
 owns review policy, visible queue membership, group ids, evidence facts, and
-profile counts. Eval owns labels, denominators, and quality metrics. CLI owns
+queue counts. Eval owns labels, denominators, and quality metrics. CLI owns
 stdout/stderr routing and command-line configuration.
 
 The smallest public report interface is:
@@ -112,8 +112,8 @@ Representative shape:
       "limit": 500,
       "truncated": false,
       "total": 22,
-      "summary": "5 groups match the active review profile; 17 groups are hidden.",
-      "reason": "Some ranked groups are hidden by the active review profile or blockers."
+      "summary": "5 groups match the active audit visibility options; 17 groups are hidden.",
+      "reason": "Some ranked groups are hidden by the active audit visibility options or blockers."
     }
   }
 }
@@ -159,7 +159,7 @@ Default text audit output includes, in order:
 6. visible-group count and emitted/limit facts;
 7. visible-queue explanation;
 8. exclusive hidden-group counts;
-9. profile counts and suppressed groups;
+9. queue counts and suppressed groups;
 10. the first visible groups, if any.
 
 When `visible_group_count = 0`, the text report explains why without requiring
@@ -250,7 +250,7 @@ env LEAN_DUP_CACHE_DIR=target/report-contract/cache \
 env LEAN_DUP_CACHE_DIR=target/report-contract/cache LEAN_NUM_THREADS=2 \
   cargo run -q -p lean-dup-cli -- audit \
   --workspace <kan-proofs-workspace> --module KanProofs \
-  --no-semantic-probes --review-profile noise --format json \
+  --no-semantic-probes --diagnostics --format json \
   > target/report-contract/truncated-audit.json
 ```
 

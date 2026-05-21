@@ -26,7 +26,7 @@ pub struct RankingInput<'a> {
     pub comparison_policy: &'a ComparisonEvidencePolicy,
 }
 
-/// Tunable ranking defaults owned by a review profile, not by CLI parsing.
+/// Tunable ranking defaults owned by search policy, not by CLI parsing.
 #[derive(Debug, Clone, Copy)]
 pub struct RankingProfile {
     pub min_near_score: f64,
@@ -57,26 +57,27 @@ impl RankedReview {
     }
 }
 
-/// User-facing filter policy for default queues.
+/// User-facing visibility intent for audit queues.
 #[derive(Debug, Clone, Copy)]
 pub struct ReviewFilter {
     pub include_generated: bool,
-    pub show_noise: bool,
+    pub include_private: bool,
+    pub include_diagnostics: bool,
     pub min_priority: ReviewPriority,
 }
 
 impl ReviewFilter {
     pub fn includes(self, group: &RankedGroup) -> bool {
-        if group.review_priority == ReviewPriority::Noise && !self.show_noise {
+        if group.review_priority == ReviewPriority::Noise && !self.include_diagnostics {
             return false;
         }
         if !self.include_generated && group.blockers.iter().any(|blocker| blocker == "generated-declaration") {
             return false;
         }
-        if !self.show_noise && group.members.iter().all(|member| member.visibility == "private") {
+        if !self.include_private && group.members.iter().any(|member| member.visibility != "public") {
             return false;
         }
-        if !self.show_noise
+        if !self.include_diagnostics
             && group
                 .blockers
                 .iter()
@@ -342,7 +343,6 @@ fn rank_pair(anchor: &HydratedDeclaration, candidate: &RetrievedCandidate, input
     let mut confidence = confidence_for(relation, priority);
     if blockers.contains("generated-declaration")
         || blockers.contains("broad-head-only")
-        || blockers.contains("non-public-declaration")
         || blockers.contains("low-signal-declaration")
         || blockers.contains("typeclass-instance-noise")
         || blockers.contains("non-theorem-static-only")
@@ -815,7 +815,8 @@ mod tests {
         )]));
         let filter = ReviewFilter {
             include_generated: false,
-            show_noise: false,
+            include_private: false,
+            include_diagnostics: false,
             min_priority: ReviewPriority::Low,
         };
 
@@ -853,7 +854,8 @@ mod tests {
             });
             let filter = ReviewFilter {
                 include_generated: false,
-                show_noise: false,
+                include_private: false,
+                include_diagnostics: false,
                 min_priority: ReviewPriority::Medium,
             };
 
@@ -862,7 +864,7 @@ mod tests {
     }
 
     #[test]
-    fn private_private_helper_groups_are_noise_by_default() {
+    fn private_private_helper_groups_are_hidden_until_private_findings_are_requested() {
         let mut left = declaration("workspace:Tiny:Tiny.left_aux", "workspace", "Tiny.left_aux");
         left.visibility = "private".to_owned();
         let mut right = declaration("workspace:Tiny:Tiny.right_aux", "workspace", "Tiny.right_aux");
@@ -873,17 +875,49 @@ mod tests {
         )]));
         let default_filter = ReviewFilter {
             include_generated: false,
-            show_noise: false,
+            include_private: false,
+            include_diagnostics: false,
             min_priority: ReviewPriority::Medium,
         };
-        let noise_filter = ReviewFilter {
+        let private_filter = ReviewFilter {
+            include_generated: false,
+            include_private: true,
+            include_diagnostics: false,
+            min_priority: ReviewPriority::Medium,
+        };
+
+        assert_eq!(review.groups[0].review_priority, ReviewPriority::High);
+        assert!(review.visible_groups(default_filter).is_empty());
+        assert_eq!(review.visible_groups(private_filter).len(), 1);
+    }
+
+    #[test]
+    fn private_visibility_does_not_include_noise_groups() {
+        let mut left = declaration("workspace:Tiny:Tiny.left_aux", "workspace", "Tiny.left_aux");
+        left.visibility = "private".to_owned();
+        left.low_signal_markers.push("broad_head:Eq".to_owned());
+        let mut right = declaration("workspace:Tiny:Tiny.right_aux", "workspace", "Tiny.right_aux");
+        right.visibility = "private".to_owned();
+        right.low_signal_markers.push("broad_head:Eq".to_owned());
+        let review = rank_candidates(input(vec![candidate_set(
+            left,
+            candidate_with_display(right, "role-feature", Some("Eq"), 8.0),
+        )]));
+        let private_filter = ReviewFilter {
+            include_generated: false,
+            include_private: true,
+            include_diagnostics: false,
+            min_priority: ReviewPriority::Medium,
+        };
+        let diagnostics_filter = ReviewFilter {
             include_generated: true,
-            show_noise: true,
+            include_private: true,
+            include_diagnostics: true,
             min_priority: ReviewPriority::Noise,
         };
 
-        assert!(review.visible_groups(default_filter).is_empty());
-        assert_eq!(review.visible_groups(noise_filter).len(), 1);
+        assert!(review.visible_groups(private_filter).is_empty());
+        assert_eq!(review.visible_groups(diagnostics_filter).len(), 1);
     }
 
     #[test]

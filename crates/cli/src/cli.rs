@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use lean_dup_eval::EvalSuite;
-use lean_dup_search::{ProbePolicy, ReviewProfile};
+use lean_dup_search::{AuditVisibilityOptions, ProbePolicy};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
@@ -156,11 +156,14 @@ pub struct AuditArgs {
     #[arg(long)]
     pub include_generated: bool,
 
-    #[arg(long)]
-    pub show_noise: bool,
+    #[arg(long = "private", help = "Show otherwise-actionable private helper findings")]
+    pub show_private: bool,
 
-    #[arg(long = "review-profile", value_enum, default_value_t = CliReviewProfile::Mathlib)]
-    pub review_profile: CliReviewProfile,
+    #[arg(long = "low-priority", help = "Include lower-priority structural findings")]
+    pub low_priority: bool,
+
+    #[arg(long, help = "Show broad diagnostic findings")]
+    pub diagnostics: bool,
 
     #[arg(long = "save-baseline")]
     pub save_baseline: Option<String>,
@@ -298,26 +301,6 @@ impl From<CliEvalSuite> for EvalSuite {
 
 #[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum CliReviewProfile {
-    Mathlib,
-    Internal,
-    ApiDesign,
-    Noise,
-}
-
-impl From<CliReviewProfile> for ReviewProfile {
-    fn from(value: CliReviewProfile) -> Self {
-        match value {
-            CliReviewProfile::Mathlib => Self::Mathlib,
-            CliReviewProfile::Internal => Self::Internal,
-            CliReviewProfile::ApiDesign => Self::ApiDesign,
-            CliReviewProfile::Noise => Self::Noise,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
 pub enum CliProbePolicy {
     Actionable,
     Broad,
@@ -367,5 +350,13 @@ impl PerfWorkload {
 impl AuditArgs {
     pub fn effective_include_private(&self) -> bool {
         self.include_private && self.no_include_private && !self.public_only
+    }
+
+    pub fn visibility_options(&self) -> AuditVisibilityOptions {
+        AuditVisibilityOptions {
+            include_private: self.show_private,
+            include_low_priority: self.low_priority,
+            diagnostics: self.diagnostics,
+        }
     }
 }

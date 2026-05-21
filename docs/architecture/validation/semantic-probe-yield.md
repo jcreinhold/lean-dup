@@ -95,7 +95,7 @@ env LEAN_DUP_CACHE_DIR=target/probe-cache/source-backed \
   cargo run -p lean-dup-cli -- index --workspace tests/fixtures/source-backed --module External --label linked
 env LEAN_DUP_CACHE_DIR=target/probe-cache/source-backed /usr/bin/time -l \
   cargo run -p lean-dup-cli -- audit --workspace tests/fixtures/source-backed --module Tiny \
-    --compare-index linked --format json --review-profile api-design \
+    --compare-index linked --format json --low-priority \
   > target/audit-runs/probe-source-backed.json \
   2> target/audit-runs/probe-source-backed.stderr
 ```

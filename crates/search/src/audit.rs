@@ -8,6 +8,7 @@ use lean_dup_index::{ComparisonProvenance, ComparisonProvenanceReport};
 use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
 use lean_dup_project::{ResolvedWorkspace, WorkspaceRequest, resolve, resolve_workspace_mathlib};
 use lean_dup_worker::WorkerClient;
+use serde::Serialize;
 
 use crate::baseline;
 use crate::ranking::{
@@ -30,7 +31,7 @@ use crate::semantic_verification::{
     verify_candidate_probes,
 };
 use crate::source_refs::{SourceFactInput, collect_source_facts};
-use crate::{ProbePolicy, Result, ReviewProfile};
+use crate::{ProbePolicy, Result};
 
 const DEFAULT_VISIBLE_GROUP_LIMIT: usize = 500;
 
@@ -49,8 +50,7 @@ pub struct AuditRequest {
     pub compare_mathlib: bool,
     pub mathlib_workspace: Option<PathBuf>,
     pub include_generated: bool,
-    pub show_noise: bool,
-    pub review_profile: ReviewProfile,
+    pub visibility: AuditVisibilityOptions,
     pub save_baseline: Option<String>,
     pub semantic_probes: bool,
     pub probe_budget: usize,
@@ -71,14 +71,13 @@ pub struct AuditOutput {
     pub compare_indexes: Vec<String>,
     pub compare_mathlib: bool,
     pub include_generated: bool,
-    pub show_noise: bool,
-    pub review_profile: ReviewProfile,
+    pub visibility: AuditVisibilityOptions,
     pub scoring: SearchScoringSummary,
     pub review_policy: SearchReviewPolicySummary,
     pub retrieval: AuditRetrievalSummary,
     pub comparison_provenance: Vec<ComparisonProvenanceReport>,
     pub semantic_verification: AuditProbeSummary,
-    pub profile_counts: AuditProfileCounts,
+    pub queue_counts: AuditQueueCounts,
     pub queue_summary: AuditQueueSummary,
     pub review: AuditReview,
     pub visible_groups: Vec<AuditGroup>,
@@ -273,7 +272,7 @@ pub enum AuditHiddenReason {
     Generated,
     UnverifiedProofGrade,
     UnavailableProbe,
-    NoiseOrProfile,
+    VisibilityOrNoise,
     OtherBlocker,
 }
 
@@ -290,19 +289,30 @@ pub struct AuditQueueSummary {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AuditHiddenGroupCounts {
     pub total: usize,
-    pub noise_or_profile: usize,
+    pub visibility_or_noise: usize,
     pub generated: usize,
     pub unverified_proof_grade: usize,
     pub unavailable_probe: usize,
     pub other_blockers: usize,
 }
 
+/// Composable visibility options for audit review queues.
+///
+/// Callers describe which classes of findings they want to include. Search
+/// owns the priority thresholds, blocker predicates, and diagnostic details.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct AuditVisibilityOptions {
+    pub include_private: bool,
+    pub include_low_priority: bool,
+    pub diagnostics: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AuditProfileCounts {
-    pub mathlib: usize,
-    pub internal: usize,
-    pub api_design: usize,
-    pub noise: usize,
+pub struct AuditQueueCounts {
+    pub cleanup: usize,
+    pub with_private: usize,
+    pub with_low_priority: usize,
+    pub diagnostics: usize,
 }
 
 struct WorkflowOutput {
@@ -316,8 +326,7 @@ struct WorkflowOutput {
     compare_indexes: Vec<String>,
     compare_mathlib: bool,
     include_generated: bool,
-    show_noise: bool,
-    review_profile: ReviewProfile,
+    visibility: AuditVisibilityOptions,
     retrieval: RetrievalDiagnostics,
     comparison_provenance: Vec<ComparisonProvenanceReport>,
     semantic_verification: ProbeDiagnostics,
@@ -373,16 +382,14 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
         candidate_sets_for_review(
             &retrieval_output.candidate_sets,
             request.compare_mathlib,
-            request.review_profile,
-            request.show_noise,
+            request.visibility.diagnostics,
         )
     });
     let source_fact_rows = source_fact_declarations(
         &workspace_rows,
         &review_candidate_sets,
         request.compare_mathlib,
-        request.review_profile,
-        request.show_noise,
+        request.visibility.diagnostics,
     );
     let mut source_facts = perf::measure(CostClass::RetrievalRanking, "source_refs.collect.initial", || {
         collect_source_facts(SourceFactInput::new(&source_fact_rows).without_references())
@@ -424,7 +431,7 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
             comparison_policy: &compare.provenance.policy,
         })
     });
-    let filter = review_filter(request.review_profile, request.include_generated, request.show_noise);
+    let filter = review_filter(request.visibility, request.include_generated);
     let reference_ids = reference_declarations_for_hints(&review_without_references, filter)
         .into_iter()
         .collect::<BTreeSet<_>>();
@@ -469,8 +476,7 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
         compare_indexes: request.compare_indexes,
         compare_mathlib: request.compare_mathlib,
         include_generated: request.include_generated,
-        show_noise: request.show_noise,
-        review_profile: request.review_profile,
+        visibility: request.visibility,
         retrieval: retrieval_output.diagnostics,
         comparison_provenance: compare.provenance.reports,
         semantic_verification: verification.diagnostics,
@@ -482,7 +488,7 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
 /// Run an audit and return one ranked group by stable group id.
 pub fn run_show(request: AuditRequest, requested_group: &str, reporter: &mut Reporter) -> Result<ShowOutput> {
     let workflow = run_audit_workflow(request, reporter)?;
-    let filter = review_filter(workflow.review_profile, workflow.include_generated, workflow.show_noise);
+    let filter = review_filter(workflow.visibility, workflow.include_generated);
     let group = workflow
         .review
         .groups
@@ -545,7 +551,7 @@ fn search_baseline_group(group: baseline::BaselineGroup) -> SearchBaselineGroup 
 }
 
 fn project_audit_output(workflow: WorkflowOutput) -> AuditOutput {
-    let filter = review_filter(workflow.review_profile, workflow.include_generated, workflow.show_noise);
+    let filter = review_filter(workflow.visibility, workflow.include_generated);
     let visible_ranked_groups = workflow.review.visible_groups(filter);
     let visible_group_count = visible_ranked_groups.len();
     let visible_group_limit = DEFAULT_VISIBLE_GROUP_LIMIT;
@@ -556,7 +562,7 @@ fn project_audit_output(workflow: WorkflowOutput) -> AuditOutput {
         .map(|group| audit_group(group, filter))
         .collect::<Vec<_>>();
     let queue_summary = audit_queue_summary(&workflow.review, filter, visible_groups.len(), visible_group_limit);
-    let profile_counts = audit_profile_counts(&workflow.review);
+    let queue_counts = audit_queue_counts(&workflow.review);
     let review = audit_review(&workflow.review, filter);
     AuditOutput {
         requested_workspace: workflow.requested_workspace,
@@ -569,14 +575,13 @@ fn project_audit_output(workflow: WorkflowOutput) -> AuditOutput {
         compare_indexes: workflow.compare_indexes,
         compare_mathlib: workflow.compare_mathlib,
         include_generated: workflow.include_generated,
-        show_noise: workflow.show_noise,
-        review_profile: workflow.review_profile,
+        visibility: workflow.visibility,
         scoring: default_summary(),
         review_policy: review_policy::summary(),
         retrieval: audit_retrieval_summary(&workflow.retrieval),
         comparison_provenance: workflow.comparison_provenance,
         semantic_verification: audit_probe_summary(&workflow.semantic_verification),
-        profile_counts,
+        queue_counts,
         queue_summary,
         review,
         visible_groups,
@@ -723,7 +728,7 @@ fn audit_visibility(group: &RankedGroup, filter: ReviewFilter) -> AuditVisibilit
     if filter.includes(group) {
         return AuditVisibility {
             visible: true,
-            reason: "included by the active review profile and output filters".to_owned(),
+            reason: "included by the active audit visibility options".to_owned(),
             hidden_reason: None,
         };
     }
@@ -751,7 +756,7 @@ fn audit_queue_summary(
             AuditHiddenReason::Generated => hidden.generated += 1,
             AuditHiddenReason::UnverifiedProofGrade => hidden.unverified_proof_grade += 1,
             AuditHiddenReason::UnavailableProbe => hidden.unavailable_probe += 1,
-            AuditHiddenReason::NoiseOrProfile => hidden.noise_or_profile += 1,
+            AuditHiddenReason::VisibilityOrNoise => hidden.visibility_or_noise += 1,
             AuditHiddenReason::OtherBlocker => hidden.other_blockers += 1,
         }
     }
@@ -766,19 +771,38 @@ fn audit_queue_summary(
     }
 }
 
-fn audit_profile_counts(review: &RankedReview) -> AuditProfileCounts {
-    AuditProfileCounts {
-        mathlib: review
-            .visible_groups(review_filter(ReviewProfile::Mathlib, false, false))
+fn audit_queue_counts(review: &RankedReview) -> AuditQueueCounts {
+    AuditQueueCounts {
+        cleanup: review
+            .visible_groups(review_filter(AuditVisibilityOptions::default(), false))
             .len(),
-        internal: review
-            .visible_groups(review_filter(ReviewProfile::Internal, false, false))
+        with_private: review
+            .visible_groups(review_filter(
+                AuditVisibilityOptions {
+                    include_private: true,
+                    ..AuditVisibilityOptions::default()
+                },
+                false,
+            ))
             .len(),
-        api_design: review
-            .visible_groups(review_filter(ReviewProfile::ApiDesign, false, false))
+        with_low_priority: review
+            .visible_groups(review_filter(
+                AuditVisibilityOptions {
+                    include_low_priority: true,
+                    ..AuditVisibilityOptions::default()
+                },
+                false,
+            ))
             .len(),
-        noise: review
-            .visible_groups(review_filter(ReviewProfile::Noise, false, false))
+        diagnostics: review
+            .visible_groups(review_filter(
+                AuditVisibilityOptions {
+                    include_private: true,
+                    include_low_priority: true,
+                    diagnostics: true,
+                },
+                true,
+            ))
             .len(),
     }
 }
@@ -798,9 +822,9 @@ fn audit_hidden_reason(group: &RankedGroup, filter: ReviewFilter) -> Option<Audi
     }
     if group.review_priority == ReviewPriority::Noise
         || group.review_priority > filter.min_priority
-        || !filter.show_noise
+        || !filter.include_diagnostics
     {
-        return Some(AuditHiddenReason::NoiseOrProfile);
+        return Some(AuditHiddenReason::VisibilityOrNoise);
     }
     if !group.blockers.is_empty() {
         return Some(AuditHiddenReason::OtherBlocker);
@@ -821,7 +845,7 @@ fn hidden_reason_sentence(reason: AuditHiddenReason) -> String {
         AuditHiddenReason::UnavailableProbe => {
             "hidden because the required Lean semantic probe is unavailable".to_owned()
         }
-        AuditHiddenReason::NoiseOrProfile => "hidden by the active review profile or noise filter".to_owned(),
+        AuditHiddenReason::VisibilityOrNoise => "hidden by the active audit visibility options".to_owned(),
         AuditHiddenReason::OtherBlocker => "hidden by blockers or output filters".to_owned(),
     }
 }
@@ -876,33 +900,18 @@ fn priority_label(priority: ReviewPriority) -> &'static str {
     }
 }
 
-fn review_filter(profile: ReviewProfile, include_generated: bool, show_noise: bool) -> ReviewFilter {
-    let profile_filter = match profile {
-        ReviewProfile::Mathlib => ReviewFilter {
-            include_generated: false,
-            show_noise: false,
-            min_priority: ReviewPriority::Medium,
-        },
-        ReviewProfile::Internal => ReviewFilter {
-            include_generated: false,
-            show_noise: false,
-            min_priority: ReviewPriority::Medium,
-        },
-        ReviewProfile::ApiDesign => ReviewFilter {
-            include_generated: false,
-            show_noise: false,
-            min_priority: ReviewPriority::Low,
-        },
-        ReviewProfile::Noise => ReviewFilter {
-            include_generated: true,
-            show_noise: true,
-            min_priority: ReviewPriority::Noise,
-        },
-    };
+fn review_filter(visibility: AuditVisibilityOptions, include_generated: bool) -> ReviewFilter {
     ReviewFilter {
-        include_generated: include_generated || profile_filter.include_generated,
-        show_noise: show_noise || profile_filter.show_noise,
-        min_priority: profile_filter.min_priority,
+        include_generated: include_generated || visibility.diagnostics,
+        include_private: visibility.include_private || visibility.diagnostics,
+        include_diagnostics: visibility.diagnostics,
+        min_priority: if visibility.diagnostics {
+            ReviewPriority::Noise
+        } else if visibility.include_low_priority {
+            ReviewPriority::Low
+        } else {
+            ReviewPriority::Medium
+        },
     }
 }
 
@@ -961,10 +970,9 @@ fn source_fact_declarations(
     workspace_rows: &[lean_dup_index::HydratedDeclaration],
     candidate_sets: &[crate::retrieval::CandidateSet],
     _compare_mathlib: bool,
-    review_profile: ReviewProfile,
-    show_noise: bool,
+    diagnostics: bool,
 ) -> Vec<lean_dup_index::HydratedDeclaration> {
-    if show_noise || review_profile == ReviewProfile::Noise {
+    if diagnostics {
         return workspace_rows.to_vec();
     }
 

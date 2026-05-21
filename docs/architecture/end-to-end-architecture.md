@@ -134,16 +134,16 @@ Parallel Lean probe workers are not the default because each worker imports a la
 measured work has favored removing weak obligations and improving reuse before multiplying
 imports.
 
-### Ranking and review profiles
+### Ranking and audit visibility
 
 `ranking.rs` consumes candidates, indexed facts, semantic evidence, provenance policy, source
-facts, and review-profile settings. It produces ranked groups with signals, blockers, evidence
+facts, and audit visibility options. It produces ranked groups with signals, blockers, evidence
 mode, visibility, priority, and recommended actions. It does not know SQLite tables or Lean
 worker messages.
 
 Default output favors actionable findings. Feature-only and noisy groups are hidden unless the
-user asks for broader profiles or `--show-noise`. Broad exploration remains available; the
-default queue is not a dump of every indexed overlap.
+user widens the queue with `--private`, `--low-priority`, or `--diagnostics`. Broad exploration
+remains available; the default queue is not a dump of every indexed overlap.
 
 ### Source facts and replacement hints
 

@@ -59,8 +59,8 @@ comparison provenance: no comparison indexes
 semantic probes: planned=0 cached=0 worker=0 unavailable=0
 review groups: 22
 visible groups: 16
-visible queue: 16 groups match the active review profile; 6 groups are hidden.
-hidden groups: total=6 profile/noise=6 generated=0 unverified-proof-grade=0 unavailable-probe=0 other=0
+visible queue: 16 groups match the active audit visibility options; 6 groups are hidden.
+hidden groups: total=6 visibility/noise=6 generated=0 unverified-proof-grade=0 unavailable-probe=0 other=0
 probe summary: semantic probes disabled
 ...
 exact-statement-1f4b80d2bb8e: high replace-local-uses exact-statement -> Tiny.same_left
@@ -84,11 +84,11 @@ target/release/lean-dup audit \
     "visible": 16,
     "total": 22,
     "summary": "16/22 ranked groups visible",
-    "reason": "16 groups match the active review profile; 6 groups are hidden."
+    "reason": "16 groups match the active audit visibility options; 6 groups are hidden."
   },
   "hidden_groups": {
     "total": 6,
-    "noise_or_profile": 6,
+    "visibility_or_noise": 6,
     "generated": 0,
     "unverified_proof_grade": 0,
     "unavailable_probe": 0,
@@ -146,7 +146,7 @@ callers: 1
          theorem use_same_left (p q : Prop) : p → q → p := same_left p q
 explanation:
   visibility: visible
-  why visible or hidden: included by the active review profile and output filters
+  why visible or hidden: included by the active audit visibility options and output filters
   evidence mode: static
   static/proof evidence: static indexed evidence; Lean did not verify this group
   semantic evidence: no additional semantic probe evidence is attached
@@ -167,6 +167,9 @@ target/release/lean-dup audit --workspace /path/to/your/lake/project --progress
 - `--module Root.Module` scopes the audit to one module subtree. Use this to keep runs short while you are still
   evaluating the tool.
 - `--public-only` excludes private declarations from the report.
+- `--private` includes otherwise-actionable private helper findings.
+- `--low-priority` includes lower-priority structural/API-design findings.
+- `--diagnostics` shows broad diagnostic findings, including noise/debug groups.
 - `--progress` writes phase events to stderr; stdout stays parseable as JSON when `--format json` is set.
 
 First run on your project is cold: `lean-dup` builds an index of your workspace declarations. Subsequent runs reuse
@@ -200,9 +203,10 @@ The fixture quick-start above shows `evidence mode: static` because the run was 
 
 ### Visible vs hidden
 
-The default review queue prefers high precision. Groups that are noisy, unverified, or filtered by the active review
-profile are hidden by default and counted in the `hidden_groups` block of the JSON. Use `--show-noise` or a different
-review profile to widen the queue. An empty visible queue is always explained by `visible_queue.reason`.
+The default review queue prefers high precision. Groups that are noisy, unverified, private-only, or lower priority are
+hidden by default and counted in the `hidden_groups` block of the JSON. Use `--private`, `--low-priority`, or
+`--diagnostics` to widen the queue by the dimension you want. An empty visible queue is always explained by
+`visible_queue.reason`.
 
 ### Replacement hint
 
@@ -259,7 +263,7 @@ hundred MB. The shared cache under `~/.cache/lean-dup` makes subsequent runs fas
   sharing the cache root. The hidden `cache-cleanup` command is dry-run by default; pass `--execute` to remove
   unprotected stale entries.
 - **An audit reports `visible groups: 0`**: the `visible_queue.reason` field always names why. Common causes: no
-  ranked groups (no candidates passed the filters), all groups hidden by the review profile, or all proof-grade
+  ranked groups (no candidates passed the filters), all groups hidden by the audit visibility options, or all proof-grade
   candidates remained unverified.
 
 For deeper diagnosis run `doctor --format json` and inspect the cache + provenance state directly.

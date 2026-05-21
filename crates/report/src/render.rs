@@ -1,5 +1,3 @@
-use lean_dup_search::ReviewProfile;
-
 use crate::report_contract::GroupExplanation;
 use crate::reports::{
     AuditReport, CacheCleanupReportDto, DiffReport, DoctorReport, EvalReportDto, IndexReport, PerfReport, Report,
@@ -277,8 +275,10 @@ fn render_audit(report: &AuditReport) -> String {
         format!("include private: {}", report.options.include_private),
         format!("compare mathlib: {}", report.options.compare_mathlib),
         format!(
-            "review profile: {}",
-            review_profile_label(report.options.review_profile)
+            "visibility: private={} low-priority={} diagnostics={}",
+            report.options.visibility.include_private,
+            report.options.visibility.include_low_priority,
+            report.options.visibility.diagnostics
         ),
         format!("candidates: {}", report.retrieval.candidate_count),
         format!(
@@ -312,9 +312,9 @@ fn render_audit(report: &AuditReport) -> String {
         ),
         format!("visible queue: {}", report.explanations.visible_queue.reason),
         format!(
-            "hidden groups: total={} profile/noise={} generated={} unverified-proof-grade={} unavailable-probe={} other={}",
+            "hidden groups: total={} visibility/noise={} generated={} unverified-proof-grade={} unavailable-probe={} other={}",
             report.explanations.hidden_groups.total,
-            report.explanations.hidden_groups.noise_or_profile,
+            report.explanations.hidden_groups.visibility_or_noise,
             report.explanations.hidden_groups.generated,
             report.explanations.hidden_groups.unverified_proof_grade,
             report.explanations.hidden_groups.unavailable_probe,
@@ -322,11 +322,11 @@ fn render_audit(report: &AuditReport) -> String {
         ),
         format!("probe summary: {}", report.explanations.semantic_probes.summary),
         format!(
-            "profile counts: mathlib={} internal={} api-design={} noise={}",
-            report.profile_counts.mathlib,
-            report.profile_counts.internal,
-            report.profile_counts.api_design,
-            report.profile_counts.noise
+            "queue counts: cleanup={} with-private={} with-low-priority={} diagnostics={}",
+            report.queue_counts.cleanup,
+            report.queue_counts.with_private,
+            report.queue_counts.with_low_priority,
+            report.queue_counts.diagnostics
         ),
         format!("suppressed groups: {}", report.review.suppressed_count),
         format!("message: {}", report.message),
@@ -436,13 +436,4 @@ fn push_group_explanation(lines: &mut Vec<String>, explanation: &GroupExplanatio
         "  replacement/import/callers: {}",
         explanation.replacement_summary
     ));
-}
-
-fn review_profile_label(profile: ReviewProfile) -> &'static str {
-    match profile {
-        ReviewProfile::Mathlib => "mathlib",
-        ReviewProfile::Internal => "internal",
-        ReviewProfile::ApiDesign => "api-design",
-        ReviewProfile::Noise => "noise",
-    }
 }

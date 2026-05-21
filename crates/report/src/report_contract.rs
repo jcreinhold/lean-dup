@@ -34,7 +34,7 @@ pub struct VisibleQueueExplanation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct HiddenGroupExplanation {
     pub total: usize,
-    pub noise_or_profile: usize,
+    pub visibility_or_noise: usize,
     pub generated: usize,
     pub unverified_proof_grade: usize,
     pub unavailable_probe: usize,
@@ -128,17 +128,17 @@ fn visible_queue(queue: &AuditQueueSummary, hidden: &HiddenGroupExplanation) -> 
             String::new()
         };
         format!(
-            "{visible} groups match the active review profile; {} groups are hidden.{truncation}",
+            "{visible} groups match the active audit visibility options; {} groups are hidden.{truncation}",
             total - visible
         )
-    } else if hidden.noise_or_profile == hidden.total {
-        "All ranked groups are hidden by the active review profile or noise filter.".to_owned()
+    } else if hidden.visibility_or_noise == hidden.total {
+        "All ranked groups are hidden by the active audit visibility options.".to_owned()
     } else if hidden.unverified_proof_grade == hidden.total {
         "All ranked groups require proof-grade semantic evidence that was not verified.".to_owned()
     } else if hidden.unavailable_probe == hidden.total {
         "All ranked groups are blocked by unavailable Lean semantic probes.".to_owned()
     } else {
-        "No ranked groups pass the active review profile; see hidden group counts for blockers.".to_owned()
+        "No ranked groups pass the active audit visibility options; see hidden group counts for blockers.".to_owned()
     };
     VisibleQueueExplanation {
         visible,
@@ -154,7 +154,7 @@ fn visible_queue(queue: &AuditQueueSummary, hidden: &HiddenGroupExplanation) -> 
 fn hidden_groups(queue: &AuditQueueSummary) -> HiddenGroupExplanation {
     HiddenGroupExplanation {
         total: queue.hidden.total,
-        noise_or_profile: queue.hidden.noise_or_profile,
+        visibility_or_noise: queue.hidden.visibility_or_noise,
         generated: queue.hidden.generated,
         unverified_proof_grade: queue.hidden.unverified_proof_grade,
         unavailable_probe: queue.hidden.unavailable_probe,
@@ -337,7 +337,7 @@ mod tests {
             generated: 1,
             unverified_proof_grade: 1,
             unavailable_probe: 1,
-            noise_or_profile: 1,
+            visibility_or_noise: 1,
             ..AuditHiddenGroupCounts::default()
         });
         let explanations = explain_audit(&review, &[], &queue, &AuditProbeSummary::default(), &[]);
@@ -346,7 +346,7 @@ mod tests {
         assert_eq!(explanations.hidden_groups.generated, 1);
         assert_eq!(explanations.hidden_groups.unverified_proof_grade, 1);
         assert_eq!(explanations.hidden_groups.unavailable_probe, 1);
-        assert_eq!(explanations.hidden_groups.noise_or_profile, 1);
+        assert_eq!(explanations.hidden_groups.visibility_or_noise, 1);
     }
 
     #[test]

@@ -11,7 +11,7 @@ use crate::semantic_reranking::{
     SearchSemanticObligationFact, SearchSemanticObligationKind, SearchSemanticObligationStatus,
     SearchSemanticObligationYield, SearchSemanticUnavailableReason,
 };
-use crate::{ProbePolicy, Result, ReviewProfile};
+use crate::{ProbePolicy, Result};
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_index::ComparisonEvidencePolicy;
 use lean_dup_index::{HydratedDeclaration, OpenedIndex, ProbeCacheEntry};
@@ -217,17 +217,16 @@ impl Default for ProbeDiagnostics {
 
 /// Return the candidate sets worth ranking for the requested review queue.
 ///
-/// Default profiles keep only strong static candidates before semantic probing
-/// and ranking. Broad/noise-oriented profiles keep the full retrieval output.
+/// Default review keeps only strong static candidates before semantic probing
+/// and ranking. Diagnostics keep the full retrieval output.
 /// This keeps reports actionable without changing retrieval diagnostics,
 /// candidate-generation behavior, or index contents.
 pub fn candidate_sets_for_review(
     candidate_sets: &[CandidateSet],
     compare_mathlib: bool,
-    review_profile: ReviewProfile,
-    show_noise: bool,
+    diagnostics: bool,
 ) -> Vec<CandidateSet> {
-    if show_noise || review_profile == ReviewProfile::Noise {
+    if diagnostics {
         return candidate_sets.to_vec();
     }
 
@@ -1112,10 +1111,10 @@ fn declaration_cache_facts(declaration: &HydratedDeclaration) -> serde_json::Val
 #[cfg(test)]
 mod tests {
     use super::{ProbeSettings, SemanticVerificationInput, VerificationIndex, candidate_sets_for_review, plan_probes};
+    use crate::ProbePolicy;
     use crate::ranking::{RankingInput, RankingProfile, rank_candidates};
     use crate::retrieval::{CandidateExplanation, CandidateSet, KeyContribution, RetrievedCandidate};
     use crate::source_refs::SourceFacts;
-    use crate::{ProbePolicy, ReviewProfile};
     use lean_dup_index::{ComparisonEvidenceMode, ComparisonEvidencePolicy};
     use lean_dup_index::{DeclarationHandle, HydratedDeclaration};
     use lean_dup_project::ResolvedWorkspace;
@@ -1140,7 +1139,6 @@ mod tests {
                 candidates: vec![exact.clone(), broad],
             }],
             true,
-            ReviewProfile::Mathlib,
             false,
         );
 
@@ -1166,7 +1164,6 @@ mod tests {
                 candidates: vec![exact.clone(), broad],
             }],
             false,
-            ReviewProfile::Mathlib,
             false,
         );
 
@@ -1192,7 +1189,6 @@ mod tests {
                 candidates: vec![exact.clone(), broad],
             }],
             false,
-            ReviewProfile::Internal,
             false,
         );
 

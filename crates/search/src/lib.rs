@@ -22,9 +22,9 @@ mod source_refs;
 
 pub use audit::{
     AuditEvidence, AuditGroup, AuditHiddenGroupCounts, AuditHiddenReason, AuditMember, AuditOutput, AuditProbeSummary,
-    AuditProfileCounts, AuditQueueSummary, AuditReplacementHint, AuditRequest, AuditRetrievalSummary, AuditReview,
-    AuditReviewDiagnostics, AuditSourceReference, AuditVisibility, DiffOutput, SearchBaselineChange,
-    SearchBaselineDiff, SearchBaselineGroup, ShowOutput, run_audit, run_diff, run_show,
+    AuditQueueCounts, AuditQueueSummary, AuditReplacementHint, AuditRequest, AuditRetrievalSummary, AuditReview,
+    AuditReviewDiagnostics, AuditSourceReference, AuditVisibility, AuditVisibilityOptions, DiffOutput,
+    SearchBaselineChange, SearchBaselineDiff, SearchBaselineGroup, ShowOutput, run_audit, run_diff, run_show,
 };
 pub use error::{Error, Result};
 pub use observation::{
@@ -41,15 +41,6 @@ pub use semantic_reranking::{
     SearchSemanticObligationFact, SearchSemanticObligationKind, SearchSemanticObligationStatus,
     SearchSemanticObligationYield, SearchSemanticRerankingSummary, SearchSemanticUnavailableReason,
 };
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum ReviewProfile {
-    Mathlib,
-    Internal,
-    ApiDesign,
-    Noise,
-}
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
