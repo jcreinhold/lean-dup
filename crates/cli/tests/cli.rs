@@ -293,10 +293,15 @@ fn doctor_json_reports_cache_lifecycle_diagnostics() {
     let payload: Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(payload["command"], "doctor");
     assert_eq!(payload["status"], "ok");
-    assert_eq!(
-        payload["cache"]["cache_root"].as_str().unwrap(),
-        cache.path().to_string_lossy()
+    assert_eq!(payload["cache"]["cache_root"]["kind"], "cache-root");
+    assert!(
+        payload["cache"]["cache_root"]["fingerprint"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:")
     );
+    assert!(!stdout.contains(cache.path().to_string_lossy().as_ref()));
+    assert!(!stdout.contains("index.sqlite"));
     let labels = payload["cache"]["labels"].as_array().unwrap();
     assert!(labels.iter().any(|label| label["label"] == "audit-workspace"));
     let audit_workspace = labels.iter().find(|label| label["label"] == "audit-workspace").unwrap();
@@ -705,14 +710,8 @@ fn doctor_reports_workspace_facts_from_repo_root() {
         .assert()
         .success()
         .stdout(predicate::str::contains("command: doctor"))
-        .stdout(predicate::str::contains(format!(
-            "requested workspace: {}",
-            root.display()
-        )))
-        .stdout(predicate::str::contains(format!(
-            "resolved Lake root: {}",
-            root.join("lean").display()
-        )))
+        .stdout(predicate::str::contains("requested workspace: workspace-root sha256:"))
+        .stdout(predicate::str::contains("resolved Lake root: workspace-root sha256:"))
         .stdout(predicate::str::contains("module roots: LeanDup"))
         .stdout(predicate::str::contains("source files:"))
         .stdout(predicate::str::contains("cache root:"))
@@ -731,10 +730,8 @@ fn doctor_respects_cache_dir_override() {
         .arg(repo_root())
         .assert()
         .success()
-        .stdout(predicate::str::contains(format!(
-            "cache root: {}",
-            temp.path().display()
-        )));
+        .stdout(predicate::str::contains("cache root: cache-root sha256:"))
+        .stdout(predicate::str::contains(temp.path().to_string_lossy().as_ref()).not());
 }
 
 #[test]

@@ -3,7 +3,7 @@ use lean_dup_search::ReviewProfile;
 use crate::report_contract::GroupExplanation;
 use crate::reports::{
     AuditReport, CacheCleanupReportDto, DiffReport, DoctorReport, EvalReportDto, IndexReport, PerfReport, Report,
-    ReviewGroupReport, ShowReport,
+    ReviewGroupReport, ShowReport, cache_root_diagnostic_label, path_diagnostic_label,
 };
 
 pub fn render_text(report: &Report) -> String {
@@ -83,13 +83,16 @@ fn render_doctor(report: &DoctorReport) -> String {
     let mut lines = vec![
         "command: doctor".to_owned(),
         format!("status: {}", report.status),
-        format!("requested workspace: {}", report.requested_workspace.display()),
-        format!("resolved Lake root: {}", report.lake_root.display()),
-        format!("lakefile: {}", report.lakefile.display()),
+        format!(
+            "requested workspace: {}",
+            path_diagnostic_label(&report.requested_workspace)
+        ),
+        format!("resolved Lake root: {}", path_diagnostic_label(&report.lake_root)),
+        format!("lakefile: {}", path_diagnostic_label(&report.lakefile)),
         format!("module roots: {}", report.module_roots.join(", ")),
         format!("selected roots: {}", report.selected_roots.join(", ")),
         format!("source files: {}", report.source_count),
-        format!("cache root: {}", report.cache_root.display()),
+        format!("cache root: {}", cache_root_diagnostic_label(&report.cache_root)),
         format!("cache fingerprint: {}", report.cache_fingerprint),
         format!("cache labels: {}", report.cache.labels.len()),
         format!("cache disk bytes: {}", report.cache.total_disk_bytes),
@@ -106,7 +109,7 @@ fn render_doctor(report: &DoctorReport) -> String {
         for entry in &label.entries {
             lines.push(format!(
                 "  {}: status={} active={} expected={} schema={} provenance={} bytes={}",
-                entry.index_dir.display(),
+                path_diagnostic_label(&entry.index_dir),
                 entry.status,
                 entry.active_latest,
                 entry.expected_current,
@@ -140,7 +143,7 @@ fn render_cache_cleanup(report: &CacheCleanupReportDto) -> String {
     let mut lines = vec![
         "command: cache-cleanup".to_owned(),
         format!("status: {}", report.status),
-        format!("cache root: {}", report.cache_root.display()),
+        format!("cache root: {}", cache_root_diagnostic_label(&report.cache_root)),
         format!("executed: {}", report.executed),
         format!("removable entries: {}", report.removable_count),
         format!("protected entries: {}", report.protected_count),
@@ -150,7 +153,7 @@ fn render_cache_cleanup(report: &CacheCleanupReportDto) -> String {
     for entry in &report.removed_entries {
         lines.push(format!(
             "  removable {} {} bytes ({})",
-            entry.index_dir.display(),
+            path_diagnostic_label(&entry.index_dir),
             entry.disk_bytes,
             entry.reason
         ));
@@ -158,7 +161,7 @@ fn render_cache_cleanup(report: &CacheCleanupReportDto) -> String {
     for entry in &report.protected_entries {
         lines.push(format!(
             "  protected {} {} bytes ({})",
-            entry.index_dir.display(),
+            path_diagnostic_label(&entry.index_dir),
             entry.disk_bytes,
             entry.reason
         ));

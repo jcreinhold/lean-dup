@@ -1,5 +1,31 @@
 # Cache Validity Lifecycle
 
+## Design note
+
+This document owns the release-facing cache lifecycle contract. Project resolution owns workspace,
+Lake, toolchain, and source identity; the index crate owns cache keys, latest-pointer interpretation,
+schema/protocol compatibility, and cleanup eligibility; worker owns protocol and semantic-version
+facts; report/doctor owns concise diagnostics. The smallest public interface is cache status,
+schema/provenance kind, declaration counts, disk-cost facts, path-role fingerprints, and actionable
+reasons.
+
+Absolute filesystem paths, cache directory layout, latest-pointer storage, SQLite table names,
+worker rows, and retrieval keys must not leak upward or sideways. The preserved user-facing
+capability is deterministic cache reuse and a `doctor` report that explains stale, missing,
+corrupt, unchecked, or reusable entries. The Python-era behavior intentionally discarded is using
+project-wide dirtiness or operator path inspection as the cache validity rule.
+
+## Design it twice
+
+Three designs were considered:
+
+- expose cache roots, index files, and table-level details in reports;
+- invalidate every cache on any workspace dirtiness;
+- make project/index own precise lifecycle facts while doctor/report project redacted diagnostics.
+
+The third design is deeper. It keeps cache mechanics below the report boundary, avoids false rebuilds
+from unrelated files, and still gives operators stable status and next-action reasons.
+
 `lean-dup` reuses indexes across audits. This document defines when an index is still good, when it must be rebuilt,
 and how `doctor` and the hidden `cache-cleanup` keep the cache directory honest.
 
@@ -42,7 +68,8 @@ The cache root defaults to `~/.cache/lean-dup`; `LEAN_DUP_CACHE_DIR` overrides i
 
 `doctor --format json` reports:
 
-- cache root and total indexed disk bytes;
+- redacted cache-root and workspace path references as `{ kind, fingerprint }`;
+- total indexed disk bytes;
 - one entry per cache label;
 - latest-pointer status: `ok | missing | target-missing | corrupt-pointer`;
 - per-entry status: `current | stale | corrupt | missing | unchecked`;
@@ -50,6 +77,10 @@ The cache root defaults to `~/.cache/lean-dup`; `LEAN_DUP_CACHE_DIR` overrides i
 - static vs source-backed provenance;
 - declaration count when readable;
 - disk bytes and reasons.
+
+The JSON projection does not expose absolute private paths, cache-entry directory names, file names such as
+`index.sqlite` or `latest.json`, SQLite table names, posting-list vocabulary, or worker-row details. The index crate
+continues to own concrete paths internally so it can open, reuse, invalidate, and clean up caches.
 
 `unchecked` means the index is readable but the current `doctor` invocation did not provide enough source context to
 judge freshness. That is normal for arbitrary external labels.
@@ -93,3 +124,14 @@ cargo run -p lean-dup-cli -- doctor \
   --workspace tests/fixtures/tiny --module Tiny --format json \
   > target/cache/doctor-production.json
 ```
+
+Prompt 57 generated `target/cache/doctor-production.json` with `LEAN_DUP_CACHE_DIR=target/cache/doctor-cache`.
+Observed facts:
+
+- `status = ok`;
+- `lean_version = Lean 4.30.0-rc2`;
+- requested workspace, Lake root, Lake file, cache root, cache labels, cache entries, and cache stores are redacted path
+  references;
+- the expected audit-workspace entry is `missing` before an index has been built and reports `missing cache store`;
+- leak check over `target/cache/doctor-production.json` and redacted provenance summaries found no absolute private
+  paths, storage file names, SQLite/posting vocabulary, or worker-row text.

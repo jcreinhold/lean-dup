@@ -248,7 +248,7 @@ fn diagnose_entry(
     let mut reasons = Vec::new();
 
     if !index_path.exists() {
-        reasons.push("missing index.sqlite".to_owned());
+        reasons.push("missing cache store".to_owned());
         return Ok(CacheEntryDiagnostics {
             index_dir,
             index_path,
@@ -265,8 +265,8 @@ fn diagnose_entry(
 
     let metadata = match read_index_metadata(&index_path) {
         Ok(metadata) => metadata,
-        Err(message) => {
-            reasons.push(message);
+        Err(_) => {
+            reasons.push("cache store metadata is unreadable".to_owned());
             return Ok(CacheEntryDiagnostics {
                 index_dir,
                 index_path,

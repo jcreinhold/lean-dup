@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use lean_dup_diagnostics::perf::{PerfEvent, PerfSummary};
 use lean_dup_eval::EvalOutput;
@@ -9,6 +9,7 @@ use lean_dup_search::{
     SearchSemanticObligationFact, SearchSemanticObligationYield, SearchSemanticRerankingSummary, ShowOutput,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::report_contract::{AuditExplanations, GroupExplanation};
 
@@ -177,12 +178,16 @@ pub struct EvalSemanticVerificationStageMetricsDto {
 #[derive(Debug, Serialize)]
 pub struct DoctorReport {
     pub status: &'static str,
+    #[serde(serialize_with = "serialize_path_ref")]
     pub requested_workspace: PathBuf,
+    #[serde(serialize_with = "serialize_path_ref")]
     pub lake_root: PathBuf,
+    #[serde(serialize_with = "serialize_path_ref")]
     pub lakefile: PathBuf,
     pub module_roots: Vec<String>,
     pub selected_roots: Vec<String>,
     pub source_count: usize,
+    #[serde(serialize_with = "serialize_cache_root_ref")]
     pub cache_root: PathBuf,
     pub cache_fingerprint: String,
     pub cache: CacheDiagnosticsReport,
@@ -211,6 +216,7 @@ pub struct IndexReport {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CacheDiagnosticsReport {
+    #[serde(serialize_with = "serialize_cache_root_ref")]
     pub cache_root: PathBuf,
     pub total_disk_bytes: u64,
     pub labels: Vec<CacheLabelDiagnosticsReport>,
@@ -219,6 +225,7 @@ pub struct CacheDiagnosticsReport {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CacheLabelDiagnosticsReport {
     pub label: String,
+    #[serde(serialize_with = "serialize_path_ref")]
     pub label_dir: PathBuf,
     pub disk_bytes: u64,
     pub latest: CacheLatestDiagnosticsReport,
@@ -227,14 +234,18 @@ pub struct CacheLabelDiagnosticsReport {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CacheLatestDiagnosticsReport {
+    #[serde(serialize_with = "serialize_path_ref")]
     pub pointer_path: PathBuf,
     pub status: String,
+    #[serde(serialize_with = "serialize_option_path_ref")]
     pub index_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CacheEntryDiagnosticsReport {
+    #[serde(serialize_with = "serialize_path_ref")]
     pub index_dir: PathBuf,
+    #[serde(serialize_with = "serialize_path_ref")]
     pub index_path: PathBuf,
     pub status: String,
     pub active_latest: bool,
@@ -249,6 +260,7 @@ pub struct CacheEntryDiagnosticsReport {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CacheCleanupReportDto {
     pub status: &'static str,
+    #[serde(serialize_with = "serialize_cache_root_ref")]
     pub cache_root: PathBuf,
     pub executed: bool,
     pub removable_count: usize,
@@ -262,9 +274,89 @@ pub struct CacheCleanupReportDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CacheCleanupEntryReport {
     pub label: String,
+    #[serde(serialize_with = "serialize_path_ref")]
     pub index_dir: PathBuf,
     pub disk_bytes: u64,
     pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PathReferenceReport {
+    pub kind: &'static str,
+    pub fingerprint: String,
+}
+
+/// Stable path diagnostic for release-facing report output.
+///
+/// Reports expose the role and digest of local paths, not filesystem layout.
+/// Index, project, and worker crates keep owning the concrete paths they need
+/// to build, open, or invalidate caches.
+pub fn path_reference(path: &Path) -> PathReferenceReport {
+    PathReferenceReport {
+        kind: path_kind(path),
+        fingerprint: path_fingerprint(path),
+    }
+}
+
+pub(crate) fn path_diagnostic_label(path: &Path) -> String {
+    let reference = path_reference(path);
+    format!("{} {}", reference.kind, reference.fingerprint)
+}
+
+pub(crate) fn cache_root_diagnostic_label(path: &Path) -> String {
+    format!("cache-root {}", path_fingerprint(path))
+}
+
+fn serialize_path_ref<S>(path: &Path, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    path_reference(path).serialize(serializer)
+}
+
+fn serialize_cache_root_ref<S>(path: &Path, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    PathReferenceReport {
+        kind: "cache-root",
+        fingerprint: path_fingerprint(path),
+    }
+    .serialize(serializer)
+}
+
+fn serialize_option_path_ref<S>(path: &Option<PathBuf>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    path.as_deref().map(path_reference).serialize(serializer)
+}
+
+fn path_kind(path: &Path) -> &'static str {
+    let path_text = path.to_string_lossy();
+    let filename = path.file_name().and_then(|name| name.to_str());
+    if filename == Some("lakefile.toml") || filename == Some("lakefile.lean") {
+        "lake-config"
+    } else if filename == Some("index.sqlite") {
+        "cache-store"
+    } else if filename == Some("latest.json") {
+        "cache-pointer"
+    } else if path_text.contains("/indexes/") || path_text.contains("\\indexes\\") {
+        "cache-entry"
+    } else if path_text.contains("cache") || path_text.contains(".cache") {
+        "cache-root"
+    } else {
+        "workspace-root"
+    }
+}
+
+fn path_fingerprint(path: &Path) -> String {
+    let digest = Sha256::digest(path.to_string_lossy().as_bytes());
+    let mut short = String::with_capacity(24);
+    for byte in digest.iter().take(12) {
+        short.push_str(&format!("{byte:02x}"));
+    }
+    format!("sha256:{short}")
 }
 
 #[derive(Debug, Serialize)]
