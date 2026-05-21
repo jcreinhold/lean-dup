@@ -357,8 +357,8 @@ fn render_audit(report: &AuditReport) -> String {
         }
         if let Some(hint) = &group.replacement_hint {
             lines.push(format!(
-                "  hint: import={} callers={} target_module={}",
-                hint.import_status, hint.caller_count, hint.target_module
+                "  hint: import={} impact={} callers={} target_module={}",
+                hint.import_status, hint.caller_impact, hint.caller_count, hint.target_module
             ));
         }
         if !group.blockers.is_empty() {
@@ -433,7 +433,11 @@ fn push_group_detail(lines: &mut Vec<String>, group: &ReviewGroupReport) {
     if let Some(hint) = &group.replacement_hint {
         lines.push(format!("replacement: {}", hint.target_decl));
         lines.push(format!("import status: {}", hint.import_status));
+        lines.push(format!("caller impact: {}", hint.caller_impact));
         lines.push(format!("callers: {}", hint.caller_count));
+        if hint.callers_truncated {
+            lines.push("caller list: truncated".to_owned());
+        }
         for caller in &hint.displayed_callers {
             lines.push(format!(
                 "  caller {}:{}:{} {}",

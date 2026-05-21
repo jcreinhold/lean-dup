@@ -130,6 +130,7 @@ pub struct DeclarationSourceFact {
     pub source_file: Option<PathBuf>,
     pub source_fingerprint: Option<String>,
     pub references: Vec<SourceReference>,
+    pub reference_status: SourceReferenceStatus,
 }
 
 /// Source-level facts for one loaded file.
@@ -149,6 +150,20 @@ pub struct SourceReference {
     pub text: String,
 }
 
+/// Bounded reference-scan status for one declaration.
+///
+/// Search callers use this to describe uncertainty in replacement guidance
+/// without learning token scanning, source parsing, or filesystem details.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SourceReferenceStatus {
+    NotRequested,
+    MissingSource,
+    SourceUnavailable,
+    Complete,
+    Truncated,
+}
+
 /// Import availability for replacing a local declaration with a target module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -156,6 +171,7 @@ pub enum ImportStatus {
     Direct,
     Missing,
     Unknown,
+    SourceBackedNotImportable,
 }
 
 /// Collect source facts for declarations that belong to workspace files.
@@ -198,12 +214,16 @@ pub fn collect_source_facts(input: SourceFactInput<'_>) -> SourceFacts {
             let span = declaration.source_span.as_ref()?;
             source.fingerprint_for(declaration, span.start.line as usize, span.end.line as usize)
         });
-        let references = if input.reference_scope.includes(&declaration.declaration_id) {
+        let (references, reference_status) = if !input.reference_scope.includes(&declaration.declaration_id) {
+            (Vec::new(), SourceReferenceStatus::NotRequested)
+        } else if source_file.is_none() {
+            (Vec::new(), SourceReferenceStatus::MissingSource)
+        } else if source_file.as_ref().is_some_and(|path| !loaded.contains_key(path)) {
+            (Vec::new(), SourceReferenceStatus::SourceUnavailable)
+        } else {
             reference_tokens(declaration)
                 .map(|tokens| references_to(declaration, &tokens, &loaded, input.max_references_per_declaration))
-                .unwrap_or_default()
-        } else {
-            Vec::new()
+                .unwrap_or_else(|| (Vec::new(), SourceReferenceStatus::Complete))
         };
         facts.declarations.insert(
             declaration.declaration_id.clone(),
@@ -214,6 +234,7 @@ pub fn collect_source_facts(input: SourceFactInput<'_>) -> SourceFacts {
                 source_file,
                 source_fingerprint,
                 references,
+                reference_status,
             },
         );
     }
@@ -242,7 +263,7 @@ impl SourceFile {
         let text = std::fs::read_to_string(path)
             .map_err(|source| format!("{}: source unavailable ({source})", path.display()))?;
         let lines = text.lines().map(str::to_owned).collect::<Vec<_>>();
-        let stripped_lines = strip_comments_by_line(&lines);
+        let stripped_lines = strip_comments_and_strings_by_line(&lines);
         let imports = parse_imports(&stripped_lines);
         Ok(Self {
             path: path.to_path_buf(),
@@ -320,17 +341,19 @@ fn references_to(
     tokens: &[String],
     files: &BTreeMap<PathBuf, SourceFile>,
     max_references: usize,
-) -> Vec<SourceReference> {
+) -> (Vec<SourceReference>, SourceReferenceStatus) {
     if declaration.origin != "workspace" {
-        return Vec::new();
+        return (Vec::new(), SourceReferenceStatus::Complete);
     }
     let declaration_file = declaration.source_span.as_ref().map(|span| PathBuf::from(&span.file));
     let declaration_start = declaration.source_span.as_ref().map(|span| span.start.line as usize);
     let declaration_end = declaration.source_span.as_ref().map(|span| span.end.line as usize);
     let mut references = Vec::new();
+    let mut truncated = false;
     for source in files.values() {
         let remaining = max_references.saturating_sub(references.len());
         if remaining == 0 {
+            truncated = true;
             break;
         }
         references.extend(source.references_to(
@@ -343,7 +366,15 @@ fn references_to(
     }
     references.sort();
     references.dedup();
-    references
+    if references.len() >= max_references {
+        truncated = true;
+    }
+    let status = if truncated {
+        SourceReferenceStatus::Truncated
+    } else {
+        SourceReferenceStatus::Complete
+    };
+    (references, status)
 }
 
 fn reference_tokens(declaration: &HydratedDeclaration) -> Option<Vec<String>> {
@@ -390,9 +421,11 @@ fn is_lean_name_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || matches!(ch, '_' | '\'' | '.')
 }
 
-fn strip_comments_by_line(lines: &[String]) -> Vec<String> {
+fn strip_comments_and_strings_by_line(lines: &[String]) -> Vec<String> {
     let mut stripped = Vec::with_capacity(lines.len());
     let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
     for line in lines {
         let mut output = String::new();
         let bytes = line.as_bytes();
@@ -402,12 +435,12 @@ fn strip_comments_by_line(lines: &[String]) -> Vec<String> {
             if depth == 0 && two == Some("--") {
                 break;
             }
-            if two == Some("/-") {
+            if depth == 0 && !in_string && two == Some("/-") {
                 depth += 1;
                 index += 2;
                 continue;
             }
-            if depth > 0 && two == Some("-/") {
+            if depth > 0 && !in_string && two == Some("-/") {
                 depth -= 1;
                 index += 2;
                 continue;
@@ -415,7 +448,21 @@ fn strip_comments_by_line(lines: &[String]) -> Vec<String> {
             if depth == 0
                 && let Some(ch) = line[index..].chars().next()
             {
-                output.push(ch);
+                if in_string {
+                    if escaped {
+                        escaped = false;
+                    } else if ch == '\\' {
+                        escaped = true;
+                    } else if ch == '"' {
+                        in_string = false;
+                    }
+                    output.push(' ');
+                } else if ch == '"' {
+                    in_string = true;
+                    output.push(' ');
+                } else {
+                    output.push(ch);
+                }
                 index += ch.len_utf8();
             } else {
                 index += 1;
@@ -469,6 +516,7 @@ theorem target : True := by trivial
 theorem target_suffix : True := by trivial
 -- target
 /- target -/
+def string_noise := "target"
 theorem caller : True := target
 end Tiny
 "#,
@@ -480,7 +528,7 @@ end Tiny
         let fact = facts.declaration(&declaration.declaration_id).unwrap();
 
         assert_eq!(fact.references.len(), 1);
-        assert_eq!(fact.references[0].line, 8);
+        assert_eq!(fact.references[0].line, 9);
         assert_eq!(
             facts.import_status_for(&declaration.declaration_id, "Target.Module"),
             ImportStatus::Direct

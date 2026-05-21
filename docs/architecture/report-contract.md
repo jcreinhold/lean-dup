@@ -180,7 +180,8 @@ or pair id. It includes:
 - evidence mode: `static`, `source-backed-not-importable`, or `proof-grade`;
 - typed semantic evidence status or the reason no semantic evidence is attached;
 - blockers, or `none`;
-- replacement target, import status, caller count, and replacement notes;
+- replacement target, import status, caller-impact state, caller count,
+  truncation status, and replacement notes;
 - whether the group is visible or hidden under the active filter, and why.
 
 `show` may include full evidence for that selected family. It still does not

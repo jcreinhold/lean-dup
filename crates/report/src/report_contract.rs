@@ -285,8 +285,8 @@ fn blocker_summary(group: &AuditGroup) -> String {
 fn replacement_summary(group: &AuditGroup) -> String {
     if let Some(hint) = &group.replacement_hint {
         let mut summary = format!(
-            "target {}; import={}; callers={}",
-            hint.target_decl, hint.import_status, hint.caller_count
+            "target {}; import={}; impact={}; callers={}",
+            hint.target_decl, hint.import_status, hint.caller_impact, hint.caller_count
         );
         if !hint.blockers.is_empty() {
             summary.push_str(&format!("; blockers={}", hint.blockers.join(", ")));

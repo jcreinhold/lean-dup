@@ -2,9 +2,11 @@ use serde::Serialize;
 
 use lean_dup_worker::SourceSpan;
 
-use crate::ranking::{ConfidenceTier, RankedGroup, RankedReview, ReviewAction, ReviewFilter};
+use crate::ranking::{
+    ConfidenceTier, RankedGroup, RankedReview, ReviewAction, ReviewEvidenceMode, ReviewFilter, ReviewMember,
+};
 use crate::scorer;
-use crate::source_refs::{ImportStatus, SourceFacts, SourceReference};
+use crate::source_refs::{ImportStatus, SourceFacts, SourceReference, SourceReferenceStatus};
 
 /// Replacement guidance attached to ranked groups.
 ///
@@ -16,10 +18,28 @@ pub struct ReplacementHint {
     pub target_decl: String,
     pub target_module: String,
     pub import_status: ImportStatus,
+    pub caller_impact: CallerImpact,
     pub caller_count: usize,
     pub displayed_callers: Vec<SourceReference>,
+    pub callers_truncated: bool,
     pub notes: Vec<String>,
     pub blockers: Vec<String>,
+}
+
+/// Stable caller-impact category for replacement guidance.
+///
+/// This describes what search can safely say from bounded source-use facts.
+/// It is not proof of semantic replaceability, and it does not expose token
+/// scanning, parser heuristics, or local filesystem layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CallerImpact {
+    NoCallers,
+    WrapperOnly,
+    BoundedCallers,
+    TruncatedCallers,
+    UnknownCallers,
+    MissingSource,
 }
 
 /// Profile defaults for replacement hint display and safety notes.
@@ -92,11 +112,20 @@ fn hint_for_group(
         return None;
     }
 
-    let import_status = aggregate_import_status(
-        local_members
-            .iter()
-            .map(|member| facts.import_status_for(&member.declaration_id, &target_module)),
-    );
+    let import_status = if group.evidence_mode == ReviewEvidenceMode::SourceBackedNotImportable {
+        ImportStatus::SourceBackedNotImportable
+    } else {
+        aggregate_import_status(
+            local_members
+                .iter()
+                .map(|member| facts.import_status_for(&member.declaration_id, &target_module)),
+        )
+    };
+    let caller_status = aggregate_reference_status(local_members.iter().map(|member| {
+        facts
+            .declaration(&member.declaration_id)
+            .map(|fact| fact.reference_status)
+    }));
     let mut callers = local_members
         .iter()
         .filter_map(|member| facts.declaration(&member.declaration_id))
@@ -107,9 +136,35 @@ fn hint_for_group(
 
     let mut notes = Vec::new();
     let mut blockers = Vec::new();
+    let caller_impact = caller_impact(group, &local_members, facts, caller_status, &callers);
     if import_status == ImportStatus::Missing {
         blockers.push("missing-import".to_owned());
         notes.push(format!("add `import {target_module}` before replacing local uses"));
+    }
+    if import_status == ImportStatus::SourceBackedNotImportable {
+        blockers.push("source-backed-not-importable".to_owned());
+        notes.push(
+            "source-backed evidence is not importable in this workspace; review before replacing uses".to_owned(),
+        );
+    }
+    match caller_impact {
+        CallerImpact::NoCallers => notes.push("no local callers were found in the bounded source scan".to_owned()),
+        CallerImpact::WrapperOnly => {
+            notes.push("caller impact is wrapper-only; do not replace uses outside the wrapper".to_owned())
+        }
+        CallerImpact::TruncatedCallers => {
+            blockers.push("caller-scan-truncated".to_owned());
+            notes.push("caller scan reached its bound; inspect remaining uses before replacing".to_owned());
+        }
+        CallerImpact::UnknownCallers => {
+            blockers.push("caller-impact-unknown".to_owned());
+            notes.push("caller impact is unknown because source-use facts are incomplete".to_owned());
+        }
+        CallerImpact::MissingSource => {
+            blockers.push("missing-source".to_owned());
+            notes.push("caller impact is unknown because source location is missing".to_owned());
+        }
+        CallerImpact::BoundedCallers => {}
     }
     if callers.len() >= profile.transitional_alias_callers {
         notes.push("many local callers; keep a transitional alias during cleanup".to_owned());
@@ -127,8 +182,11 @@ fn hint_for_group(
         target_decl,
         target_module,
         import_status,
+        caller_impact,
         caller_count: callers.len(),
-        displayed_callers: callers.into_iter().take(profile.max_displayed_callers).collect(),
+        displayed_callers: callers.iter().take(profile.max_displayed_callers).cloned().collect(),
+        callers_truncated: caller_impact == CallerImpact::TruncatedCallers
+            || callers.len() > profile.max_displayed_callers,
         notes,
         blockers,
     })
@@ -184,7 +242,8 @@ fn private_helper_wrapper_cleanup(group: &RankedGroup, facts: &SourceFacts) -> b
     let Some(private_fact) = facts.declaration(&private.declaration_id) else {
         return false;
     };
-    !private_fact.references.is_empty()
+    private_fact.reference_status == SourceReferenceStatus::Complete
+        && !private_fact.references.is_empty()
         && target.source_span.as_ref().is_some_and(|target_span| {
             private_fact
                 .references
@@ -203,6 +262,8 @@ fn aggregate_import_status(statuses: impl Iterator<Item = ImportStatus>) -> Impo
     let statuses = statuses.collect::<Vec<_>>();
     if statuses.is_empty() {
         ImportStatus::Unknown
+    } else if statuses.contains(&ImportStatus::SourceBackedNotImportable) {
+        ImportStatus::SourceBackedNotImportable
     } else if statuses.iter().all(|status| *status == ImportStatus::Direct) {
         ImportStatus::Direct
     } else if statuses.contains(&ImportStatus::Missing) {
@@ -212,16 +273,100 @@ fn aggregate_import_status(statuses: impl Iterator<Item = ImportStatus>) -> Impo
     }
 }
 
+fn aggregate_reference_status(statuses: impl Iterator<Item = Option<SourceReferenceStatus>>) -> SourceReferenceStatus {
+    let statuses = statuses.collect::<Vec<_>>();
+    if statuses.is_empty() || statuses.iter().any(Option::is_none) {
+        SourceReferenceStatus::NotRequested
+    } else if statuses
+        .iter()
+        .any(|status| status == &Some(SourceReferenceStatus::MissingSource))
+    {
+        SourceReferenceStatus::MissingSource
+    } else if statuses
+        .iter()
+        .any(|status| status == &Some(SourceReferenceStatus::SourceUnavailable))
+    {
+        SourceReferenceStatus::SourceUnavailable
+    } else if statuses
+        .iter()
+        .any(|status| status == &Some(SourceReferenceStatus::Truncated))
+    {
+        SourceReferenceStatus::Truncated
+    } else if statuses
+        .iter()
+        .any(|status| status == &Some(SourceReferenceStatus::NotRequested))
+    {
+        SourceReferenceStatus::NotRequested
+    } else {
+        SourceReferenceStatus::Complete
+    }
+}
+
+fn caller_impact(
+    group: &RankedGroup,
+    local_members: &[&ReviewMember],
+    facts: &SourceFacts,
+    status: SourceReferenceStatus,
+    callers: &[SourceReference],
+) -> CallerImpact {
+    match status {
+        SourceReferenceStatus::MissingSource => return CallerImpact::MissingSource,
+        SourceReferenceStatus::NotRequested | SourceReferenceStatus::SourceUnavailable => {
+            return CallerImpact::UnknownCallers;
+        }
+        SourceReferenceStatus::Truncated => return CallerImpact::TruncatedCallers,
+        SourceReferenceStatus::Complete => {}
+    }
+    if callers.is_empty() {
+        return CallerImpact::NoCallers;
+    }
+    if group.recommended_action == ReviewAction::InlinePrivateHelper && wrapper_only(group, local_members, facts) {
+        CallerImpact::WrapperOnly
+    } else {
+        CallerImpact::BoundedCallers
+    }
+}
+
+fn wrapper_only(group: &RankedGroup, local_members: &[&ReviewMember], facts: &SourceFacts) -> bool {
+    let Some(target_decl) = group.target_decl.as_deref() else {
+        return false;
+    };
+    let Some(target) = local_members
+        .iter()
+        .copied()
+        .find(|member| member.visibility == "public" && member.qualified_name == target_decl)
+    else {
+        return false;
+    };
+    let Some(target_span) = target.source_span.as_ref() else {
+        return false;
+    };
+    let private_facts = local_members
+        .iter()
+        .copied()
+        .filter(|member| member.visibility != "public")
+        .filter_map(|member| facts.declaration(&member.declaration_id))
+        .collect::<Vec<_>>();
+    !private_facts.is_empty()
+        && private_facts
+            .iter()
+            .all(|fact| fact.reference_status == SourceReferenceStatus::Complete)
+        && private_facts
+            .iter()
+            .flat_map(|fact| fact.references.iter())
+            .all(|reference| span_contains(target_span, reference))
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::TempDir;
 
-    use super::{ReplacementHintProfile, attach_replacement_hints};
+    use super::{CallerImpact, ReplacementHintProfile, attach_replacement_hints};
     use crate::ranking::{
         ConfidenceTier, RankedGroup, RankedReview, RankingDiagnostics, ReviewAction, ReviewEvidenceMode, ReviewMember,
         ReviewPriority, ReviewRelation,
     };
-    use crate::source_refs::{ImportStatus, SourceFactInput, collect_source_facts};
+    use crate::source_refs::{ImportStatus, SourceFactInput, SourceReferenceStatus, collect_source_facts};
     use lean_dup_index::{DeclarationHandle, HydratedDeclaration};
     use lean_dup_worker::{Fingerprints, SourcePoint, SourceSpan};
 
@@ -279,6 +424,7 @@ end Tiny
         let hint = review.groups[0].replacement_hint.as_ref().unwrap();
 
         assert_eq!(hint.import_status, ImportStatus::Missing);
+        assert_eq!(hint.caller_impact, CallerImpact::BoundedCallers);
         assert_eq!(hint.caller_count, 1);
         assert_eq!(hint.displayed_callers.len(), 1);
         assert!(hint.notes.iter().all(|note| !note.contains("delete")));
@@ -339,12 +485,129 @@ end Tiny
         let group = &review.groups[0];
         assert_eq!(group.recommended_action, ReviewAction::InlinePrivateHelper);
         let hint = group.replacement_hint.as_ref().unwrap();
+        assert_eq!(hint.caller_impact, CallerImpact::WrapperOnly);
         assert_eq!(hint.caller_count, 1);
         assert!(
             hint.notes
                 .iter()
                 .any(|note| note.contains("inline the helper body into the wrapper"))
         );
+    }
+
+    #[test]
+    fn local_alias_without_callers_reports_no_caller_impact() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("Tiny.lean");
+        std::fs::write(
+            &path,
+            r#"
+namespace Tiny
+theorem local : True := by trivial
+end Tiny
+"#,
+        )
+        .unwrap();
+        let declaration = declaration_with_span("workspace:Tiny:Tiny.local", "Tiny.local", "public", &path, 3, 3);
+        let facts = collect_source_facts(SourceFactInput::new(std::slice::from_ref(&declaration)));
+        let review = RankedReview {
+            groups: vec![group_for(
+                vec![member(&declaration)],
+                ReviewAction::LocalAlias,
+                ReviewEvidenceMode::Static,
+                Some("Tiny.local"),
+                Some("Tiny"),
+                Vec::new(),
+            )],
+            suppressed: Vec::new(),
+            diagnostics: RankingDiagnostics::default(),
+        };
+
+        let review = attach_replacement_hints(review, &facts, ReplacementHintProfile::default());
+        let hint = review.groups[0].replacement_hint.as_ref().unwrap();
+        assert_eq!(hint.caller_impact, CallerImpact::NoCallers);
+        assert!(hint.notes.iter().any(|note| note.contains("no local callers")));
+        assert!(hint.notes.iter().any(|note| note.contains("alias-first")));
+    }
+
+    #[test]
+    fn bounded_caller_truncation_is_explicit() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("Tiny.lean");
+        std::fs::write(
+            &path,
+            r#"
+namespace Tiny
+theorem local : True := by trivial
+theorem caller_one : True := local
+theorem caller_two : True := local
+theorem caller_three : True := local
+end Tiny
+"#,
+        )
+        .unwrap();
+        let declaration = declaration_with_span("workspace:Tiny:Tiny.local", "Tiny.local", "public", &path, 3, 3);
+        let mut input = SourceFactInput::new(std::slice::from_ref(&declaration));
+        input.max_references_per_declaration = 2;
+        let facts = collect_source_facts(input);
+        assert_eq!(
+            facts.declaration(&declaration.declaration_id).unwrap().reference_status,
+            SourceReferenceStatus::Truncated
+        );
+        let review = RankedReview {
+            groups: vec![group_for(
+                vec![member(&declaration)],
+                ReviewAction::ReplaceLocalUses,
+                ReviewEvidenceMode::Static,
+                Some("Tiny.local"),
+                Some("Tiny"),
+                Vec::new(),
+            )],
+            suppressed: Vec::new(),
+            diagnostics: RankingDiagnostics::default(),
+        };
+
+        let review = attach_replacement_hints(
+            review,
+            &facts,
+            ReplacementHintProfile {
+                max_displayed_callers: 1,
+                transitional_alias_callers: 10,
+            },
+        );
+        let hint = review.groups[0].replacement_hint.as_ref().unwrap();
+        assert_eq!(hint.caller_impact, CallerImpact::TruncatedCallers);
+        assert!(hint.callers_truncated);
+        assert!(hint.blockers.iter().any(|blocker| blocker == "caller-scan-truncated"));
+        assert_eq!(hint.displayed_callers.len(), 1);
+    }
+
+    #[test]
+    fn missing_source_and_source_backed_importability_are_blockers() {
+        let missing = declaration_without_span("workspace:Tiny:Tiny.local", "Tiny.local");
+        let facts = collect_source_facts(SourceFactInput::new(std::slice::from_ref(&missing)));
+        let review = RankedReview {
+            groups: vec![group_for(
+                vec![member(&missing)],
+                ReviewAction::ReplaceLocalUses,
+                ReviewEvidenceMode::SourceBackedNotImportable,
+                Some("Mathlib.local"),
+                Some("Mathlib"),
+                Vec::new(),
+            )],
+            suppressed: Vec::new(),
+            diagnostics: RankingDiagnostics::default(),
+        };
+
+        let review = attach_replacement_hints(review, &facts, ReplacementHintProfile::default());
+        let hint = review.groups[0].replacement_hint.as_ref().unwrap();
+        assert_eq!(hint.import_status, ImportStatus::SourceBackedNotImportable);
+        assert_eq!(hint.caller_impact, CallerImpact::MissingSource);
+        assert!(
+            hint.blockers
+                .iter()
+                .any(|blocker| blocker == "source-backed-not-importable")
+        );
+        assert!(hint.blockers.iter().any(|blocker| blocker == "missing-source"));
     }
 
     fn declaration(id: &str, name: &str, path: &std::path::Path) -> HydratedDeclaration {
@@ -397,6 +660,35 @@ end Tiny
         }
     }
 
+    fn declaration_without_span(id: &str, name: &str) -> HydratedDeclaration {
+        HydratedDeclaration {
+            handle: DeclarationHandle::from_fixture_id(id),
+            declaration_id: id.to_owned(),
+            origin: "workspace".to_owned(),
+            module: "Tiny".to_owned(),
+            qualified_name: name.to_owned(),
+            display_name: name.rsplit('.').next().unwrap().to_owned(),
+            kind: "theorem".to_owned(),
+            visibility: "public".to_owned(),
+            modifiers: Vec::new(),
+            source_span: None,
+            statement_text: "theorem local : True".to_owned(),
+            docstring_text: None,
+            definition_body_summary: None,
+            status_flags: Vec::new(),
+            feature_version: "features.roles.v1".to_owned(),
+            fingerprints: Fingerprints {
+                statement: "statement".to_owned(),
+                safe_binder_permutation: "permutation".to_owned(),
+                connective_shape: "connective".to_owned(),
+                conclusion_shape: "conclusion".to_owned(),
+            },
+            role_features: Vec::new(),
+            binder_count: 0,
+            low_signal_markers: Vec::new(),
+        }
+    }
+
     fn member(declaration: &HydratedDeclaration) -> ReviewMember {
         ReviewMember {
             declaration_id: declaration.declaration_id.clone(),
@@ -408,6 +700,35 @@ end Tiny
             visibility: declaration.visibility.clone(),
             source_span: declaration.source_span.clone(),
             status_flags: Vec::new(),
+        }
+    }
+
+    fn group_for(
+        members: Vec<ReviewMember>,
+        action: ReviewAction,
+        evidence_mode: ReviewEvidenceMode,
+        target_decl: Option<&str>,
+        target_module: Option<&str>,
+        blockers: Vec<String>,
+    ) -> RankedGroup {
+        RankedGroup {
+            id: "review-1".to_owned(),
+            pair_id: "p1".to_owned(),
+            relation: ReviewRelation::ExactStatement,
+            members,
+            evidence: Vec::new(),
+            signals: vec!["statement-fingerprint".to_owned()],
+            blockers,
+            confidence: ConfidenceTier::High,
+            review_priority: ReviewPriority::High,
+            recommended_action: action,
+            target_decl: target_decl.map(str::to_owned),
+            target_module: target_module.map(str::to_owned),
+            evidence_mode,
+            probe_summary: None,
+            semantic_obligations: Vec::new(),
+            local_caller_count: 0,
+            replacement_hint: None,
         }
     }
 }

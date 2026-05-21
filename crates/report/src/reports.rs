@@ -722,8 +722,10 @@ pub struct ReplacementHintReport {
     pub target_decl: String,
     pub target_module: String,
     pub import_status: String,
+    pub caller_impact: String,
     pub caller_count: usize,
     pub displayed_callers: Vec<SourceReferenceReport>,
+    pub callers_truncated: bool,
     pub notes: Vec<String>,
     pub blockers: Vec<String>,
 }
@@ -1346,6 +1348,7 @@ fn replacement_hint_report(hint: &AuditReplacementHint) -> ReplacementHintReport
         target_decl: hint.target_decl.clone(),
         target_module: hint.target_module.clone(),
         import_status: hint.import_status.clone(),
+        caller_impact: hint.caller_impact.clone(),
         caller_count: hint.caller_count,
         displayed_callers: hint
             .displayed_callers
@@ -1357,6 +1360,7 @@ fn replacement_hint_report(hint: &AuditReplacementHint) -> ReplacementHintReport
                 text: caller.text.clone(),
             })
             .collect(),
+        callers_truncated: hint.callers_truncated,
         notes: hint.notes.clone(),
         blockers: hint.blockers.clone(),
     }

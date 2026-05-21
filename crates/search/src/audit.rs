@@ -17,7 +17,7 @@ use crate::ranking::{
     ReviewEvidence, ReviewEvidenceMode, ReviewFilter, ReviewMember, ReviewPriority, ReviewRelation, rank_candidates,
 };
 use crate::replacement_hints::{
-    ReplacementHint, ReplacementHintProfile, attach_replacement_hints, reference_declarations_for_hints,
+    CallerImpact, ReplacementHint, ReplacementHintProfile, attach_replacement_hints, reference_declarations_for_hints,
 };
 use crate::retrieval::RetrievalDiagnostics;
 use crate::retrieval::retrieve_candidates;
@@ -31,7 +31,7 @@ use crate::semantic_verification::{
     ProbeDiagnostics, ProbeSettings, SemanticVerificationInput, VerificationIndex, candidate_sets_for_review,
     verify_candidate_probes,
 };
-use crate::source_refs::{SourceFactInput, collect_source_facts};
+use crate::source_refs::{ImportStatus, SourceFactInput, collect_source_facts};
 use crate::{ProbePolicy, ProbeStatusBreakdown, Result};
 
 const DEFAULT_VISIBLE_GROUP_LIMIT: usize = 500;
@@ -283,8 +283,10 @@ pub struct AuditReplacementHint {
     pub target_decl: String,
     pub target_module: String,
     pub import_status: String,
+    pub caller_impact: String,
     pub caller_count: usize,
     pub displayed_callers: Vec<AuditSourceReference>,
+    pub callers_truncated: bool,
     pub notes: Vec<String>,
     pub blockers: Vec<String>,
 }
@@ -902,7 +904,8 @@ fn audit_replacement_hint(hint: &ReplacementHint) -> AuditReplacementHint {
     AuditReplacementHint {
         target_decl: hint.target_decl.clone(),
         target_module: hint.target_module.clone(),
-        import_status: format!("{:?}", hint.import_status).to_ascii_lowercase(),
+        import_status: import_status_label(hint.import_status).to_owned(),
+        caller_impact: caller_impact_label(hint.caller_impact).to_owned(),
         caller_count: hint.caller_count,
         displayed_callers: hint
             .displayed_callers
@@ -914,8 +917,29 @@ fn audit_replacement_hint(hint: &ReplacementHint) -> AuditReplacementHint {
                 text: caller.text.clone(),
             })
             .collect(),
+        callers_truncated: hint.callers_truncated,
         notes: hint.notes.clone(),
         blockers: hint.blockers.clone(),
+    }
+}
+
+fn import_status_label(status: ImportStatus) -> &'static str {
+    match status {
+        ImportStatus::Direct => "direct",
+        ImportStatus::Missing => "missing",
+        ImportStatus::Unknown => "unknown",
+        ImportStatus::SourceBackedNotImportable => "source-backed-not-importable",
+    }
+}
+
+fn caller_impact_label(impact: CallerImpact) -> &'static str {
+    match impact {
+        CallerImpact::NoCallers => "no-callers",
+        CallerImpact::WrapperOnly => "wrapper-only",
+        CallerImpact::BoundedCallers => "bounded-callers",
+        CallerImpact::TruncatedCallers => "truncated-callers",
+        CallerImpact::UnknownCallers => "unknown-callers",
+        CallerImpact::MissingSource => "missing-source",
     }
 }
 
