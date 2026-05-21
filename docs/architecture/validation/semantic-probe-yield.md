@@ -172,6 +172,20 @@ Cost: 122.75 seconds wall time; maximum RSS 5,628,461,056 bytes.
 The four visible groups all had `probe:verified:exact-theorem` and no `lean-probe-rejected` or
 `lean-probe-unavailable` blocker. A JSON check found zero visible groups carrying either blocker.
 
+## Prompt 71 Planning Update
+
+Prompt 71 keeps the fallback policy above and adds source-aware planning diagnostics before final ranking. Audit JSON
+now records `semantic_verification.status_by_source` and `semantic_verification.status_by_match_class`, each with
+planned, cached, worker, verified, rejected, unavailable, skipped-by-policy, skipped-by-budget, and timeout counts.
+
+The policy specifically addresses the KanProofs baseline where 470 of 500 planned probes were reducible-definition
+obligations with low yield. In actionable mode, reducible-definition probes now have a bounded quota, while exact theorem
+and other strong obligations keep priority. Broad diagnostic mode can still spend the full configured budget for
+debugging.
+
+These fields are release diagnostics, not worker traces. They do not expose generated proof obligations, raw Lean
+expressions, worker rows, cache keys, private paths, or vector facts.
+
 ## Fallback Policy
 
 Default actionable output blocks groups with:

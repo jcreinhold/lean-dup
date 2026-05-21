@@ -6,12 +6,12 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::ranking::{ConfidenceTier, RankedReview, ReviewAction, ReviewPriority, ReviewRelation};
-use crate::retrieval::{CandidateSet, RetrievedCandidate};
+use crate::retrieval::{CandidateSet, CandidateSourceFamily, RetrievedCandidate};
 use crate::semantic_reranking::{
     SearchSemanticObligationFact, SearchSemanticObligationKind, SearchSemanticObligationStatus,
     SearchSemanticObligationYield, SearchSemanticUnavailableReason,
 };
-use crate::{ProbePolicy, Result};
+use crate::{ProbePolicy, ProbeStatusBreakdown, Result};
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_index::ComparisonEvidencePolicy;
 use lean_dup_index::{HydratedDeclaration, OpenedIndex, ProbeCacheEntry};
@@ -21,6 +21,9 @@ use lean_dup_worker::{ModuleDescriptor, ProbeBatch, ProbePair, ProbeResult, Work
 const PROBE_CACHE_VERSION: &str = "semantic-probe-cache.v3";
 const PROBE_POLICY_VERSION: &str = "semantic-probe-policy.v2";
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const REDUCIBLE_DEFINITION_BUDGET_PERCENT: usize = 30;
+const LOCAL_DUPLICATE_BUDGET_PERCENT: usize = 10;
+const HIGH_RISK_BUDGET_PERCENT: usize = 10;
 
 /// User-independent settings for bounded semantic verification.
 ///
@@ -171,6 +174,8 @@ pub struct ProbeDiagnostics {
     pub unavailable_by_obligation: BTreeMap<String, usize>,
     pub unavailable_by_module: BTreeMap<String, usize>,
     pub unavailable_by_origin: BTreeMap<String, usize>,
+    pub status_by_source: BTreeMap<String, ProbeStatusBreakdown>,
+    pub status_by_match_class: BTreeMap<String, ProbeStatusBreakdown>,
     pub verified_results: usize,
     pub rejected_results: usize,
     pub obligation_yield: Vec<SearchSemanticObligationYield>,
@@ -208,6 +213,8 @@ impl Default for ProbeDiagnostics {
             unavailable_by_obligation: BTreeMap::new(),
             unavailable_by_module: BTreeMap::new(),
             unavailable_by_origin: BTreeMap::new(),
+            status_by_source: BTreeMap::new(),
+            status_by_match_class: BTreeMap::new(),
             verified_results: 0,
             rejected_results: 0,
             obligation_yield: Vec::new(),
@@ -280,6 +287,7 @@ pub fn verify_candidate_probes(
     for planned_probe in plan.planned {
         if let Some(cached) = input.local_index.index.cached_probe_result(&planned_probe.cache_key)? {
             diagnostics.cached_hits += 1;
+            record_probe_status(&mut diagnostics, &planned_probe.facts, ProbeStatus::Cached);
             increment_yield(
                 &mut diagnostics.obligation_yield,
                 planned_probe.obligation.semantic_kind(),
@@ -308,6 +316,7 @@ struct PlannedProbe {
     pair: ProbePair,
     cache_key: String,
     obligation: ProbeObligation,
+    facts: ProbePlanningFacts,
     right_module: String,
     right_origin: String,
     left_module: String,
@@ -343,6 +352,53 @@ impl ProbeObligation {
 struct ProbePlan {
     planned: Vec<PlannedProbe>,
     preflight_evidence: BTreeMap<String, SemanticEvidence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProbePlanningFacts {
+    source_id: String,
+    source_family: String,
+    match_class: String,
+    declaration_kind: String,
+    risk: ProbeRisk,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProbeRisk {
+    Ordinary,
+    HardNegativeRisk,
+    ReducibleDefinitionRisk,
+}
+
+impl ProbeRisk {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Ordinary => "ordinary",
+            Self::HardNegativeRisk => "hard-negative-risk",
+            Self::ReducibleDefinitionRisk => "reducible-definition-risk",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct ProbeQuotaState {
+    by_source: HashMap<String, usize>,
+    by_match_class: HashMap<String, usize>,
+    by_declaration_kind: HashMap<String, usize>,
+    by_risk: HashMap<&'static str, usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProbeStatus {
+    Planned,
+    Cached,
+    Worker,
+    Verified,
+    Rejected,
+    Unavailable,
+    SkippedByPolicy,
+    SkippedByBudget,
+    Timeout,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -443,15 +499,21 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
             diagnostics.candidates_considered += 1;
             let Some(group) = groups.get(candidate.pair_id.as_str()) else {
                 diagnostics.skipped_by_policy += 1;
+                let facts = probe_planning_facts_without_group(&set.anchor, candidate);
+                record_probe_status(diagnostics, &facts, ProbeStatus::SkippedByPolicy);
                 continue;
             };
-            if !eligible_for_policy(input.settings.policy, candidate, group) {
-                diagnostics.skipped_by_policy += 1;
-                continue;
-            }
             let left = DeclarationProbeSummary::from_declaration(&set.anchor, input.comparison_policy);
             let right = DeclarationProbeSummary::from_declaration(&candidate.declaration, input.comparison_policy);
+            if !eligible_for_policy(input.settings.policy, candidate, group) {
+                diagnostics.skipped_by_policy += 1;
+                let facts = probe_planning_facts(&left, &right, candidate, group, None);
+                record_probe_status(diagnostics, &facts, ProbeStatus::SkippedByPolicy);
+                continue;
+            }
             if !left.importable || !right.importable {
+                let facts =
+                    probe_planning_facts(&left, &right, candidate, group, Some(ProbeObligation::LocalDuplicate));
                 candidates.push((
                     set,
                     candidate,
@@ -459,10 +521,13 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
                     ProbeDecision::Unavailable(UnavailableReason::MissingDeclaration),
                     left,
                     right,
+                    facts,
                 ));
                 continue;
             }
             if !left.probe_supported_kind() || !right.probe_supported_kind() {
+                let facts =
+                    probe_planning_facts(&left, &right, candidate, group, Some(ProbeObligation::LocalDuplicate));
                 candidates.push((
                     set,
                     candidate,
@@ -470,14 +535,26 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
                     ProbeDecision::Unavailable(UnavailableReason::Unsupported),
                     left,
                     right,
+                    facts,
                 ));
                 continue;
             }
             let Some(obligation) = probe_obligation(input.settings.policy, &left, &right, candidate, group) else {
                 diagnostics.cheap_summary_rejects += 1;
+                let facts = probe_planning_facts(&left, &right, candidate, group, None);
+                record_probe_status(diagnostics, &facts, ProbeStatus::SkippedByPolicy);
                 continue;
             };
-            candidates.push((set, candidate, *group, ProbeDecision::Worker(obligation), left, right));
+            let facts = probe_planning_facts(&left, &right, candidate, group, Some(obligation));
+            candidates.push((
+                set,
+                candidate,
+                *group,
+                ProbeDecision::Worker(obligation),
+                left,
+                right,
+                facts,
+            ));
         }
     }
 
@@ -485,6 +562,8 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
         left.3
             .order_key()
             .cmp(&right.3.order_key())
+            .then_with(|| risk_order(left.6.risk).cmp(&risk_order(right.6.risk)))
+            .then_with(|| left.6.source_family.cmp(&right.6.source_family))
             .then_with(|| left.2.review_priority.cmp(&right.2.review_priority))
             .then_with(|| left.2.confidence.cmp(&right.2.confidence))
             .then_with(|| {
@@ -500,17 +579,28 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
     let mut planned = Vec::new();
     let mut preflight_evidence = BTreeMap::new();
     let mut per_declaration = HashMap::<String, usize>::default();
-    for (set, candidate, _, decision, left, right) in candidates {
-        if planned.len() >= input.settings.budget {
+    let mut quotas = ProbeQuotaState::default();
+    let mut selected_count = 0usize;
+    for (set, candidate, _, decision, left, right, facts) in candidates {
+        if selected_count >= input.settings.budget {
             diagnostics.skipped_by_budget += 1;
+            record_probe_status(diagnostics, &facts, ProbeStatus::SkippedByBudget);
             continue;
         }
         let count = per_declaration.entry(set.anchor.declaration_id.clone()).or_default();
         if *count >= input.settings.per_declaration_cap {
             diagnostics.skipped_by_budget += 1;
+            record_probe_status(diagnostics, &facts, ProbeStatus::SkippedByBudget);
+            continue;
+        }
+        if !quota_allows(input.settings, &facts, &quotas) {
+            diagnostics.skipped_by_budget += 1;
+            record_probe_status(diagnostics, &facts, ProbeStatus::SkippedByBudget);
             continue;
         }
         *count += 1;
+        record_quota_use(&facts, &mut quotas);
+        selected_count += 1;
         let pair = ProbePair {
             pair_id: candidate.pair_id.clone(),
             left_declaration_id: set.anchor.declaration_id.clone(),
@@ -519,6 +609,7 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
         match decision {
             ProbeDecision::Worker(obligation) => {
                 record_planned_obligation(obligation, diagnostics);
+                record_probe_status(diagnostics, &facts, ProbeStatus::Planned);
                 let include_private =
                     input.include_private || left.needs_private_filter() || right.needs_private_filter();
                 let include_generated = input.include_generated || left.generated || right.generated;
@@ -532,6 +623,7 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
                     ),
                     pair,
                     obligation,
+                    facts,
                     right_module: right.module,
                     right_origin: right.origin,
                     left_module: left.module,
@@ -545,6 +637,7 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
                     cache_key: String::new(),
                     pair: pair.clone(),
                     obligation: ProbeObligation::LocalDuplicate,
+                    facts,
                     right_module: right.module,
                     right_origin: right.origin,
                     left_module: left.module,
@@ -557,6 +650,7 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
                     synthetic.obligation.semantic_kind(),
                     SearchSemanticObligationStatus::Planned,
                 );
+                record_probe_status(diagnostics, &synthetic.facts, ProbeStatus::Planned);
                 let semantic = SemanticEvidence {
                     pair_id: pair.pair_id,
                     kind: EvidenceKind::Unavailable,
@@ -570,7 +664,7 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
             }
         }
     }
-    diagnostics.planned_pairs = planned.len();
+    diagnostics.planned_pairs = selected_count;
     ProbePlan {
         planned,
         preflight_evidence,
@@ -588,6 +682,7 @@ fn run_probe_chunk(
     diagnostics.worker_batches += 1;
     diagnostics.worker_pairs += chunk.len();
     for planned in chunk {
+        record_probe_status(diagnostics, &planned.facts, ProbeStatus::Worker);
         increment_worker_pairs(&mut diagnostics.obligation_yield, planned.obligation.semantic_kind(), 1);
     }
     reporter.event(
@@ -728,6 +823,172 @@ fn eligible_for_policy(
         ReviewAction::AlreadyInMathlib | ReviewAction::ReplaceLocalUses | ReviewAction::LocalAlias
     ) && matches!(group.confidence, ConfidenceTier::High | ConfidenceTier::Medium)
         && group.review_priority <= ReviewPriority::Medium
+}
+
+fn probe_planning_facts_without_group(
+    anchor: &HydratedDeclaration,
+    candidate: &RetrievedCandidate,
+) -> ProbePlanningFacts {
+    let (source_id, source_family) = primary_candidate_source(candidate);
+    ProbePlanningFacts {
+        source_id,
+        source_family,
+        match_class: "unranked".to_owned(),
+        declaration_kind: declaration_kind_pair(&anchor.kind, &candidate.declaration.kind),
+        risk: ProbeRisk::Ordinary,
+    }
+}
+
+fn probe_planning_facts(
+    left: &DeclarationProbeSummary,
+    right: &DeclarationProbeSummary,
+    candidate: &RetrievedCandidate,
+    group: &crate::ranking::RankedGroup,
+    obligation: Option<ProbeObligation>,
+) -> ProbePlanningFacts {
+    let (source_id, source_family) = primary_candidate_source(candidate);
+    let match_class = obligation
+        .map(|obligation| obligation_label(obligation).to_owned())
+        .unwrap_or_else(|| review_match_class(group, left, right).to_owned());
+    let declaration_kind = declaration_kind_pair(&left.kind, &right.kind);
+    let risk = if group.blockers.iter().any(|blocker| {
+        matches!(
+            blocker.as_str(),
+            "generated-declaration" | "broad-head-only" | "weak-feature-overlap"
+        )
+    }) {
+        ProbeRisk::HardNegativeRisk
+    } else if match_class == "reducible-definition" || left.definition_like() && right.definition_like() {
+        ProbeRisk::ReducibleDefinitionRisk
+    } else {
+        ProbeRisk::Ordinary
+    };
+
+    ProbePlanningFacts {
+        source_id,
+        source_family,
+        match_class,
+        declaration_kind,
+        risk,
+    }
+}
+
+fn review_match_class(
+    group: &crate::ranking::RankedGroup,
+    left: &DeclarationProbeSummary,
+    right: &DeclarationProbeSummary,
+) -> &'static str {
+    match group.relation {
+        ReviewRelation::ExactStatement => "exact-theorem",
+        ReviewRelation::PermutedStatement => "permuted-theorem",
+        ReviewRelation::ConnectiveEquivalent => "replacement",
+        ReviewRelation::Specialization => "specialization",
+        ReviewRelation::SourceClone => "source-clone",
+        ReviewRelation::SubsumptionCandidate => "subsumption-candidate",
+        ReviewRelation::NearStatement if left.definition_like() && right.definition_like() => "reducible-definition",
+        ReviewRelation::NearStatement => "near-statement",
+    }
+}
+
+fn primary_candidate_source(candidate: &RetrievedCandidate) -> (String, String) {
+    let source = candidate
+        .source_evidence
+        .iter()
+        .find(|source| source.source_family == CandidateSourceFamily::LeanSemantic)
+        .or_else(|| candidate.source_evidence.first());
+    if let Some(source) = source {
+        (
+            source.source_id.clone(),
+            candidate_source_family_label(source.source_family).to_owned(),
+        )
+    } else {
+        ("symbolic-retrieval".to_owned(), "symbolic".to_owned())
+    }
+}
+
+fn candidate_source_family_label(family: CandidateSourceFamily) -> &'static str {
+    match family {
+        CandidateSourceFamily::Symbolic => "symbolic",
+        CandidateSourceFamily::LeanSemantic => "lean-semantic",
+    }
+}
+
+fn declaration_kind_pair(left: &str, right: &str) -> String {
+    if left <= right {
+        format!("{left}+{right}")
+    } else {
+        format!("{right}+{left}")
+    }
+}
+
+fn risk_order(risk: ProbeRisk) -> usize {
+    match risk {
+        ProbeRisk::Ordinary => 0,
+        ProbeRisk::ReducibleDefinitionRisk => 1,
+        ProbeRisk::HardNegativeRisk => 2,
+    }
+}
+
+fn quota_allows(settings: ProbeSettings, facts: &ProbePlanningFacts, quotas: &ProbeQuotaState) -> bool {
+    if settings.policy == ProbePolicy::Broad {
+        return true;
+    }
+    let budget = settings.budget.max(1);
+    let source_count = quotas.by_source.get(&facts.source_id).copied().unwrap_or_default();
+    let match_count = quotas
+        .by_match_class
+        .get(&facts.match_class)
+        .copied()
+        .unwrap_or_default();
+    let kind_count = quotas
+        .by_declaration_kind
+        .get(&facts.declaration_kind)
+        .copied()
+        .unwrap_or_default();
+    let risk_count = quotas.by_risk.get(facts.risk.label()).copied().unwrap_or_default();
+
+    source_count < budget
+        && match_count < match_class_quota(budget, &facts.match_class)
+        && kind_count < declaration_kind_quota(budget, &facts.declaration_kind)
+        && risk_count < risk_quota(budget, facts.risk)
+}
+
+fn record_quota_use(facts: &ProbePlanningFacts, quotas: &mut ProbeQuotaState) {
+    *quotas.by_source.entry(facts.source_id.clone()).or_default() += 1;
+    *quotas.by_match_class.entry(facts.match_class.clone()).or_default() += 1;
+    *quotas
+        .by_declaration_kind
+        .entry(facts.declaration_kind.clone())
+        .or_default() += 1;
+    *quotas.by_risk.entry(facts.risk.label()).or_default() += 1;
+}
+
+fn match_class_quota(budget: usize, match_class: &str) -> usize {
+    match match_class {
+        "reducible-definition" => percentage_quota(budget, REDUCIBLE_DEFINITION_BUDGET_PERCENT),
+        "local-duplicate" => percentage_quota(budget, LOCAL_DUPLICATE_BUDGET_PERCENT),
+        _ => budget,
+    }
+}
+
+fn declaration_kind_quota(budget: usize, kind_pair: &str) -> usize {
+    if kind_pair == "abbrev+abbrev" || kind_pair == "abbrev+def" || kind_pair == "def+def" {
+        percentage_quota(budget, REDUCIBLE_DEFINITION_BUDGET_PERCENT)
+    } else {
+        budget
+    }
+}
+
+fn risk_quota(budget: usize, risk: ProbeRisk) -> usize {
+    match risk {
+        ProbeRisk::Ordinary => budget,
+        ProbeRisk::ReducibleDefinitionRisk => percentage_quota(budget, REDUCIBLE_DEFINITION_BUDGET_PERCENT),
+        ProbeRisk::HardNegativeRisk => percentage_quota(budget, HIGH_RISK_BUDGET_PERCENT),
+    }
+}
+
+fn percentage_quota(budget: usize, percent: usize) -> usize {
+    ((budget * percent).div_ceil(100)).max(1).min(budget)
 }
 
 fn probe_obligation(
@@ -955,6 +1216,7 @@ fn record_evidence_diagnostic(evidence: &SemanticEvidence, planned: &PlannedProb
     match evidence.status {
         EvidenceStatus::Verified => {
             diagnostics.verified_results += 1;
+            record_probe_status(diagnostics, &planned.facts, ProbeStatus::Verified);
             increment_yield(
                 &mut diagnostics.obligation_yield,
                 planned.obligation.semantic_kind(),
@@ -963,6 +1225,7 @@ fn record_evidence_diagnostic(evidence: &SemanticEvidence, planned: &PlannedProb
         }
         EvidenceStatus::Rejected => {
             diagnostics.rejected_results += 1;
+            record_probe_status(diagnostics, &planned.facts, ProbeStatus::Rejected);
             increment_yield(
                 &mut diagnostics.obligation_yield,
                 planned.obligation.semantic_kind(),
@@ -995,6 +1258,10 @@ fn record_evidence_diagnostic(evidence: &SemanticEvidence, planned: &PlannedProb
 
 fn record_unavailable_reason(reason: UnavailableReason, planned: &PlannedProbe, diagnostics: &mut ProbeDiagnostics) {
     diagnostics.unavailable_results += 1;
+    record_probe_status(diagnostics, &planned.facts, ProbeStatus::Unavailable);
+    if reason == UnavailableReason::Timeout {
+        record_probe_status(diagnostics, &planned.facts, ProbeStatus::Timeout);
+    }
     increment_yield(
         &mut diagnostics.obligation_yield,
         planned.obligation.semantic_kind(),
@@ -1023,6 +1290,26 @@ fn record_unavailable_reason(reason: UnavailableReason, planned: &PlannedProbe, 
     );
     increment(&mut diagnostics.unavailable_by_origin, &planned.left_origin);
     increment(&mut diagnostics.unavailable_by_origin, &planned.right_origin);
+}
+
+fn record_probe_status(diagnostics: &mut ProbeDiagnostics, facts: &ProbePlanningFacts, status: ProbeStatus) {
+    record_probe_status_for_key(&mut diagnostics.status_by_source, &facts.source_id, status);
+    record_probe_status_for_key(&mut diagnostics.status_by_match_class, &facts.match_class, status);
+}
+
+fn record_probe_status_for_key(map: &mut BTreeMap<String, ProbeStatusBreakdown>, key: &str, status: ProbeStatus) {
+    let item = map.entry(key.to_owned()).or_default();
+    match status {
+        ProbeStatus::Planned => item.planned += 1,
+        ProbeStatus::Cached => item.cached += 1,
+        ProbeStatus::Worker => item.worker += 1,
+        ProbeStatus::Verified => item.verified += 1,
+        ProbeStatus::Rejected => item.rejected += 1,
+        ProbeStatus::Unavailable => item.unavailable += 1,
+        ProbeStatus::SkippedByPolicy => item.skipped_by_policy += 1,
+        ProbeStatus::SkippedByBudget => item.skipped_by_budget += 1,
+        ProbeStatus::Timeout => item.timeout += 1,
+    }
 }
 
 fn increment(map: &mut BTreeMap<String, usize>, key: &str) {
@@ -1235,6 +1522,13 @@ mod tests {
         };
 
         assert_eq!(plan_probes(&input, &mut diagnostics).planned.len(), 1);
+        assert_eq!(
+            diagnostics
+                .status_by_match_class
+                .get("local-duplicate")
+                .map(|item| item.planned),
+            Some(1)
+        );
     }
 
     #[test]
@@ -1283,6 +1577,94 @@ mod tests {
 
         assert_eq!(plan_probes(&input, &mut diagnostics).planned.len(), 2);
         assert_eq!(diagnostics.skipped_by_budget, 1);
+        assert_eq!(
+            diagnostics
+                .status_by_match_class
+                .get("exact-theorem")
+                .map(|item| (item.planned, item.skipped_by_budget)),
+            Some((2, 1))
+        );
+    }
+
+    #[test]
+    fn actionable_policy_allocates_bounded_budget_by_obligation_risk() {
+        let theorem_anchor = declaration("workspace:Tiny:Tiny.theorem", "workspace", "Tiny.theorem");
+        let theorem_candidates = (0..3)
+            .map(|index| {
+                candidate(
+                    declaration(
+                        &format!("mathlib:Mathlib:Mathlib.exact{index}"),
+                        "mathlib",
+                        &format!("Mathlib.exact{index}"),
+                    ),
+                    "statement-fingerprint",
+                    100.0 - index as f64,
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut def_anchor = declaration("workspace:Tiny:Tiny.def", "workspace", "Tiny.def");
+        def_anchor.kind = "def".to_owned();
+        let def_candidates = (0..10)
+            .map(|index| {
+                let mut declaration = declaration(
+                    &format!("mathlib:Mathlib:Mathlib.def{index}"),
+                    "mathlib",
+                    &format!("Mathlib.def{index}"),
+                );
+                declaration.kind = "def".to_owned();
+                candidate(declaration, "statement-fingerprint", 90.0 - index as f64)
+            })
+            .collect::<Vec<_>>();
+        let candidate_sets = vec![
+            CandidateSet {
+                anchor: theorem_anchor,
+                candidates: theorem_candidates,
+            },
+            CandidateSet {
+                anchor: def_anchor,
+                candidates: def_candidates,
+            },
+        ];
+        let policy = proof_grade_mathlib_policy();
+        let review = rank_candidates(RankingInput {
+            candidate_sets: &candidate_sets,
+            semantic_evidence: &std::collections::BTreeMap::new(),
+            source_facts: &SourceFacts::empty(),
+            profile: RankingProfile::default(),
+            comparison_policy: &policy,
+        });
+        let mut diagnostics = super::ProbeDiagnostics::default();
+        let index = empty_index();
+        let input = SemanticVerificationInput {
+            candidate_sets: &candidate_sets,
+            cheap_review: &review,
+            local_index: VerificationIndex::new(&index),
+            workspace: &workspace(),
+            comparison_policy: &policy,
+            enabled: true,
+            include_private: true,
+            include_generated: false,
+            settings: ProbeSettings {
+                policy: ProbePolicy::Actionable,
+                budget: 10,
+                per_declaration_cap: 10,
+                chunk_size: 16,
+            },
+        };
+
+        let plan = plan_probes(&input, &mut diagnostics);
+
+        assert_eq!(plan.planned.len(), 6);
+        assert_eq!(diagnostics.planned_exact_theorem, 3);
+        assert_eq!(diagnostics.planned_reducible_definition, 3);
+        assert_eq!(diagnostics.skipped_by_budget, 7);
+        assert_eq!(
+            diagnostics
+                .status_by_match_class
+                .get("reducible-definition")
+                .map(|item| (item.planned, item.skipped_by_budget)),
+            Some((3, 7))
+        );
     }
 
     #[test]
@@ -1397,6 +1779,7 @@ mod tests {
             },
             cache_key: "cache".to_owned(),
             obligation: super::ProbeObligation::ExactTheorem,
+            facts: probe_facts(),
             right_module: "Tiny".to_owned(),
             right_origin: "workspace".to_owned(),
             left_module: "Tiny".to_owned(),
@@ -1448,6 +1831,14 @@ mod tests {
         assert_eq!(exact.rejected, 1);
         assert_eq!(diagnostics.verified_results, 1);
         assert_eq!(diagnostics.rejected_results, 1);
+        super::record_probe_status(&mut diagnostics, &planned.facts, super::ProbeStatus::Cached);
+        let source = diagnostics
+            .status_by_source
+            .get("symbolic-retrieval")
+            .expect("source status exists");
+        assert_eq!(source.cached, 1);
+        assert_eq!(source.verified, 1);
+        assert_eq!(source.rejected, 1);
     }
 
     fn empty_index() -> lean_dup_index::OpenedIndex {
@@ -1466,6 +1857,16 @@ mod tests {
             module_roots: vec!["Tiny".to_owned()],
             selected_roots: vec!["Tiny".to_owned()],
             source_files: Vec::new(),
+        }
+    }
+
+    fn probe_facts() -> super::ProbePlanningFacts {
+        super::ProbePlanningFacts {
+            source_id: "symbolic-retrieval".to_owned(),
+            source_family: "symbolic".to_owned(),
+            match_class: "exact-theorem".to_owned(),
+            declaration_kind: "theorem+theorem".to_owned(),
+            risk: super::ProbeRisk::Ordinary,
         }
     }
 

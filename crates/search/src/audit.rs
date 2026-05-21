@@ -31,7 +31,7 @@ use crate::semantic_verification::{
     verify_candidate_probes,
 };
 use crate::source_refs::{SourceFactInput, collect_source_facts};
-use crate::{ProbePolicy, Result};
+use crate::{ProbePolicy, ProbeStatusBreakdown, Result};
 
 const DEFAULT_VISIBLE_GROUP_LIMIT: usize = 500;
 
@@ -178,6 +178,8 @@ pub struct AuditProbeSummary {
     pub unavailable_by_obligation: BTreeMap<String, usize>,
     pub unavailable_by_module: BTreeMap<String, usize>,
     pub unavailable_by_origin: BTreeMap<String, usize>,
+    pub status_by_source: BTreeMap<String, ProbeStatusBreakdown>,
+    pub status_by_match_class: BTreeMap<String, ProbeStatusBreakdown>,
     pub verified_results: usize,
     pub rejected_results: usize,
     pub obligation_yield: Vec<SearchSemanticObligationYield>,
@@ -647,6 +649,8 @@ fn audit_probe_summary(diagnostics: &ProbeDiagnostics) -> AuditProbeSummary {
         unavailable_by_obligation: diagnostics.unavailable_by_obligation.clone(),
         unavailable_by_module: diagnostics.unavailable_by_module.clone(),
         unavailable_by_origin: diagnostics.unavailable_by_origin.clone(),
+        status_by_source: diagnostics.status_by_source.clone(),
+        status_by_match_class: diagnostics.status_by_match_class.clone(),
         verified_results: diagnostics.verified_results,
         rejected_results: diagnostics.rejected_results,
         obligation_yield: sorted_yield(diagnostics.obligation_yield.clone()),

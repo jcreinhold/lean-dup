@@ -49,3 +49,21 @@ pub enum ProbePolicy {
     Actionable,
     Broad,
 }
+
+/// Stable semantic-probe status counts for one planning dimension.
+///
+/// The dimension key may be a source id or match-class label. Counts describe
+/// search-owned planning and result status; they do not expose worker rows,
+/// proof obligations, cache keys, or raw Lean terms.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct ProbeStatusBreakdown {
+    pub planned: usize,
+    pub cached: usize,
+    pub worker: usize,
+    pub verified: usize,
+    pub rejected: usize,
+    pub unavailable: usize,
+    pub skipped_by_policy: usize,
+    pub skipped_by_budget: usize,
+    pub timeout: usize,
+}
