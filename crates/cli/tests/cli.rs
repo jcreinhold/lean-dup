@@ -441,7 +441,7 @@ fn eval_default_json_contains_raw_metric_counts() {
     assert_eq!(payload["command"], "eval");
     assert_eq!(payload["report_schema_version"], "lean-dup.report.v3");
     assert_eq!(payload["status"], "ok");
-    assert_eq!(payload["scorer_version"], "lean-dup.symbolic-scorer.v1");
+    assert_eq!(payload["scorer_version"], "lean-dup.symbolic-scorer.v2");
     assert_eq!(payload["metrics"]["suite"], "default");
     assert!(
         payload["metrics"]["recall"]
@@ -651,8 +651,8 @@ fn eval_hidden_search_dataset_mode_writes_feature_artifact() {
     let dataset: Value = serde_json::from_str(&fs::read_to_string(&artifact).unwrap()).unwrap();
     assert_eq!(dataset["schema_version"], "lean-dup.search-dataset.v1");
     assert_eq!(dataset["suite"], "default");
-    assert_eq!(dataset["scoring"]["version"], "lean-dup.symbolic-scorer.v1");
-    assert_eq!(dataset["scoring"]["variant"], "symbolic-only");
+    assert_eq!(dataset["scoring"]["version"], "lean-dup.symbolic-scorer.v2");
+    assert_eq!(dataset["scoring"]["variant"], "all-features");
     assert_eq!(
         dataset["review_policy"]["version"],
         "lean-dup.symbolic-review-policy.v2"
@@ -715,7 +715,7 @@ fn eval_hidden_scorer_ablation_mode_writes_variant_artifact() {
 
     let ablations: Value = serde_json::from_str(&fs::read_to_string(&artifact).unwrap()).unwrap();
     assert_eq!(ablations["schema_version"], "lean-dup.scorer-ablation.v1");
-    assert_eq!(ablations["scorer_version"], "lean-dup.symbolic-scorer.v1");
+    assert_eq!(ablations["scorer_version"], "lean-dup.symbolic-scorer.v2");
     assert_eq!(ablations["review_policy_version"], "lean-dup.symbolic-review-policy.v2");
     assert_eq!(
         ablations["semantic_reranking"]["version"],
@@ -725,7 +725,7 @@ fn eval_hidden_scorer_ablation_mode_writes_variant_artifact() {
     let variants = ablations["variants"].as_array().unwrap();
     assert_eq!(variants.len(), 6);
     for expected in [
-        "symbolic-only",
+        "all-features",
         "no-role-features",
         "no-connective-conclusion-features",
         "no-source-module-features",

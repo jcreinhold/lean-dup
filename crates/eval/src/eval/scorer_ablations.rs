@@ -98,12 +98,12 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let report = report(
             "unit",
-            "lean-dup.symbolic-scorer.v1",
+            "lean-dup.symbolic-scorer.v2",
             "lean-dup.symbolic-review-policy.v2",
             lean_dup_search::SearchSemanticRerankingSummary::default(),
             Vec::new(),
             vec![ScorerAblationVariantReport {
-                variant: SearchScoringVariant::SymbolicOnly,
+                variant: SearchScoringVariant::AllFeatures,
                 status: "ok".to_owned(),
                 semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary::default(),
                 semantic_obligation_yield: Vec::new(),
@@ -117,7 +117,7 @@ mod tests {
         let json = std::fs::read_to_string(temp.path().join(artifact)).unwrap();
 
         assert!(json.contains(SCORER_ABLATION_SCHEMA_VERSION));
-        assert!(json.contains("symbolic-only"));
+        assert!(json.contains("all-features"));
         assert!(json.contains("lean-dup.semantic-reranking.v1"));
         assert!(!json.contains("sqlite"));
         assert!(!json.contains("posting"));

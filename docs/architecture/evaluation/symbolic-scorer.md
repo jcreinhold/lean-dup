@@ -10,7 +10,8 @@ model before the feature set and match classes are calibrated, and it would push
 
 ## Contract
 
-Scorer version: `lean-dup.symbolic-scorer.v1`. Default variant: `all-features` (preserves current ranking).
+Scorer version: `lean-dup.symbolic-scorer.v2`. Default variant: `all-features` (the ordinary calibrated symbolic
+scorer).
 
 Supported variants:
 
@@ -52,3 +53,6 @@ cargo run -p lean-dup-cli -- eval --suite production-gate --format json \
 The `all-features` row of each artifact matches the normal eval metrics; other rows are
 diagnostic, naming which feature families currently carry positives, hard negatives, and
 visible findings. The ablations are not release gates.
+
+`symbolic-only` remains a hidden vector-validation comparison label. It is not the ordinary symbolic eval baseline and
+is intentionally omitted from the symbolic ablation artifact set.

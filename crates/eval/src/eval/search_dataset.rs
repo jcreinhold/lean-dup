@@ -175,7 +175,7 @@ mod tests {
             candidate_losses: Vec::new(),
             visible_groups_found: 1,
             visible_groups_total: 2,
-            scoring: lean_dup_search::SearchScoringSummary::new(lean_dup_search::SearchScoringVariant::SymbolicOnly),
+            scoring: lean_dup_search::SearchScoringSummary::new(lean_dup_search::SearchScoringVariant::AllFeatures),
             review_policy: lean_dup_search::SearchReviewPolicySummary {
                 version: "lean-dup.symbolic-review-policy.v2",
             },
@@ -211,9 +211,7 @@ mod tests {
                 candidate_losses: Vec::new(),
                 visible_groups_found: 1,
                 visible_groups_total: 1,
-                scoring: lean_dup_search::SearchScoringSummary::new(
-                    lean_dup_search::SearchScoringVariant::SymbolicOnly,
-                ),
+                scoring: lean_dup_search::SearchScoringSummary::new(lean_dup_search::SearchScoringVariant::AllFeatures),
                 review_policy: lean_dup_search::SearchReviewPolicySummary {
                     version: "lean-dup.symbolic-review-policy.v2",
                 },
@@ -286,8 +284,8 @@ mod tests {
                 cheap_blockers: Vec::new(),
             },
             scoring: lean_dup_search::SearchPairScoring {
-                version: "lean-dup.symbolic-scorer.v1",
-                variant: lean_dup_search::SearchScoringVariant::SymbolicOnly,
+                version: "lean-dup.symbolic-scorer.v2",
+                variant: lean_dup_search::SearchScoringVariant::AllFeatures,
                 total_score: 100.0,
                 component_scores: std::collections::BTreeMap::from([("statement_fingerprint".to_owned(), 100.0)]),
             },

@@ -12,7 +12,7 @@ not recompute visibility. CLI owns review-profile selection and artifact paths.
 
 The smallest public interface is:
 
-- `scorer_version = lean-dup.symbolic-scorer.v1`;
+- `scorer_version = lean-dup.symbolic-scorer.v2`;
 - `review_policy_version = lean-dup.symbolic-review-policy.v2`;
 - raw eval denominators for generated, ranked, and visible stages;
 - bounded audit queue counts and hidden-reason summaries.
@@ -26,6 +26,9 @@ default actionable evidence and relying on large unfiltered reports as a review 
 Prompt 45 has not produced
 `docs/architecture/evaluation/semantic-theorem-profile-validation-decision.md` in this checkout.
 Semantic/vector facts are ignored for this calibration.
+
+Prompt 72 later gave the ordinary symbolic scorer the `lean-dup.symbolic-scorer.v2` id and named the default variant
+`all-features`. The review-policy evidence in this document remains the Prompt 54 visibility-policy decision.
 
 ## Design It Twice
 

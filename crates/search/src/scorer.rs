@@ -5,7 +5,7 @@ use serde::Serialize;
 use crate::pair_features::{SearchEvidenceMode, SearchPairFeatures, SearchSemanticEvidenceState};
 use crate::retrieval::RetrievedCandidate;
 
-pub(crate) const SCORER_VERSION: &str = "lean-dup.symbolic-scorer.v1";
+pub(crate) const SCORER_VERSION: &str = "lean-dup.symbolic-scorer.v2";
 
 pub(crate) const DEFAULT_SCORER_CONFIG: ScorerConfig = ScorerConfig {
     version: SCORER_VERSION,
@@ -27,6 +27,10 @@ pub(crate) const DEFAULT_SCORER_CONFIG: ScorerConfig = ScorerConfig {
 };
 
 /// Stable scorer variants available to evaluation and offline artifacts.
+///
+/// `AllFeatures` is the ordinary symbolic scorer. `SymbolicOnly` is kept as a
+/// hidden comparison row for vector validation, so the public ablation set uses
+/// `all()` rather than enumerating every enum variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SearchScoringVariant {
@@ -40,9 +44,10 @@ pub enum SearchScoringVariant {
 }
 
 impl SearchScoringVariant {
+    /// Returns the scorer variants used by symbolic eval ablation artifacts.
     pub fn all() -> [Self; 6] {
         [
-            Self::SymbolicOnly,
+            Self::AllFeatures,
             Self::NoRoleFeatures,
             Self::NoConnectiveConclusionFeatures,
             Self::NoSourceModuleFeatures,
@@ -130,7 +135,7 @@ pub(crate) struct RankingScoreFacts {
 }
 
 pub(crate) fn default_summary() -> SearchScoringSummary {
-    SearchScoringSummary::new(SearchScoringVariant::SymbolicOnly)
+    SearchScoringSummary::new(SearchScoringVariant::AllFeatures)
 }
 
 pub(crate) fn thresholds() -> &'static ScorerThresholds {

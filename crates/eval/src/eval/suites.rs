@@ -267,7 +267,7 @@ fn run_manual_single(request: EvalRequest, reporter: &mut Reporter) -> Result<Ev
     let prerequisites = manual_prerequisites(&request, reporter);
     if !prerequisites.is_satisfied() {
         let suite = request.suite.as_str().to_owned();
-        let scorer_version = lean_dup_search::SearchScoringSummary::new(SearchScoringVariant::SymbolicOnly)
+        let scorer_version = lean_dup_search::SearchScoringSummary::new(SearchScoringVariant::AllFeatures)
             .version
             .to_owned();
         return Ok(EvalOutput {
@@ -360,7 +360,7 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
                 workspace: &workspace_rows,
                 comparison_indexes: std::slice::from_ref(external),
                 tracked_pairs: &tracked_pairs,
-                scoring_variant: SearchScoringVariant::SymbolicOnly,
+                scoring_variant: SearchScoringVariant::AllFeatures,
             })?),
             None,
         ),
@@ -370,7 +370,7 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
                 workspace: &workspace_rows,
                 comparison_indexes: std::slice::from_ref(external),
                 tracked_pairs: &tracked_pairs,
-                scoring_variant: SearchScoringVariant::SymbolicOnly,
+                scoring_variant: SearchScoringVariant::AllFeatures,
             })?),
         ),
         None if needs_detailed_observation => (
@@ -378,7 +378,7 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
                 workspace: &workspace_rows,
                 comparison_indexes: &[],
                 tracked_pairs: &tracked_pairs,
-                scoring_variant: SearchScoringVariant::SymbolicOnly,
+                scoring_variant: SearchScoringVariant::AllFeatures,
             })?),
             None,
         ),
@@ -388,7 +388,7 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
                 workspace: &workspace_rows,
                 comparison_indexes: &[],
                 tracked_pairs: &tracked_pairs,
-                scoring_variant: SearchScoringVariant::SymbolicOnly,
+                scoring_variant: SearchScoringVariant::AllFeatures,
             })?),
         ),
     };
@@ -1025,7 +1025,7 @@ fn run_production_gate(request: EvalRequest, reporter: &mut Reporter) -> Result<
         .iter()
         .find_map(|run| run.scorer_version.clone())
         .unwrap_or_else(|| {
-            lean_dup_search::SearchScoringSummary::new(SearchScoringVariant::SymbolicOnly)
+            lean_dup_search::SearchScoringSummary::new(SearchScoringVariant::AllFeatures)
                 .version
                 .to_owned()
         });
