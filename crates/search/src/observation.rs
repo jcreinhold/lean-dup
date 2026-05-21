@@ -4,7 +4,6 @@ use serde::Serialize;
 
 use lean_dup_index::{HydratedDeclaration, OpenedIndex};
 
-use crate::Result;
 use crate::pair_features::{SearchPairFeatures, feature_families, pair_features};
 use crate::retrieval::{GeneratedPairEvidence, RetrievalDiagnostics, generated_pair_evidence, retrieve_candidates};
 use crate::review_policy;
@@ -14,6 +13,7 @@ use crate::scorer::{
 use crate::semantic_reranking::{
     SearchSemanticObligationYield, SearchSemanticRerankingSummary, summary as semantic_reranking_summary,
 };
+use crate::{Error, Result};
 
 /// Request for search-stage observations used by offline evaluation.
 ///
@@ -43,6 +43,41 @@ pub struct SearchObservation {
     pub semantic_reranking: SearchSemanticRerankingSummary,
     pub semantic_obligation_yield: Vec<SearchSemanticObligationYield>,
     pub retrieval: SearchRetrievalObservation,
+}
+
+/// Stable compact search-stage facts for ordinary eval metrics.
+///
+/// Eval uses this surface when it only needs pair identity, stage survival,
+/// feature-family labels, and retrieval counters. Search keeps detailed
+/// feature vectors, scorer component maps, retrieval keys, and ranking
+/// constants private unless callers explicitly request detailed observations.
+/// Non-symbolic scorer ablations require the detailed observation surface.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SearchStageObservation {
+    pub pairs: Vec<SearchStageObservedPair>,
+    pub visible_groups_found: usize,
+    pub visible_groups_total: usize,
+    pub scoring: SearchScoringSummary,
+    pub review_policy: crate::review_policy::SearchReviewPolicySummary,
+    pub semantic_reranking: SearchSemanticRerankingSummary,
+    pub semantic_obligation_yield: Vec<SearchSemanticObligationYield>,
+    pub retrieval: SearchRetrievalObservation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SearchStageObservedPair {
+    pub left: String,
+    pub right: String,
+    pub generated: bool,
+    pub symbolic_generated: bool,
+    pub merged_generated: bool,
+    pub ranked: bool,
+    pub generation_policy: String,
+    pub rank: Option<usize>,
+    pub shown: bool,
+    pub origin: String,
+    pub feature_families: Vec<String>,
+    pub survived_shown_filter: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -143,6 +178,84 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
         .count();
     let visible_groups_total = output.candidate_sets.len();
     Ok(SearchObservation {
+        pairs,
+        visible_groups_found,
+        visible_groups_total,
+        scoring: if matches!(
+            request.scoring_variant,
+            SearchScoringVariant::AllFeatures | SearchScoringVariant::SymbolicOnly
+        ) {
+            default_summary()
+        } else {
+            SearchScoringSummary::new(request.scoring_variant)
+        },
+        review_policy: review_policy::summary(),
+        semantic_reranking: semantic_reranking_summary(),
+        semantic_obligation_yield: Vec::new(),
+        retrieval: retrieval_observation(&output.diagnostics, merged_generated_count),
+    })
+}
+
+pub fn observe_search_stages(request: SearchObservationRequest<'_>) -> Result<SearchStageObservation> {
+    if !matches!(
+        request.scoring_variant,
+        SearchScoringVariant::AllFeatures | SearchScoringVariant::SymbolicOnly
+    ) {
+        return Err(Error::Search {
+            message: format!(
+                "compact search-stage observation only supports symbolic scorer variants; use detailed observations for {}",
+                request.scoring_variant.label()
+            ),
+        });
+    }
+    let output = retrieve_candidates(request.workspace, request.comparison_indexes)?;
+    let mut pairs = Vec::new();
+    let mut ranked_pair_ids = BTreeSet::new();
+    for set in &output.candidate_sets {
+        for (index, candidate) in set.candidates.iter().enumerate() {
+            let shown = review_policy::symbolic_observation_visible(
+                &set.anchor,
+                &candidate.declaration,
+                &candidate.explanation.contributions,
+            );
+            ranked_pair_ids.insert(pair_key(
+                &set.anchor.qualified_name,
+                &candidate.declaration.qualified_name,
+            ));
+            pairs.push(SearchStageObservedPair {
+                left: set.anchor.qualified_name.clone(),
+                right: candidate.declaration.qualified_name.clone(),
+                generated: true,
+                symbolic_generated: true,
+                merged_generated: true,
+                ranked: true,
+                generation_policy: generation_policy_for_ranked(&candidate.declaration),
+                rank: Some(index + 1),
+                shown,
+                origin: candidate.declaration.origin.clone(),
+                feature_families: feature_families(&candidate.explanation.contributions),
+                survived_shown_filter: shown,
+            });
+        }
+    }
+    let index_facts = tracked_index_facts(request.comparison_indexes)?;
+    pairs.extend(tracked_generated_stage_pairs(&request, &ranked_pair_ids, &index_facts)?);
+    let merged_generated_count = pairs.iter().filter(|pair| pair.merged_generated).count();
+    let visible_groups_found = output
+        .candidate_sets
+        .iter()
+        .filter(|set| {
+            set.candidates.iter().any(|candidate| {
+                review_policy::symbolic_observation_visible(
+                    &set.anchor,
+                    &candidate.declaration,
+                    &candidate.explanation.contributions,
+                )
+            })
+        })
+        .count();
+    let visible_groups_total = output.candidate_sets.len();
+    Ok(SearchStageObservation {
         pairs,
         visible_groups_found,
         visible_groups_total,
@@ -313,6 +426,46 @@ fn tracked_generated_pairs(
     Ok(observed)
 }
 
+fn tracked_generated_stage_pairs(
+    request: &SearchObservationRequest<'_>,
+    ranked_pair_ids: &BTreeSet<(String, String)>,
+    index_facts: &[lean_dup_index::OpenedIndexFacts],
+) -> Result<Vec<SearchStageObservedPair>> {
+    if request.tracked_pairs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let declarations = tracked_declarations(request)?;
+    let mut observed = Vec::new();
+    let mut seen = BTreeSet::new();
+    for tracked in request.tracked_pairs {
+        let key = pair_key(&tracked.left, &tracked.right);
+        if ranked_pair_ids.contains(&key) || !seen.insert(key) {
+            continue;
+        }
+        let Some(left) = declarations.get(&tracked.left) else {
+            continue;
+        };
+        let Some(right) = declarations.get(&tracked.right) else {
+            continue;
+        };
+        let Some(oriented) = orient_pair(left, right, request.comparison_indexes, index_facts) else {
+            continue;
+        };
+        let Some(evidence) = generated_pair_evidence(
+            request.workspace,
+            oriented.anchor,
+            oriented.candidate,
+            oriented.external,
+        )?
+        else {
+            continue;
+        };
+        observed.push(generated_stage_pair(oriented.anchor, oriented.candidate, evidence));
+    }
+    observed.sort_by(|left, right| left.left.cmp(&right.left).then_with(|| left.right.cmp(&right.right)));
+    Ok(observed)
+}
+
 #[derive(Clone)]
 struct LocatedDeclaration {
     declaration: HydratedDeclaration,
@@ -428,6 +581,28 @@ fn generated_observed_pair(
     }
 }
 
+fn generated_stage_pair(
+    anchor: &HydratedDeclaration,
+    candidate: &HydratedDeclaration,
+    evidence: GeneratedPairEvidence,
+) -> SearchStageObservedPair {
+    let default_shown = review_policy::symbolic_observation_visible(anchor, candidate, &evidence.contributions);
+    SearchStageObservedPair {
+        left: anchor.qualified_name.clone(),
+        right: candidate.qualified_name.clone(),
+        generated: true,
+        symbolic_generated: true,
+        merged_generated: true,
+        ranked: false,
+        generation_policy: evidence.policy,
+        rank: None,
+        shown: default_shown,
+        origin: candidate.origin.clone(),
+        feature_families: feature_families(&evidence.contributions),
+        survived_shown_filter: default_shown,
+    }
+}
+
 fn tracked_index_facts(indexes: &[OpenedIndex]) -> Result<Vec<lean_dup_index::OpenedIndexFacts>> {
     let mut facts = Vec::with_capacity(indexes.len());
     for index in indexes {
@@ -462,7 +637,8 @@ mod tests {
     use lean_dup_worker::{Fingerprints, RoleFeature};
 
     use super::{
-        SearchObservationRequest, SearchScoringVariant, SearchTrackedPair, observe_search, rescore_observation,
+        SearchObservationRequest, SearchScoringVariant, SearchTrackedPair, observe_search, observe_search_stages,
+        rescore_observation,
     };
 
     #[test]
@@ -519,6 +695,74 @@ mod tests {
             SearchScoringVariant::SemanticEvidenceOnlyRerank
         );
         assert!(semantic_only.pairs.iter().all(|pair| !pair.shown));
+    }
+
+    #[test]
+    fn compact_stage_observation_preserves_eval_stage_facts() {
+        let rows = generated_rows(3);
+        let detailed = observe_search(SearchObservationRequest {
+            workspace: &rows,
+            comparison_indexes: &[],
+            tracked_pairs: &[],
+            scoring_variant: SearchScoringVariant::SymbolicOnly,
+        })
+        .unwrap();
+        let compact = observe_search_stages(SearchObservationRequest {
+            workspace: &rows,
+            comparison_indexes: &[],
+            tracked_pairs: &[],
+            scoring_variant: SearchScoringVariant::SymbolicOnly,
+        })
+        .unwrap();
+
+        assert_eq!(compact.visible_groups_found, detailed.visible_groups_found);
+        assert_eq!(compact.visible_groups_total, detailed.visible_groups_total);
+        assert_eq!(compact.retrieval, detailed.retrieval);
+        let detailed_pairs = detailed
+            .pairs
+            .iter()
+            .map(|pair| {
+                (
+                    pair.left.clone(),
+                    pair.right.clone(),
+                    pair.generated,
+                    pair.ranked,
+                    pair.rank,
+                    pair.shown,
+                    pair.feature_families.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let compact_pairs = compact
+            .pairs
+            .iter()
+            .map(|pair| {
+                (
+                    pair.left.clone(),
+                    pair.right.clone(),
+                    pair.generated,
+                    pair.ranked,
+                    pair.rank,
+                    pair.shown,
+                    pair.feature_families.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(compact_pairs, detailed_pairs);
+    }
+
+    #[test]
+    fn compact_stage_observation_rejects_ablation_variants() {
+        let rows = generated_rows(3);
+        let error = observe_search_stages(SearchObservationRequest {
+            workspace: &rows,
+            comparison_indexes: &[],
+            tracked_pairs: &[],
+            scoring_variant: SearchScoringVariant::NoRoleFeatures,
+        })
+        .unwrap_err();
+
+        assert!(error.to_string().contains("use detailed observations"));
     }
 
     fn generated_rows(count: usize) -> Vec<HydratedDeclaration> {

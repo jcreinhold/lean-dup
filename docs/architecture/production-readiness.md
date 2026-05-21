@@ -128,6 +128,7 @@ The release is a no-go if any of these remain true:
   clear unavailable-probe diagnostics;
 - source-backed and static external evidence are indistinguishable in JSON or text output;
 - cache reuse depends on unrelated project dirtiness or absolute paths;
+- named release-gate memory workloads exceed the documented RSS target or record RSS as unavailable;
 - release artifacts cannot identify binary, Git revision, Lean version, worker version, protocol
   version, index schema, and report schema;
 - README examples rely on private local paths for common workflows.

@@ -18,8 +18,8 @@ use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_index::{HydratedDeclaration, IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
 use lean_dup_project::{WorkspaceRequest, resolve, resolve_project_mathlib};
 use lean_dup_search::{
-    SearchObservation, SearchObservationRequest, SearchScoringVariant, SearchTrackedPair, observe_search,
-    rescore_observation,
+    SearchObservation, SearchObservationRequest, SearchScoringVariant, SearchStageObservation, SearchTrackedPair,
+    observe_search, observe_search_stages, rescore_observation,
 };
 use lean_dup_worker::WorkerClient;
 
@@ -351,38 +351,100 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
     let labels = label_resolution_input.labels;
     let tracked_pairs = tracked_pairs(&labels);
     let retrieval_started = Instant::now();
-    let base_output = match &external {
-        Some(external) => observe_search(SearchObservationRequest {
-            workspace: &workspace_rows,
-            comparison_indexes: std::slice::from_ref(external),
-            tracked_pairs: &tracked_pairs,
-            scoring_variant: SearchScoringVariant::SymbolicOnly,
-        })?,
-        None => observe_search(SearchObservationRequest {
-            workspace: &workspace_rows,
-            comparison_indexes: &[],
-            tracked_pairs: &tracked_pairs,
-            scoring_variant: SearchScoringVariant::SymbolicOnly,
-        })?,
+    let needs_detailed_observation = write_search_dataset || write_scorer_ablations;
+    let (base_output, compact_output) = match &external {
+        Some(external) if needs_detailed_observation => (
+            Some(observe_search(SearchObservationRequest {
+                workspace: &workspace_rows,
+                comparison_indexes: std::slice::from_ref(external),
+                tracked_pairs: &tracked_pairs,
+                scoring_variant: SearchScoringVariant::SymbolicOnly,
+            })?),
+            None,
+        ),
+        Some(external) => (
+            None,
+            Some(observe_search_stages(SearchObservationRequest {
+                workspace: &workspace_rows,
+                comparison_indexes: std::slice::from_ref(external),
+                tracked_pairs: &tracked_pairs,
+                scoring_variant: SearchScoringVariant::SymbolicOnly,
+            })?),
+        ),
+        None if needs_detailed_observation => (
+            Some(observe_search(SearchObservationRequest {
+                workspace: &workspace_rows,
+                comparison_indexes: &[],
+                tracked_pairs: &tracked_pairs,
+                scoring_variant: SearchScoringVariant::SymbolicOnly,
+            })?),
+            None,
+        ),
+        None => (
+            None,
+            Some(observe_search_stages(SearchObservationRequest {
+                workspace: &workspace_rows,
+                comparison_indexes: &[],
+                tracked_pairs: &tracked_pairs,
+                scoring_variant: SearchScoringVariant::SymbolicOnly,
+            })?),
+        ),
     };
     let retrieval_ms = retrieval_started.elapsed().as_millis();
-    let output = base_output;
-    let scorer_version = output.scoring.version.to_owned();
-    let review_policy_version = output.review_policy.version.to_owned();
+    drop(workspace_rows);
+    drop(handles);
+    drop(local);
+    drop(external);
+    let scorer_version = base_output
+        .as_ref()
+        .map(|output| output.scoring.version)
+        .or_else(|| compact_output.as_ref().map(|output| output.scoring.version))
+        .expect("search observation was produced")
+        .to_owned();
+    let review_policy_version = base_output
+        .as_ref()
+        .map(|output| output.review_policy.version)
+        .or_else(|| compact_output.as_ref().map(|output| output.review_policy.version))
+        .expect("search observation was produced")
+        .to_owned();
 
-    let observed_pairs = observed_pairs(&output);
+    let observed_pairs = match (&base_output, &compact_output) {
+        (Some(output), None) => observed_pairs(output),
+        (None, Some(output)) => compact_observed_pairs(output),
+        _ => unreachable!("exactly one search observation mode is selected"),
+    };
     let label_resolution = trace_labels(&labels, label_resolution_input.traces, &observed_pairs, request.suite);
     let observed = ObservedRun {
         suite: labels.suite.clone(),
         pairs: observed_pairs,
         visible_groups: CountMetric {
-            found: output.visible_groups_found,
-            total: output.visible_groups_total,
+            found: base_output
+                .as_ref()
+                .map(|output| output.visible_groups_found)
+                .or_else(|| compact_output.as_ref().map(|output| output.visible_groups_found))
+                .expect("search observation was produced"),
+            total: base_output
+                .as_ref()
+                .map(|output| output.visible_groups_total)
+                .or_else(|| compact_output.as_ref().map(|output| output.visible_groups_total))
+                .expect("search observation was produced"),
         },
         probe_unavailable: CountMetric { found: 0, total: 0 },
         semantic_verification: SemanticVerificationStageMetrics {
-            semantic_reranking: output.semantic_reranking.clone(),
-            obligation_yield: output.semantic_obligation_yield.clone(),
+            semantic_reranking: base_output
+                .as_ref()
+                .map(|output| output.semantic_reranking.clone())
+                .or_else(|| compact_output.as_ref().map(|output| output.semantic_reranking.clone()))
+                .expect("search observation was produced"),
+            obligation_yield: base_output
+                .as_ref()
+                .map(|output| output.semantic_obligation_yield.clone())
+                .or_else(|| {
+                    compact_output
+                        .as_ref()
+                        .map(|output| output.semantic_obligation_yield.clone())
+                })
+                .expect("search observation was produced"),
             ..SemanticVerificationStageMetrics::default()
         },
         timings: TimingMetrics {
@@ -396,17 +458,26 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
     let metrics = score_run(&labels, &observed, &k_values);
     enforce_suite_gates(&definition, &labels, &metrics)?;
     let search_dataset_artifact = if write_search_dataset {
-        let dataset = search_dataset::build(&labels.suite, &labels, &output);
+        let output = base_output
+            .as_ref()
+            .expect("search dataset requests use detailed search observations");
+        let dataset = search_dataset::build(&labels.suite, &labels, output);
         Some(search_dataset::write_default_artifact(&repo_root(), &dataset)?)
     } else {
         None
     };
     let scorer_ablations = if write_scorer_ablations {
-        scorer_ablation_variants(&labels, &output, &k_values, index_load_ms, reporter)
+        let output = base_output
+            .as_ref()
+            .expect("scorer ablations use detailed search observations");
+        scorer_ablation_variants(&labels, output, &k_values, index_load_ms, reporter)
     } else {
         Vec::new()
     };
     let scorer_ablation_artifact = if write_scorer_ablations {
+        let output = base_output
+            .as_ref()
+            .expect("scorer ablations use detailed search observations");
         let report = scorer_ablations::report(
             &labels.suite,
             &scorer_version,
@@ -1555,6 +1626,26 @@ fn lake_build(workspace_root: &Path) -> Result<()> {
 }
 
 fn observed_pairs(output: &SearchObservation) -> Vec<ObservedPair> {
+    output
+        .pairs
+        .iter()
+        .map(|pair| ObservedPair {
+            pair: GoldPair::new(pair.left.clone(), pair.right.clone()),
+            generated: pair.generated,
+            symbolic_generated: pair.symbolic_generated,
+            merged_generated: pair.merged_generated,
+            ranked: pair.ranked,
+            generation_policy: pair.generation_policy.clone(),
+            rank: pair.rank,
+            shown: pair.shown,
+            origin: pair.origin.clone(),
+            feature_families: pair.feature_families.clone(),
+            survived_shown_filter: pair.survived_shown_filter,
+        })
+        .collect()
+}
+
+fn compact_observed_pairs(output: &SearchStageObservation) -> Vec<ObservedPair> {
     output
         .pairs
         .iter()
