@@ -16,6 +16,7 @@ const TOP_K_PER_WORKSPACE_DECLARATION: usize = 80;
 const SEMANTIC_LANE_TOP_K_PER_WORKSPACE_DECLARATION: usize = 24;
 const ROLE_POSTING_LIMIT: usize = 512;
 const BROAD_HEAD_POSTING_LIMIT: usize = 64;
+pub(crate) const FANOUT_POLICY_ID: &str = "lean-dup.fanout-policy.v1";
 
 /// Candidate retrieval results for a workspace corpus.
 ///
@@ -73,6 +74,7 @@ pub struct CandidateExplanation {
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[allow(dead_code)]
 pub struct RetrievalDiagnostics {
+    pub fanout_policy: FanoutPolicySummary,
     pub candidate_count: usize,
     pub generated_candidate_count: usize,
     pub ranked_candidate_count: usize,
@@ -81,6 +83,29 @@ pub struct RetrievalDiagnostics {
     pub pruned_feature_fanouts: Vec<PrunedFeatureFanout>,
     pub heap_truncations: Vec<HeapTruncation>,
     pub candidate_count_by_generation_policy: BTreeMap<String, usize>,
+    pub top_k_saturation_by_source_id: BTreeMap<String, usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[allow(dead_code)]
+pub struct FanoutPolicySummary {
+    pub policy_id: String,
+    pub symbolic_top_k_per_anchor: usize,
+    pub semantic_lane_top_k_per_anchor: usize,
+    pub role_posting_limit: usize,
+    pub broad_head_posting_limit: usize,
+}
+
+impl Default for FanoutPolicySummary {
+    fn default() -> Self {
+        Self {
+            policy_id: FANOUT_POLICY_ID.to_owned(),
+            symbolic_top_k_per_anchor: TOP_K_PER_WORKSPACE_DECLARATION,
+            semantic_lane_top_k_per_anchor: SEMANTIC_LANE_TOP_K_PER_WORKSPACE_DECLARATION,
+            role_posting_limit: ROLE_POSTING_LIMIT,
+            broad_head_posting_limit: BROAD_HEAD_POSTING_LIMIT,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +113,29 @@ pub(crate) struct GeneratedPairEvidence {
     pub policy: String,
     pub contributions: Vec<KeyContribution>,
     pub source_evidence: Vec<CandidateSourceEvidence>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TrackedPairPolicyEvidence {
+    pub generated: Option<GeneratedPairEvidence>,
+    pub losses: Vec<CandidateLossEvidence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CandidateLossEvidence {
+    pub source_id: String,
+    pub source_family: CandidateSourceFamily,
+    pub loss_stage: CandidateLossStage,
+    pub policy: String,
+    pub source: String,
+    pub reason: String,
+    pub feature_family: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum CandidateLossStage {
+    FanoutPruned,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -471,12 +519,12 @@ fn planned_keys(declaration: &HydratedDeclaration) -> Vec<PlannedKey> {
     plans
 }
 
-pub(crate) fn generated_pair_evidence(
+pub(crate) fn tracked_pair_policy_evidence(
     workspace: &[HydratedDeclaration],
     anchor: &HydratedDeclaration,
     candidate: &HydratedDeclaration,
     external: Option<(&OpenedIndex, &lean_dup_index::OpenedIndexFacts)>,
-) -> Result<Option<GeneratedPairEvidence>> {
+) -> Result<TrackedPairPolicyEvidence> {
     let anchor_plans = planned_keys(anchor);
     let candidate_keys = planned_keys(candidate)
         .into_iter()
@@ -493,6 +541,7 @@ pub(crate) fn generated_pair_evidence(
         None
     };
     let mut contributions = BTreeMap::new();
+    let mut losses = Vec::new();
     let mut admitted = false;
     for plan in sorted_plans(&anchor_plans) {
         if !candidate_keys.contains(&plan.key) {
@@ -507,6 +556,18 @@ pub(crate) fn generated_pair_evidence(
                 .unwrap_or(0)
         };
         if count == 0 || count > posting_limit(plan) {
+            if count > posting_limit(plan) {
+                losses.push(CandidateLossEvidence {
+                    source_id: "symbolic-retrieval".to_owned(),
+                    source_family: CandidateSourceFamily::Symbolic,
+                    loss_stage: CandidateLossStage::FanoutPruned,
+                    policy: policy.label().to_owned(),
+                    source: external.map_or_else(|| "workspace".to_owned(), |(_, facts)| facts.origin.clone()),
+                    reason: prune_reason_for_plan(plan).to_owned(),
+                    feature_family: plan.contribution.feature_family(),
+                    count,
+                });
+            }
             continue;
         }
         if !plan.admits_candidate && !admitted {
@@ -521,14 +582,20 @@ pub(crate) fn generated_pair_evidence(
             .or_insert(contribution);
     }
     if !admitted {
-        return Ok(None);
+        return Ok(TrackedPairPolicyEvidence {
+            generated: None,
+            losses,
+        });
     }
     let source_evidence = generated_pair_source_evidence(contributions.values());
-    Ok(Some(GeneratedPairEvidence {
-        policy: policy.label().to_owned(),
-        source_evidence,
-        contributions: contributions.into_values().collect(),
-    }))
+    Ok(TrackedPairPolicyEvidence {
+        generated: Some(GeneratedPairEvidence {
+            policy: policy.label().to_owned(),
+            source_evidence,
+            contributions: contributions.into_values().collect(),
+        }),
+        losses: Vec::new(),
+    })
 }
 
 fn fingerprint_plan(kind: FingerprintKind, key: &str, label: &'static str, base_weight: f64) -> PlannedKey {
@@ -811,6 +878,10 @@ fn select_top(
             anchor_declaration_id: anchor_declaration_id.to_owned(),
             dropped_count: candidates.len() - TOP_K_PER_WORKSPACE_DECLARATION,
         });
+        *diagnostics
+            .top_k_saturation_by_source_id
+            .entry("symbolic-retrieval".to_owned())
+            .or_default() += 1;
     }
 
     let symbolic_selection = select_by_score(&candidates, TOP_K_PER_WORKSPACE_DECLARATION, |candidate| {
@@ -842,6 +913,12 @@ fn select_top(
             continue;
         }
         let lane_saturated = lane_candidates.len() > SEMANTIC_LANE_TOP_K_PER_WORKSPACE_DECLARATION;
+        if lane_saturated {
+            *diagnostics
+                .top_k_saturation_by_source_id
+                .entry(lane.source_id().to_owned())
+                .or_default() += 1;
+        }
         let lane_selection = select_subset_by_score(
             &candidates,
             &lane_candidates,

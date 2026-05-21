@@ -6,7 +6,8 @@ use lean_dup_index::{HydratedDeclaration, OpenedIndex};
 
 use crate::pair_features::{SearchPairFeatures, feature_families, pair_features};
 use crate::retrieval::{
-    CandidateSourceEvidence, GeneratedPairEvidence, RetrievalDiagnostics, generated_pair_evidence, retrieve_candidates,
+    CandidateLossEvidence, CandidateSourceEvidence, GeneratedPairEvidence, RetrievalDiagnostics, retrieve_candidates,
+    tracked_pair_policy_evidence,
 };
 use crate::review_policy;
 use crate::scorer::{
@@ -38,6 +39,7 @@ pub struct SearchTrackedPair {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SearchObservation {
     pub pairs: Vec<SearchObservedPair>,
+    pub candidate_losses: Vec<SearchCandidateLossFact>,
     pub visible_groups_found: usize,
     pub visible_groups_total: usize,
     pub scoring: SearchScoringSummary,
@@ -57,6 +59,7 @@ pub struct SearchObservation {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SearchStageObservation {
     pub pairs: Vec<SearchStageObservedPair>,
+    pub candidate_losses: Vec<SearchCandidateLossFact>,
     pub visible_groups_found: usize,
     pub visible_groups_total: usize,
     pub scoring: SearchScoringSummary,
@@ -119,8 +122,32 @@ pub enum SearchCandidateTopKStatus {
     GeneratedNotSelected,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SearchCandidateLossFact {
+    pub left: String,
+    pub right: String,
+    pub left_declaration_id: String,
+    pub right_declaration_id: String,
+    pub pair_id: String,
+    pub loss_stage: SearchCandidateLossStage,
+    pub source_id: String,
+    pub source_family: SearchCandidateSourceFamily,
+    pub policy: String,
+    pub source: String,
+    pub reason: String,
+    pub feature_family: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SearchCandidateLossStage {
+    FanoutPruned,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct SearchRetrievalObservation {
+    pub fanout_policy: SearchFanoutPolicySummary,
     pub candidate_count: usize,
     pub generated_candidate_count: usize,
     pub ranked_candidate_count: usize,
@@ -130,7 +157,18 @@ pub struct SearchRetrievalObservation {
     pub pruned_feature_fanout_count: usize,
     pub heap_truncations: usize,
     pub candidate_count_by_generation_policy: BTreeMap<String, usize>,
+    pub top_k_saturation_by_source_id: BTreeMap<String, usize>,
+    pub pruned_feature_fanout_by_family: BTreeMap<String, usize>,
     pub pruned_feature_fanouts: Vec<SearchPrunedFeatureFanout>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct SearchFanoutPolicySummary {
+    pub policy_id: String,
+    pub symbolic_top_k_per_anchor: usize,
+    pub semantic_lane_top_k_per_anchor: usize,
+    pub role_posting_limit: usize,
+    pub broad_head_posting_limit: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -216,7 +254,9 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
         }
     }
     let index_facts = tracked_index_facts(request.comparison_indexes)?;
-    pairs.extend(tracked_generated_pairs(&request, &ranked_pair_ids, &index_facts)?);
+    let tracked = tracked_generated_pairs(&request, &ranked_pair_ids, &index_facts)?;
+    pairs.extend(tracked.pairs);
+    let candidate_losses = tracked.losses;
     let merged_generated_count = pairs.iter().filter(|pair| pair.merged_generated).count();
     let visible_groups_found = output
         .candidate_sets
@@ -234,6 +274,7 @@ pub fn observe_search(request: SearchObservationRequest<'_>) -> Result<SearchObs
     let visible_groups_total = output.candidate_sets.len();
     Ok(SearchObservation {
         pairs,
+        candidate_losses,
         visible_groups_found,
         visible_groups_total,
         scoring: if matches!(
@@ -307,7 +348,9 @@ pub fn observe_search_stages(request: SearchObservationRequest<'_>) -> Result<Se
         }
     }
     let index_facts = tracked_index_facts(request.comparison_indexes)?;
-    pairs.extend(tracked_generated_stage_pairs(&request, &ranked_pair_ids, &index_facts)?);
+    let tracked = tracked_generated_stage_pairs(&request, &ranked_pair_ids, &index_facts)?;
+    pairs.extend(tracked.pairs);
+    let candidate_losses = tracked.losses;
     let merged_generated_count = pairs.iter().filter(|pair| pair.merged_generated).count();
     let visible_groups_found = output
         .candidate_sets
@@ -325,6 +368,7 @@ pub fn observe_search_stages(request: SearchObservationRequest<'_>) -> Result<Se
     let visible_groups_total = output.candidate_sets.len();
     Ok(SearchStageObservation {
         pairs,
+        candidate_losses,
         visible_groups_found,
         visible_groups_total,
         scoring: if matches!(
@@ -369,6 +413,7 @@ pub fn rescore_observation(observation: &SearchObservation, variant: SearchScori
     let (visible_groups_found, visible_groups_total) = visible_group_counts(&pairs);
     SearchObservation {
         pairs,
+        candidate_losses: observation.candidate_losses.clone(),
         visible_groups_found,
         visible_groups_total,
         scoring: SearchScoringSummary::new(variant),
@@ -426,15 +471,24 @@ fn retrieval_observation(
     merged_generated_count: usize,
 ) -> SearchRetrievalObservation {
     SearchRetrievalObservation {
+        fanout_policy: SearchFanoutPolicySummary {
+            policy_id: diagnostics.fanout_policy.policy_id.clone(),
+            symbolic_top_k_per_anchor: diagnostics.fanout_policy.symbolic_top_k_per_anchor,
+            semantic_lane_top_k_per_anchor: diagnostics.fanout_policy.semantic_lane_top_k_per_anchor,
+            role_posting_limit: diagnostics.fanout_policy.role_posting_limit,
+            broad_head_posting_limit: diagnostics.fanout_policy.broad_head_posting_limit,
+        },
         candidate_count: diagnostics.candidate_count,
         generated_candidate_count: diagnostics.generated_candidate_count,
         ranked_candidate_count: diagnostics.ranked_candidate_count,
         symbolic_generated_candidate_count: diagnostics.generated_candidate_count,
         merged_generated_candidate_count: merged_generated_count,
         hydrated_external_count: diagnostics.hydrated_external_count,
-        pruned_feature_fanout_count: diagnostics.pruned_postings.len(),
+        pruned_feature_fanout_count: diagnostics.pruned_feature_fanouts.len(),
         heap_truncations: diagnostics.heap_truncations.len(),
         candidate_count_by_generation_policy: diagnostics.candidate_count_by_generation_policy.clone(),
+        top_k_saturation_by_source_id: diagnostics.top_k_saturation_by_source_id.clone(),
+        pruned_feature_fanout_by_family: pruned_feature_fanout_by_family(diagnostics),
         pruned_feature_fanouts: diagnostics
             .pruned_feature_fanouts
             .iter()
@@ -447,6 +501,14 @@ fn retrieval_observation(
             })
             .collect(),
     }
+}
+
+fn pruned_feature_fanout_by_family(diagnostics: &RetrievalDiagnostics) -> BTreeMap<String, usize> {
+    let mut by_family = BTreeMap::new();
+    for item in &diagnostics.pruned_feature_fanouts {
+        *by_family.entry(item.feature_family.clone()).or_default() += item.count;
+    }
+    by_family
 }
 
 fn source_facts(
@@ -501,16 +563,25 @@ fn stable_declaration_pair_id(left: &str, right: &str) -> String {
     }
 }
 
+struct TrackedObservationEvidence<T> {
+    pairs: Vec<T>,
+    losses: Vec<SearchCandidateLossFact>,
+}
+
 fn tracked_generated_pairs(
     request: &SearchObservationRequest<'_>,
     ranked_pair_ids: &BTreeSet<(String, String)>,
     index_facts: &[lean_dup_index::OpenedIndexFacts],
-) -> Result<Vec<SearchObservedPair>> {
+) -> Result<TrackedObservationEvidence<SearchObservedPair>> {
     if request.tracked_pairs.is_empty() {
-        return Ok(Vec::new());
+        return Ok(TrackedObservationEvidence {
+            pairs: Vec::new(),
+            losses: Vec::new(),
+        });
     }
     let declarations = tracked_declarations(request)?;
     let mut observed = Vec::new();
+    let mut losses = Vec::new();
     let mut seen = BTreeSet::new();
     for tracked in request.tracked_pairs {
         let key = pair_key(&tracked.left, &tracked.right);
@@ -526,36 +597,53 @@ fn tracked_generated_pairs(
         let Some(oriented) = orient_pair(left, right, request.comparison_indexes, index_facts) else {
             continue;
         };
-        let Some(evidence) = generated_pair_evidence(
+        let evidence = tracked_pair_policy_evidence(
             request.workspace,
             oriented.anchor,
             oriented.candidate,
             oriented.external,
-        )?
-        else {
+        )?;
+        if evidence.generated.is_none() {
+            losses.extend(loss_facts(oriented.anchor, oriented.candidate, &evidence.losses));
+            continue;
+        }
+        let Some(generated) = evidence.generated else {
             continue;
         };
         observed.push(generated_observed_pair(
             oriented.anchor,
             oriented.candidate,
-            evidence,
+            generated,
             request.scoring_variant,
         ));
     }
     observed.sort_by(|left, right| left.left.cmp(&right.left).then_with(|| left.right.cmp(&right.right)));
-    Ok(observed)
+    losses.sort_by(|left, right| {
+        left.left
+            .cmp(&right.left)
+            .then_with(|| left.right.cmp(&right.right))
+            .then_with(|| left.feature_family.cmp(&right.feature_family))
+    });
+    Ok(TrackedObservationEvidence {
+        pairs: observed,
+        losses,
+    })
 }
 
 fn tracked_generated_stage_pairs(
     request: &SearchObservationRequest<'_>,
     ranked_pair_ids: &BTreeSet<(String, String)>,
     index_facts: &[lean_dup_index::OpenedIndexFacts],
-) -> Result<Vec<SearchStageObservedPair>> {
+) -> Result<TrackedObservationEvidence<SearchStageObservedPair>> {
     if request.tracked_pairs.is_empty() {
-        return Ok(Vec::new());
+        return Ok(TrackedObservationEvidence {
+            pairs: Vec::new(),
+            losses: Vec::new(),
+        });
     }
     let declarations = tracked_declarations(request)?;
     let mut observed = Vec::new();
+    let mut losses = Vec::new();
     let mut seen = BTreeSet::new();
     for tracked in request.tracked_pairs {
         let key = pair_key(&tracked.left, &tracked.right);
@@ -571,19 +659,63 @@ fn tracked_generated_stage_pairs(
         let Some(oriented) = orient_pair(left, right, request.comparison_indexes, index_facts) else {
             continue;
         };
-        let Some(evidence) = generated_pair_evidence(
+        let evidence = tracked_pair_policy_evidence(
             request.workspace,
             oriented.anchor,
             oriented.candidate,
             oriented.external,
-        )?
-        else {
+        )?;
+        if evidence.generated.is_none() {
+            losses.extend(loss_facts(oriented.anchor, oriented.candidate, &evidence.losses));
+            continue;
+        }
+        let Some(generated) = evidence.generated else {
             continue;
         };
-        observed.push(generated_stage_pair(oriented.anchor, oriented.candidate, evidence));
+        observed.push(generated_stage_pair(oriented.anchor, oriented.candidate, generated));
     }
     observed.sort_by(|left, right| left.left.cmp(&right.left).then_with(|| left.right.cmp(&right.right)));
-    Ok(observed)
+    losses.sort_by(|left, right| {
+        left.left
+            .cmp(&right.left)
+            .then_with(|| left.right.cmp(&right.right))
+            .then_with(|| left.feature_family.cmp(&right.feature_family))
+    });
+    Ok(TrackedObservationEvidence {
+        pairs: observed,
+        losses,
+    })
+}
+
+fn loss_facts(
+    anchor: &HydratedDeclaration,
+    candidate: &HydratedDeclaration,
+    losses: &[CandidateLossEvidence],
+) -> Vec<SearchCandidateLossFact> {
+    losses
+        .iter()
+        .map(|loss| SearchCandidateLossFact {
+            left: anchor.qualified_name.clone(),
+            right: candidate.qualified_name.clone(),
+            left_declaration_id: anchor.declaration_id.clone(),
+            right_declaration_id: candidate.declaration_id.clone(),
+            pair_id: stable_declaration_pair_id(&anchor.declaration_id, &candidate.declaration_id),
+            loss_stage: loss_stage(loss.loss_stage),
+            source_id: loss.source_id.clone(),
+            source_family: source_family(loss.source_family),
+            policy: loss.policy.clone(),
+            source: loss.source.clone(),
+            reason: loss.reason.clone(),
+            feature_family: loss.feature_family.clone(),
+            count: loss.count,
+        })
+        .collect()
+}
+
+fn loss_stage(stage: crate::retrieval::CandidateLossStage) -> SearchCandidateLossStage {
+    match stage {
+        crate::retrieval::CandidateLossStage::FanoutPruned => SearchCandidateLossStage::FanoutPruned,
+    }
 }
 
 #[derive(Clone)]
@@ -811,6 +943,52 @@ mod tests {
     }
 
     #[test]
+    fn tracked_pairs_record_fanout_pruned_losses_without_retrieval_keys() {
+        let rows = role_fanout_rows(520);
+        let tracked = vec![SearchTrackedPair {
+            left: "Synthetic.role_0".to_owned(),
+            right: "Synthetic.role_1".to_owned(),
+        }];
+
+        let observation = observe_search_stages(SearchObservationRequest {
+            workspace: &rows,
+            comparison_indexes: &[],
+            tracked_pairs: &tracked,
+            scoring_variant: SearchScoringVariant::SymbolicOnly,
+        })
+        .unwrap();
+
+        assert!(
+            observation
+                .pairs
+                .iter()
+                .all(|pair| !(pair.left == "Synthetic.role_0" && pair.right == "Synthetic.role_1"))
+        );
+        let loss = observation
+            .candidate_losses
+            .iter()
+            .find(|loss| {
+                (loss.left == "Synthetic.role_0" && loss.right == "Synthetic.role_1")
+                    || (loss.left == "Synthetic.role_1" && loss.right == "Synthetic.role_0")
+            })
+            .expect("tracked fanout loss");
+        assert_eq!(loss.source_id, "symbolic-retrieval");
+        assert_eq!(loss.source_family, SearchCandidateSourceFamily::Symbolic);
+        assert_eq!(loss.policy, "local_duplicate_audit");
+        assert_eq!(loss.reason, "overwide-posting");
+        assert_eq!(loss.feature_family, "role_conclusion_const");
+        assert_eq!(loss.count, 520);
+        assert!(!loss.pair_id.contains("shared-role"));
+        assert_eq!(
+            observation
+                .retrieval
+                .pruned_feature_fanout_by_family
+                .get("role_conclusion_const"),
+            Some(&(520 * 520))
+        );
+    }
+
+    #[test]
     fn rescoring_does_not_rerun_generation_or_expose_private_keys() {
         let rows = generated_rows(3);
         let observation = observe_search(SearchObservationRequest {
@@ -855,6 +1033,7 @@ mod tests {
         assert_eq!(compact.visible_groups_found, detailed.visible_groups_found);
         assert_eq!(compact.visible_groups_total, detailed.visible_groups_total);
         assert_eq!(compact.retrieval, detailed.retrieval);
+        assert_eq!(compact.candidate_losses, detailed.candidate_losses);
         let detailed_pairs = detailed
             .pairs
             .iter()
@@ -1037,5 +1216,23 @@ mod tests {
         role_only.role_features[0].key = "rescue-role".to_owned();
         rows.push(role_only);
         rows
+    }
+
+    fn role_fanout_rows(count: usize) -> Vec<HydratedDeclaration> {
+        (0..count)
+            .map(|index| {
+                let mut row = generated_rows(1).remove(0);
+                row.declaration_id = format!("synthetic:role:{index}");
+                row.qualified_name = format!("Synthetic.role_{index}");
+                row.display_name = format!("role_{index}");
+                row.handle = DeclarationHandle::from_fixture_id(row.declaration_id.clone());
+                row.fingerprints.statement = format!("statement-{index}");
+                row.fingerprints.safe_binder_permutation.clear();
+                row.fingerprints.connective_shape.clear();
+                row.fingerprints.conclusion_shape.clear();
+                row.role_features[0].key = "shared-role".to_owned();
+                row
+            })
+            .collect()
     }
 }

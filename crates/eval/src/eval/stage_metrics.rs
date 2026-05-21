@@ -28,6 +28,7 @@ pub struct SearchStageMetrics {
     pub generated_candidate_count_by_policy: BTreeMap<String, usize>,
     pub generated_candidate_count_by_feature_family: BTreeMap<String, usize>,
     pub hard_negative_generated_by_feature_family: BTreeMap<String, usize>,
+    pub candidate_loss_metrics: CandidateLossMetrics,
     pub semantic_verification: SemanticVerificationStageMetrics,
 }
 
@@ -44,6 +45,18 @@ pub struct CandidateSourceRecall {
     pub symbolic_only: CountMetric,
     pub semantic_lane_only: CountMetric,
     pub merged: CountMetric,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct CandidateLossMetrics {
+    pub positive_fanout_pruned: CountMetric,
+    pub hard_negative_fanout_pruned: CountMetric,
+    pub positive_top_k_dropped: CountMetric,
+    pub hard_negative_top_k_dropped: CountMetric,
+    pub positive_fanout_pruned_by_feature_family: BTreeMap<String, usize>,
+    pub hard_negative_fanout_pruned_by_feature_family: BTreeMap<String, usize>,
+    pub positive_top_k_dropped_by_feature_family: BTreeMap<String, usize>,
+    pub hard_negative_top_k_dropped_by_feature_family: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -113,6 +126,18 @@ pub fn score(labels: &GoldLabels, observed: &ObservedRun, k_values: &[usize]) ->
         .iter()
         .filter(|pair| pair.ranked)
         .map(|pair| pair.pair.clone())
+        .collect::<FxHashSet<_>>();
+    let top_k_dropped_pairs = observed
+        .pairs
+        .iter()
+        .filter(|pair| pair.generated && !pair.ranked)
+        .map(|pair| pair.pair.clone())
+        .collect::<FxHashSet<_>>();
+    let fanout_pruned_pairs = observed
+        .candidate_losses
+        .iter()
+        .filter(|loss| loss.loss_stage == "fanout-pruned")
+        .map(|loss| loss.pair.clone())
         .collect::<FxHashSet<_>>();
     let shown_pairs = observed
         .pairs
@@ -202,6 +227,30 @@ pub fn score(labels: &GoldLabels, observed: &ObservedRun, k_values: &[usize]) ->
         generated_candidate_count_by_policy: count_generated_by_policy(observed),
         generated_candidate_count_by_feature_family: count_generated_by_feature_family(observed),
         hard_negative_generated_by_feature_family: count_generated_hard_negatives_by_feature_family(labels, observed),
+        candidate_loss_metrics: CandidateLossMetrics {
+            positive_fanout_pruned: count_labeled(&labels.positives, &fanout_pruned_pairs),
+            hard_negative_fanout_pruned: count_labeled(&labels.hard_negatives, &fanout_pruned_pairs),
+            positive_top_k_dropped: count_labeled(&labels.positives, &top_k_dropped_pairs),
+            hard_negative_top_k_dropped: count_labeled(&labels.hard_negatives, &top_k_dropped_pairs),
+            positive_fanout_pruned_by_feature_family: count_losses_by_feature_family(
+                &labels.positives,
+                observed,
+                "fanout-pruned",
+            ),
+            hard_negative_fanout_pruned_by_feature_family: count_losses_by_feature_family(
+                &labels.hard_negatives,
+                observed,
+                "fanout-pruned",
+            ),
+            positive_top_k_dropped_by_feature_family: count_top_k_dropped_by_feature_family(
+                &labels.positives,
+                observed,
+            ),
+            hard_negative_top_k_dropped_by_feature_family: count_top_k_dropped_by_feature_family(
+                &labels.hard_negatives,
+                observed,
+            ),
+        },
         semantic_verification: observed.semantic_verification.clone(),
     }
 }
@@ -275,6 +324,34 @@ pub fn aggregate(_suite: &str, runs: &[&SearchStageMetrics]) -> SearchStageMetri
             runs.iter()
                 .map(|metrics| &metrics.hard_negative_generated_by_feature_family),
         ),
+        candidate_loss_metrics: CandidateLossMetrics {
+            positive_fanout_pruned: sum_count(runs, |metrics| &metrics.candidate_loss_metrics.positive_fanout_pruned),
+            hard_negative_fanout_pruned: sum_count(runs, |metrics| {
+                &metrics.candidate_loss_metrics.hard_negative_fanout_pruned
+            }),
+            positive_top_k_dropped: sum_count(runs, |metrics| &metrics.candidate_loss_metrics.positive_top_k_dropped),
+            hard_negative_top_k_dropped: sum_count(runs, |metrics| {
+                &metrics.candidate_loss_metrics.hard_negative_top_k_dropped
+            }),
+            positive_fanout_pruned_by_feature_family: sum_maps(
+                runs.iter()
+                    .map(|metrics| &metrics.candidate_loss_metrics.positive_fanout_pruned_by_feature_family),
+            ),
+            hard_negative_fanout_pruned_by_feature_family: sum_maps(runs.iter().map(|metrics| {
+                &metrics
+                    .candidate_loss_metrics
+                    .hard_negative_fanout_pruned_by_feature_family
+            })),
+            positive_top_k_dropped_by_feature_family: sum_maps(
+                runs.iter()
+                    .map(|metrics| &metrics.candidate_loss_metrics.positive_top_k_dropped_by_feature_family),
+            ),
+            hard_negative_top_k_dropped_by_feature_family: sum_maps(runs.iter().map(|metrics| {
+                &metrics
+                    .candidate_loss_metrics
+                    .hard_negative_top_k_dropped_by_feature_family
+            })),
+        },
         semantic_verification: SemanticVerificationStageMetrics {
             semantic_reranking: SearchSemanticRerankingSummary::default(),
             planned: runs.iter().map(|metrics| metrics.semantic_verification.planned).sum(),
@@ -408,6 +485,47 @@ fn count_generated_hard_negatives_by_feature_family(
     counts
 }
 
+fn count_losses_by_feature_family(
+    labels: &FxHashSet<GoldPair>,
+    observed: &ObservedRun,
+    loss_stage: &str,
+) -> BTreeMap<String, usize> {
+    let mut seen_by_family = BTreeSet::new();
+    for loss in observed
+        .candidate_losses
+        .iter()
+        .filter(|loss| loss.loss_stage == loss_stage && labels.contains(&loss.pair))
+    {
+        seen_by_family.insert((loss.feature_family.clone(), loss.pair.clone()));
+    }
+    let mut counts = BTreeMap::new();
+    for (family, _) in seen_by_family {
+        *counts.entry(family).or_insert(0) += 1;
+    }
+    counts
+}
+
+fn count_top_k_dropped_by_feature_family(
+    labels: &FxHashSet<GoldPair>,
+    observed: &ObservedRun,
+) -> BTreeMap<String, usize> {
+    let mut seen_by_family = BTreeSet::new();
+    for pair in observed
+        .pairs
+        .iter()
+        .filter(|pair| pair.generated && !pair.ranked && labels.contains(&pair.pair))
+    {
+        for family in &pair.feature_families {
+            seen_by_family.insert((family.clone(), pair.pair.clone()));
+        }
+    }
+    let mut counts = BTreeMap::new();
+    for (family, _) in seen_by_family {
+        *counts.entry(family).or_insert(0) += 1;
+    }
+    counts
+}
+
 fn best_rank_by_pair(pairs: &[crate::eval::scoring::ObservedPair]) -> FxHashMap<GoldPair, usize> {
     let mut ranks: FxHashMap<GoldPair, usize> = FxHashMap::default();
     for observed in pairs {
@@ -501,7 +619,9 @@ mod tests {
 
     use super::{SearchStageMetrics, SemanticVerificationStageMetrics, aggregate, score};
     use crate::eval::labels::GoldLabels;
-    use crate::eval::scoring::{CountMetric, GoldPair, ObservedPair, ObservedRun, TimingMetrics};
+    use crate::eval::scoring::{
+        CountMetric, GoldPair, ObservedCandidateLoss, ObservedPair, ObservedRun, TimingMetrics,
+    };
 
     #[test]
     fn stage_metrics_separate_generated_and_top_k_recall() {
@@ -528,6 +648,37 @@ mod tests {
         assert_eq!(
             metrics.generated_candidate_count_by_source_id.get("symbolic-retrieval"),
             Some(&2)
+        );
+        assert_eq!(metrics.candidate_loss_metrics.positive_top_k_dropped.found, 1);
+        assert_eq!(
+            metrics
+                .candidate_loss_metrics
+                .positive_top_k_dropped_by_feature_family
+                .get("role_other"),
+            Some(&1)
+        );
+    }
+
+    #[test]
+    fn fanout_loss_metrics_count_labeled_pairs_by_feature_family() {
+        let labels = labels(["A:B"], ["C:D"]);
+        let mut observed = observed([]);
+        observed.candidate_losses = vec![
+            candidate_loss("A", "B", "fanout-pruned", "role_conclusion_const"),
+            candidate_loss("C", "D", "fanout-pruned", "role_conclusion_const"),
+        ];
+
+        let metrics = score(&labels, &observed, &[1]);
+
+        assert_eq!(metrics.candidate_loss_metrics.positive_fanout_pruned.found, 1);
+        assert_eq!(metrics.candidate_loss_metrics.positive_fanout_pruned.total, 1);
+        assert_eq!(metrics.candidate_loss_metrics.hard_negative_fanout_pruned.found, 1);
+        assert_eq!(
+            metrics
+                .candidate_loss_metrics
+                .positive_fanout_pruned_by_feature_family
+                .get("role_conclusion_const"),
+            Some(&1)
         );
     }
 
@@ -653,11 +804,26 @@ mod tests {
         ObservedRun {
             suite: "unit".to_owned(),
             pairs: pairs.into_iter().collect(),
+            candidate_losses: Vec::new(),
             visible_groups: CountMetric::default(),
             probe_unavailable: CountMetric::default(),
             semantic_verification: SemanticVerificationStageMetrics::default(),
             timings: TimingMetrics::default(),
             peak_memory_bytes: None,
+        }
+    }
+
+    fn candidate_loss(left: &str, right: &str, loss_stage: &str, feature_family: &str) -> ObservedCandidateLoss {
+        ObservedCandidateLoss {
+            pair: GoldPair::new(left, right),
+            loss_stage: loss_stage.to_owned(),
+            source_id: "symbolic-retrieval".to_owned(),
+            source_family: "symbolic".to_owned(),
+            policy: "local_duplicate_audit".to_owned(),
+            source: "workspace".to_owned(),
+            reason: "role-posting-limit".to_owned(),
+            feature_family: feature_family.to_owned(),
+            count: 513,
         }
     }
 

@@ -28,10 +28,10 @@ pub use audit::{
 };
 pub use error::{Error, Result};
 pub use observation::{
-    SearchCandidateSourceFact, SearchCandidateSourceFamily, SearchCandidateTopKStatus, SearchObservation,
-    SearchObservationRequest, SearchObservedPair, SearchPrunedFeatureFanout, SearchRetrievalObservation,
-    SearchStageObservation, SearchStageObservedPair, SearchTrackedPair, observe_search, observe_search_stages,
-    rescore_observation,
+    SearchCandidateLossFact, SearchCandidateLossStage, SearchCandidateSourceFact, SearchCandidateSourceFamily,
+    SearchCandidateTopKStatus, SearchFanoutPolicySummary, SearchObservation, SearchObservationRequest,
+    SearchObservedPair, SearchPrunedFeatureFanout, SearchRetrievalObservation, SearchStageObservation,
+    SearchStageObservedPair, SearchTrackedPair, observe_search, observe_search_stages, rescore_observation,
 };
 pub use pair_features::{
     SearchEvidenceMode, SearchModuleRelation, SearchPairFeatures, SearchRoleOverlap, SearchSemanticEvidenceState,

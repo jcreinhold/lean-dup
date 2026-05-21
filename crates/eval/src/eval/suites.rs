@@ -9,7 +9,8 @@ use crate::EvalSuite;
 use crate::eval::labels::{GoldLabelFact, GoldLabels, LabelFactSource, LabelPolarity, TypedGoldLabel, load_builtin};
 use crate::eval::scorer_ablations::{self, ScorerAblationVariantReport};
 use crate::eval::scoring::{
-    CountMetric, EvaluationMetrics, GoldPair, ObservedPair, ObservedRun, RecallAtK, TimingMetrics, score_run,
+    CountMetric, EvaluationMetrics, GoldPair, ObservedCandidateLoss, ObservedPair, ObservedRun, RecallAtK,
+    TimingMetrics, score_run,
 };
 use crate::eval::search_dataset;
 use crate::eval::stage_metrics::SemanticVerificationStageMetrics;
@@ -18,9 +19,9 @@ use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_index::{HydratedDeclaration, IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
 use lean_dup_project::{WorkspaceRequest, resolve, resolve_project_mathlib};
 use lean_dup_search::{
-    SearchCandidateSourceFact, SearchCandidateSourceFamily, SearchCandidateTopKStatus, SearchObservation,
-    SearchObservationRequest, SearchScoringVariant, SearchStageObservation, SearchTrackedPair, observe_search,
-    observe_search_stages, rescore_observation,
+    SearchCandidateLossFact, SearchCandidateLossStage, SearchCandidateSourceFact, SearchCandidateSourceFamily,
+    SearchCandidateTopKStatus, SearchObservation, SearchObservationRequest, SearchScoringVariant,
+    SearchStageObservation, SearchTrackedPair, observe_search, observe_search_stages, rescore_observation,
 };
 use lean_dup_worker::WorkerClient;
 
@@ -414,10 +415,16 @@ fn run_single(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutpu
         (None, Some(output)) => compact_observed_pairs(output),
         _ => unreachable!("exactly one search observation mode is selected"),
     };
+    let candidate_losses = match (&base_output, &compact_output) {
+        (Some(output), None) => observed_candidate_losses(&output.candidate_losses),
+        (None, Some(output)) => observed_candidate_losses(&output.candidate_losses),
+        _ => unreachable!("exactly one search observation mode is selected"),
+    };
     let label_resolution = trace_labels(&labels, label_resolution_input.traces, &observed_pairs, request.suite);
     let observed = ObservedRun {
         suite: labels.suite.clone(),
         pairs: observed_pairs,
+        candidate_losses,
         visible_groups: CountMetric {
             found: base_output
                 .as_ref()
@@ -938,6 +945,7 @@ fn scorer_ablation_variants(
         let observed = ObservedRun {
             suite: labels.suite.clone(),
             pairs: observed_pairs(&observation),
+            candidate_losses: observed_candidate_losses(&observation.candidate_losses),
             visible_groups: CountMetric {
                 found: observation.visible_groups_found,
                 total: observation.visible_groups_total,
@@ -1688,10 +1696,33 @@ fn observed_candidate_sources(
         .collect()
 }
 
+fn observed_candidate_losses(items: &[SearchCandidateLossFact]) -> Vec<ObservedCandidateLoss> {
+    items
+        .iter()
+        .map(|loss| ObservedCandidateLoss {
+            pair: GoldPair::new(loss.left.clone(), loss.right.clone()),
+            loss_stage: loss_stage_label(loss.loss_stage).to_owned(),
+            source_id: loss.source_id.clone(),
+            source_family: source_family_label(loss.source_family).to_owned(),
+            policy: loss.policy.clone(),
+            source: loss.source.clone(),
+            reason: loss.reason.clone(),
+            feature_family: loss.feature_family.clone(),
+            count: loss.count,
+        })
+        .collect()
+}
+
 fn source_family_label(family: SearchCandidateSourceFamily) -> &'static str {
     match family {
         SearchCandidateSourceFamily::Symbolic => "symbolic",
         SearchCandidateSourceFamily::LeanSemantic => "lean-semantic",
+    }
+}
+
+fn loss_stage_label(stage: SearchCandidateLossStage) -> &'static str {
+    match stage {
+        SearchCandidateLossStage::FanoutPruned => "fanout-pruned",
     }
 }
 
@@ -2022,6 +2053,7 @@ mod tests {
                 generated_candidate_count_by_policy: Default::default(),
                 generated_candidate_count_by_feature_family: Default::default(),
                 hard_negative_generated_by_feature_family: Default::default(),
+                candidate_loss_metrics: Default::default(),
                 semantic_verification: SemanticVerificationStageMetrics {
                     semantic_reranking: lean_dup_search::SearchSemanticRerankingSummary::default(),
                     planned: found,

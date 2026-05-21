@@ -731,6 +731,7 @@ fn observed_from_symbolic(suite: &str, output: &SearchObservation, timings: Timi
                 survived_shown_filter: pair.survived_shown_filter,
             })
             .collect(),
+        candidate_losses: Vec::new(),
         visible_groups: CountMetric {
             found: output.visible_groups_found,
             total: output.visible_groups_total,

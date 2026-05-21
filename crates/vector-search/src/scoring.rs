@@ -160,6 +160,7 @@ pub(crate) fn observed_run(
                 survived_shown_filter: pair.visible,
             })
             .collect(),
+        candidate_losses: Vec::new(),
         visible_groups: CountMetric {
             found: visible_groups.found,
             total: visible_groups.total,

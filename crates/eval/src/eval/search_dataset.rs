@@ -172,6 +172,7 @@ mod tests {
                 observed("Z.unlabeled", "A.unlabeled", 2),
                 observed("Tiny.same_right", "Tiny.same_left", 1),
             ],
+            candidate_losses: Vec::new(),
             visible_groups_found: 1,
             visible_groups_total: 2,
             scoring: lean_dup_search::SearchScoringSummary::new(lean_dup_search::SearchScoringVariant::SymbolicOnly),
@@ -207,6 +208,7 @@ mod tests {
             &labels(),
             &SearchObservation {
                 pairs: vec![observed("Tiny.same_left", "Tiny.same_right", 1)],
+                candidate_losses: Vec::new(),
                 visible_groups_found: 1,
                 visible_groups_total: 1,
                 scoring: lean_dup_search::SearchScoringSummary::new(

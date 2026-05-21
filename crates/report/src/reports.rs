@@ -202,6 +202,7 @@ pub struct EvalStageMetricsDto {
     pub generated_candidate_count_by_policy: std::collections::BTreeMap<String, usize>,
     pub generated_candidate_count_by_feature_family: std::collections::BTreeMap<String, usize>,
     pub hard_negative_generated_by_feature_family: std::collections::BTreeMap<String, usize>,
+    pub candidate_loss_metrics: EvalCandidateLossMetricsDto,
     pub semantic_verification: EvalSemanticVerificationStageMetricsDto,
 }
 
@@ -218,6 +219,18 @@ pub struct EvalCandidateSourceRecallDto {
     pub symbolic_only: EvalCountMetricDto,
     pub semantic_lane_only: EvalCountMetricDto,
     pub merged: EvalCountMetricDto,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct EvalCandidateLossMetricsDto {
+    pub positive_fanout_pruned: EvalCountMetricDto,
+    pub hard_negative_fanout_pruned: EvalCountMetricDto,
+    pub positive_top_k_dropped: EvalCountMetricDto,
+    pub hard_negative_top_k_dropped: EvalCountMetricDto,
+    pub positive_fanout_pruned_by_feature_family: std::collections::BTreeMap<String, usize>,
+    pub hard_negative_fanout_pruned_by_feature_family: std::collections::BTreeMap<String, usize>,
+    pub positive_top_k_dropped_by_feature_family: std::collections::BTreeMap<String, usize>,
+    pub hard_negative_top_k_dropped_by_feature_family: std::collections::BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -549,10 +562,13 @@ pub struct DiffReport {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RetrievalReport {
+    pub fanout_policy_id: String,
     pub candidate_count: usize,
     pub hydrated_external_count: usize,
     pub pruned_feature_fanouts: usize,
     pub heap_truncations: usize,
+    pub top_k_saturation_by_source_id: std::collections::BTreeMap<String, usize>,
+    pub pruned_feature_fanout_by_family: std::collections::BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -925,6 +941,36 @@ fn eval_metrics_dto(metrics: lean_dup_eval::EvaluationMetrics) -> EvalMetricsDto
                 .stage_metrics
                 .generated_candidate_count_by_feature_family,
             hard_negative_generated_by_feature_family: metrics.stage_metrics.hard_negative_generated_by_feature_family,
+            candidate_loss_metrics: EvalCandidateLossMetricsDto {
+                positive_fanout_pruned: eval_count_metric_dto(
+                    metrics.stage_metrics.candidate_loss_metrics.positive_fanout_pruned,
+                ),
+                hard_negative_fanout_pruned: eval_count_metric_dto(
+                    metrics.stage_metrics.candidate_loss_metrics.hard_negative_fanout_pruned,
+                ),
+                positive_top_k_dropped: eval_count_metric_dto(
+                    metrics.stage_metrics.candidate_loss_metrics.positive_top_k_dropped,
+                ),
+                hard_negative_top_k_dropped: eval_count_metric_dto(
+                    metrics.stage_metrics.candidate_loss_metrics.hard_negative_top_k_dropped,
+                ),
+                positive_fanout_pruned_by_feature_family: metrics
+                    .stage_metrics
+                    .candidate_loss_metrics
+                    .positive_fanout_pruned_by_feature_family,
+                hard_negative_fanout_pruned_by_feature_family: metrics
+                    .stage_metrics
+                    .candidate_loss_metrics
+                    .hard_negative_fanout_pruned_by_feature_family,
+                positive_top_k_dropped_by_feature_family: metrics
+                    .stage_metrics
+                    .candidate_loss_metrics
+                    .positive_top_k_dropped_by_feature_family,
+                hard_negative_top_k_dropped_by_feature_family: metrics
+                    .stage_metrics
+                    .candidate_loss_metrics
+                    .hard_negative_top_k_dropped_by_feature_family,
+            },
             semantic_verification: EvalSemanticVerificationStageMetricsDto {
                 semantic_reranking: metrics.stage_metrics.semantic_verification.semantic_reranking.clone(),
                 planned: metrics.stage_metrics.semantic_verification.planned,
@@ -969,10 +1015,13 @@ pub fn audit_report(output: AuditOutput) -> AuditReport {
         &output.comparison_provenance,
     );
     let retrieval = RetrievalReport {
+        fanout_policy_id: output.retrieval.fanout_policy_id.clone(),
         candidate_count: output.retrieval.candidate_count,
         hydrated_external_count: output.retrieval.hydrated_external_count,
         pruned_feature_fanouts: output.retrieval.pruned_feature_fanout_count,
         heap_truncations: output.retrieval.heap_truncations,
+        top_k_saturation_by_source_id: output.retrieval.top_k_saturation_by_source_id.clone(),
+        pruned_feature_fanout_by_family: output.retrieval.pruned_feature_fanout_by_family.clone(),
     };
     let comparison_provenance = output
         .comparison_provenance

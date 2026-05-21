@@ -64,11 +64,30 @@ pub struct ObservedCandidateSource {
     pub feature_families: Vec<String>,
 }
 
+/// Search-owned candidate loss fact preserved for eval denominators.
+///
+/// Eval uses these facts to count labeled pairs lost to bounded retrieval
+/// policy. It does not inspect retrieval keys, posting layout, or scorer
+/// internals.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ObservedCandidateLoss {
+    pub pair: GoldPair,
+    pub loss_stage: String,
+    pub source_id: String,
+    pub source_family: String,
+    pub policy: String,
+    pub source: String,
+    pub reason: String,
+    pub feature_family: String,
+    pub count: usize,
+}
+
 /// Observed candidates and measured costs for one corpus run.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ObservedRun {
     pub suite: String,
     pub pairs: Vec<ObservedPair>,
+    pub candidate_losses: Vec<ObservedCandidateLoss>,
     pub visible_groups: CountMetric,
     pub probe_unavailable: CountMetric,
     pub semantic_verification: SemanticVerificationStageMetrics,
@@ -276,6 +295,7 @@ mod tests {
                     survived_shown_filter: shown,
                 })
                 .collect(),
+            candidate_losses: Vec::new(),
             visible_groups: CountMetric::default(),
             probe_unavailable: CountMetric::default(),
             semantic_verification: SemanticVerificationStageMetrics::default(),

@@ -136,10 +136,13 @@ pub struct SearchBaselineChange {
 /// Stable retrieval counters exposed by audit workflows.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AuditRetrievalSummary {
+    pub fanout_policy_id: String,
     pub candidate_count: usize,
     pub hydrated_external_count: usize,
     pub pruned_feature_fanout_count: usize,
     pub heap_truncations: usize,
+    pub top_k_saturation_by_source_id: BTreeMap<String, usize>,
+    pub pruned_feature_fanout_by_family: BTreeMap<String, usize>,
 }
 
 /// Stable semantic-probe counters exposed by audit workflows.
@@ -594,11 +597,22 @@ fn project_audit_output(workflow: WorkflowOutput) -> AuditOutput {
 
 fn audit_retrieval_summary(diagnostics: &RetrievalDiagnostics) -> AuditRetrievalSummary {
     AuditRetrievalSummary {
+        fanout_policy_id: diagnostics.fanout_policy.policy_id.clone(),
         candidate_count: diagnostics.candidate_count,
         hydrated_external_count: diagnostics.hydrated_external_count,
-        pruned_feature_fanout_count: diagnostics.pruned_postings.len(),
+        pruned_feature_fanout_count: diagnostics.pruned_feature_fanouts.len(),
         heap_truncations: diagnostics.heap_truncations.len(),
+        top_k_saturation_by_source_id: diagnostics.top_k_saturation_by_source_id.clone(),
+        pruned_feature_fanout_by_family: pruned_feature_fanout_by_family(diagnostics),
     }
+}
+
+fn pruned_feature_fanout_by_family(diagnostics: &RetrievalDiagnostics) -> BTreeMap<String, usize> {
+    let mut by_family = BTreeMap::new();
+    for item in &diagnostics.pruned_feature_fanouts {
+        *by_family.entry(item.feature_family.clone()).or_insert(0) += item.count;
+    }
+    by_family
 }
 
 fn audit_probe_summary(diagnostics: &ProbeDiagnostics) -> AuditProbeSummary {
