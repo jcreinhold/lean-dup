@@ -55,9 +55,10 @@ fn render_baseline(report: &BaselineReport, options: RenderOptions) -> String {
                 lines.push(String::new());
                 push_baseline_table(&mut lines, std::slice::from_ref(entry));
                 lines.push(String::new());
+                let total = entry.unique_group_count.unwrap_or(entry.group_ids.len());
                 let id_cap = if options.verbose { entry.group_ids.len() } else { 20 };
                 let shown = id_cap.min(entry.group_ids.len());
-                lines.push(format!("group ids ({} of {}):", shown, entry.group_ids.len()));
+                lines.push(format!("group ids ({shown} of {total} distinct):"));
                 for id in entry.group_ids.iter().take(id_cap) {
                     lines.push(format!("  {id}"));
                 }
@@ -642,7 +643,12 @@ fn render_audit(report: &AuditReport, options: RenderOptions) -> String {
         let name = report.saved_baseline_name.as_deref().unwrap_or("baseline");
         let count = report.saved_baseline_group_count.unwrap_or(0);
         let suffix = if count == 1 { "group" } else { "groups" };
-        lines.push(format!("saved baseline '{name}' ({count} {suffix}) → {}", path.display()));
+        let replaced = if report.saved_baseline_replaced.unwrap_or(false) {
+            ", replaced existing"
+        } else {
+            ""
+        };
+        lines.push(format!("saved baseline '{name}' ({count} {suffix}{replaced}) → {}", path.display()));
     }
 
     // Section B — groups table.

@@ -48,9 +48,14 @@ pub struct BaselineSummaryReport {
     #[serde(serialize_with = "serialize_path_ref")]
     pub path: PathBuf,
     pub workspace_fingerprint: String,
+    /// Total snapshot entries (one per family-pair; may include duplicates of `id`).
     pub group_count: usize,
+    /// Distinct group IDs. Populated by `show`; equals `group_count` when
+    /// the snapshot has no duplicate ids.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unique_group_count: Option<usize>,
     pub disk_bytes: u64,
-    /// Populated by `show` only.
+    /// Distinct group IDs, deduplicated. Populated by `show` only.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub group_ids: Vec<String>,
 }
@@ -534,6 +539,8 @@ pub struct AuditReport {
     pub saved_baseline_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub saved_baseline_group_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub saved_baseline_replaced: Option<bool>,
     pub message: &'static str,
 }
 
@@ -1142,6 +1149,7 @@ pub fn audit_report(output: AuditOutput) -> AuditReport {
         visible_group_limit: output.visible_group_limit,
         visible_groups_truncated: output.visible_groups_truncated,
         saved_baseline_group_count: output.saved_baseline.as_ref().map(|_| output.saved_baseline_group_count),
+        saved_baseline_replaced: output.saved_baseline.as_ref().map(|_| output.saved_baseline_replaced),
         saved_baseline: output.saved_baseline,
         saved_baseline_name: output.saved_baseline_name,
         message: "audit ranking queue generated",

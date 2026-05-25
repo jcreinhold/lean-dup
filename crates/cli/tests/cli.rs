@@ -1466,6 +1466,41 @@ fn baseline_subcommand_lists_shows_and_deletes() {
         .success()
         .stdout(predicate::str::contains("deleted baseline 'alpha'"));
 
+    // Re-saving a baseline reports it as replacing the existing one.
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--no-semantic-probes", "--save-baseline", "beta"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("replaced existing"));
+
+    // `baseline show` must dedup group IDs in its listing.
+    let show = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["baseline", "--verbose", "show", "beta"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(show.get_output().stdout.clone()).unwrap();
+    let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        if trimmed.contains('-')
+            && !trimmed.starts_with("lean-dup")
+            && !trimmed.starts_with("name")
+            && !trimmed.contains(' ')
+            && trimmed.len() > 6
+        {
+            assert!(
+                seen.insert(trimmed),
+                "duplicate group id {trimmed:?} in baseline show output:\n{stdout}"
+            );
+        }
+    }
+
     Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())

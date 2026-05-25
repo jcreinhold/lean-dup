@@ -130,6 +130,7 @@ pub struct AuditOutput {
     pub saved_baseline: Option<PathBuf>,
     pub saved_baseline_name: Option<String>,
     pub saved_baseline_group_count: usize,
+    pub saved_baseline_replaced: bool,
 }
 
 /// Result of resolving one audit group through the search workflow.
@@ -416,6 +417,7 @@ struct WorkflowOutput {
     saved_baseline: Option<PathBuf>,
     saved_baseline_name: Option<String>,
     saved_baseline_group_count: usize,
+    saved_baseline_replaced: bool,
 }
 
 struct Foundation {
@@ -552,12 +554,15 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
         );
     }
     let snapshot_group_count = snapshot.groups.len();
-    let (saved_baseline, saved_baseline_name) = match request.save_baseline {
+    let (saved_baseline, saved_baseline_name, saved_baseline_replaced) = match request.save_baseline {
         Some(name) => {
+            let existing = baseline::path_for(&foundation.cache.root, &name)
+                .ok()
+                .is_some_and(|path| path.exists());
             let path = baseline::save(&foundation.cache.root, &name, &snapshot)?;
-            (Some(path), Some(name))
+            (Some(path), Some(name), existing)
         }
-        None => (None, None),
+        None => (None, None, false),
     };
 
     Ok(WorkflowOutput {
@@ -579,6 +584,7 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
         saved_baseline,
         saved_baseline_name,
         saved_baseline_group_count: snapshot_group_count,
+        saved_baseline_replaced,
     })
 }
 
@@ -700,6 +706,7 @@ fn project_audit_output(workflow: WorkflowOutput) -> AuditOutput {
         saved_baseline: workflow.saved_baseline,
         saved_baseline_name: workflow.saved_baseline_name,
         saved_baseline_group_count: workflow.saved_baseline_group_count,
+        saved_baseline_replaced: workflow.saved_baseline_replaced,
     }
 }
 

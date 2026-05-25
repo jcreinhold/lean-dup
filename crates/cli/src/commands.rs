@@ -670,16 +670,25 @@ fn baseline_summary(cache_root: &std::path::Path, name: &str, include_ids: bool)
     }
     let (path, snapshot) = load_named_baseline(cache_root, name).ok()?;
     let disk_bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-    let group_ids = if include_ids {
-        snapshot.groups.iter().map(|group| group.id.clone()).collect()
+    let (group_ids, unique_group_count) = if include_ids {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut ordered: Vec<String> = Vec::new();
+        for group in &snapshot.groups {
+            if seen.insert(group.id.clone()) {
+                ordered.push(group.id.clone());
+            }
+        }
+        let unique = ordered.len();
+        (ordered, Some(unique))
     } else {
-        Vec::new()
+        (Vec::new(), None)
     };
     Some(BaselineSummaryReport {
         name: name.to_owned(),
         path,
         workspace_fingerprint: snapshot.workspace_fingerprint,
         group_count: snapshot.groups.len(),
+        unique_group_count,
         disk_bytes,
         group_ids,
     })
