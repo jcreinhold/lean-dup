@@ -56,8 +56,15 @@ impl AuditDetailSnapshot {
     }
 }
 
+/// Directory holding per-audit detail snapshots, one per workspace
+/// fingerprint. Exposed crate-private so the workspace cleanup module can
+/// walk it without duplicating the path constant.
+pub(crate) fn last_audit_detail_dir(cache_root: &Path) -> PathBuf {
+    cache_root.join("last-audit-detail")
+}
+
 fn snapshot_path(cache_root: &Path, fingerprint: &str) -> PathBuf {
-    cache_root.join("last-audit-detail").join(format!("{fingerprint}.json"))
+    last_audit_detail_dir(cache_root).join(format!("{fingerprint}.json"))
 }
 
 /// Persist the detail snapshot atomically. Best-effort: failures degrade

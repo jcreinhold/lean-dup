@@ -408,6 +408,16 @@ fn hidden_cache_cleanup_dry_run_and_execute_preserve_latest_entry() {
         serde_json::to_string(&serde_json::json!({ "index_dir": &active })).unwrap(),
     )
     .unwrap();
+    // Plant a stale snapshot pair (no workspace passed → no protected
+    // fingerprints → everything is stale).
+    let snap_dir = cache.path().join("last-snapshot");
+    let detail_dir = cache.path().join("last-audit-detail");
+    fs::create_dir_all(&snap_dir).unwrap();
+    fs::create_dir_all(&detail_dir).unwrap();
+    let stale_snap = snap_dir.join("ghost-fp.json");
+    let stale_detail = detail_dir.join("ghost-fp.json");
+    fs::write(&stale_snap, "{}").unwrap();
+    fs::write(&stale_detail, "{}").unwrap();
 
     let dry_run = Command::cargo_bin("lean-dup")
         .unwrap()
@@ -420,8 +430,12 @@ fn hidden_cache_cleanup_dry_run_and_execute_preserve_latest_entry() {
     assert_eq!(payload["command"], "cache-cleanup");
     assert_eq!(payload["executed"], false);
     assert_eq!(payload["removable_count"], 1);
+    assert_eq!(payload["workspace_files"]["removable_count"], 2);
+    assert_eq!(payload["workspace_files"]["protected_count"], 0);
     assert!(active.exists());
     assert!(stale.exists());
+    assert!(stale_snap.exists());
+    assert!(stale_detail.exists());
 
     Command::cargo_bin("lean-dup")
         .unwrap()
@@ -430,10 +444,13 @@ fn hidden_cache_cleanup_dry_run_and_execute_preserve_latest_entry() {
         .assert()
         .success()
         .stdout(predicate::str::contains("removed"))
-        .stdout(predicate::str::contains("1 entries to remove"));
+        .stdout(predicate::str::contains("1 entries to remove"))
+        .stdout(predicate::str::contains("workspace snapshots: removed 2"));
 
     assert!(active.exists());
     assert!(!stale.exists());
+    assert!(!stale_snap.exists());
+    assert!(!stale_detail.exists());
 }
 
 #[test]

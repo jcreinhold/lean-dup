@@ -520,6 +520,44 @@ fn render_cache_cleanup(report: &CacheCleanupReportDto, options: RenderOptions) 
     } else if report.removable_count + report.protected_count > 0 {
         lines.push("(pass --verbose for the per-entry list.)".to_owned());
     }
+    if let Some(ws) = report.workspace_files.as_ref() {
+        lines.push(String::new());
+        let stale_summary = if report.executed {
+            format!("workspace snapshots: removed {} ({})", ws.removable_count, format_bytes(ws.bytes_removed))
+        } else {
+            format!(
+                "workspace snapshots: {} stale ({})    {} protected",
+                ws.removable_count,
+                format_bytes(ws.bytes_to_remove),
+                ws.protected_count,
+            )
+        };
+        lines.push(stale_summary);
+        if options.verbose {
+            if !ws.removed.is_empty() {
+                lines.push("stale snapshot files:".to_owned());
+                for entry in &ws.removed {
+                    lines.push(format!(
+                        "  {} {} ({})",
+                        entry.kind,
+                        format_bytes(entry.disk_bytes),
+                        entry.fingerprint,
+                    ));
+                }
+            }
+            if !ws.protected.is_empty() {
+                lines.push("protected snapshot files:".to_owned());
+                for entry in &ws.protected {
+                    lines.push(format!(
+                        "  {} {} ({})",
+                        entry.kind,
+                        format_bytes(entry.disk_bytes),
+                        entry.fingerprint,
+                    ));
+                }
+            }
+        }
+    }
     lines.join("\n")
 }
 

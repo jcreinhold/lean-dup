@@ -140,7 +140,8 @@ pub struct CacheCleanupArgs {
     #[arg(long)]
     pub cache_root: Option<PathBuf>,
 
-    /// Workspace whose live cache pointer should be protected. Defaults to the current directory.
+    /// Workspace whose live cache pointer and last-audit snapshots should be protected.
+    /// Without this flag, every per-workspace snapshot file in the cache is treated as stale.
     #[arg(long)]
     pub workspace: Option<PathBuf>,
 

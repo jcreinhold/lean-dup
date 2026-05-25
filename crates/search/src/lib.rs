@@ -20,6 +20,7 @@ mod scorer;
 mod semantic_reranking;
 mod semantic_verification;
 mod source_refs;
+mod workspace_cleanup;
 
 pub use audit::{
     AuditDetailSnapshot, AuditEvidence, AuditGroup, AuditHiddenGroupCounts, AuditHiddenReason, AuditMember,
@@ -44,6 +45,9 @@ pub use scorer::{SearchPairScoring, SearchScoringSummary, SearchScoringVariant};
 pub use semantic_reranking::{
     SearchSemanticObligationFact, SearchSemanticObligationKind, SearchSemanticObligationStatus,
     SearchSemanticObligationYield, SearchSemanticRerankingSummary, SearchSemanticUnavailableReason,
+};
+pub use workspace_cleanup::{
+    WorkspaceFileCleanupEntry, WorkspaceFileCleanupReport, cleanup_stale_workspace_files,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]

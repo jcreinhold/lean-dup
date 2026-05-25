@@ -210,6 +210,7 @@ fn worker_diagnostics(version: &WorkerVersion) -> lean_dup_report::WorkerDiagnos
 fn cache_cleanup(args: CacheCleanupArgs, reporter: &mut Reporter) -> Result<CacheCleanupReportDto> {
     let cache_root = args.cache_root.unwrap_or_else(lean_dup_index::cache_root);
     let store = IndexStore::new(cache_root.clone());
+    let mut protected_fingerprints: Vec<String> = Vec::new();
     let expected_entries = if let Some(workspace_root) = pick_workspace(args.workspace, args.workspace_positional) {
         let workspace = resolve(
             WorkspaceRequest {
@@ -218,6 +219,9 @@ fn cache_cleanup(args: CacheCleanupArgs, reporter: &mut Reporter) -> Result<Cach
             },
             reporter,
         )?;
+        if let Ok(cache) = lean_dup_index::resolve_cache(&workspace) {
+            protected_fingerprints.push(cache.fingerprint);
+        }
         let version_call = WorkerClient::with_timeout(Duration::from_secs(60)).version(workspace.root.clone())?;
         let worker_version = version_call.rows.into_iter().next().ok_or_else(|| AppError::Cli {
             message: "worker version returned no rows".to_owned(),
@@ -240,11 +244,11 @@ fn cache_cleanup(args: CacheCleanupArgs, reporter: &mut Reporter) -> Result<Cach
     } else {
         Vec::new()
     };
-    Ok(lean_dup_report::cache_cleanup_report(lean_dup_index::cleanup_cache(
-        cache_root,
-        &expected_entries,
-        CleanupPolicy { execute: args.execute },
-    )?))
+    let policy = CleanupPolicy { execute: args.execute };
+    let workspace_files =
+        lean_dup_search::cleanup_stale_workspace_files(&cache_root, &protected_fingerprints, policy)?;
+    let index_report = lean_dup_index::cleanup_cache(cache_root, &expected_entries, policy)?;
+    Ok(lean_dup_report::cache_cleanup_report(index_report, Some(workspace_files)))
 }
 
 fn index(args: IndexArgs, reporter: &mut Reporter) -> Result<IndexReport> {

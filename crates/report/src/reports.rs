@@ -7,7 +7,7 @@ use lean_dup_search::{
     AuditDetailSnapshot, AuditEvidence, AuditGroup, AuditMember, AuditOutput, AuditProbeSummary,
     AuditReplacementHint, AuditReview, AuditVisibilityOptions, DiffOutput, SearchBaselineDiff, SearchBaselineGroup,
     SearchScoringSummary, SearchSemanticObligationFact, SearchSemanticObligationYield, SearchSemanticRerankingSummary,
-    ShowOutput,
+    ShowOutput, WorkspaceFileCleanupEntry, WorkspaceFileCleanupReport,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -426,6 +426,11 @@ pub struct CacheCleanupReportDto {
     pub bytes_removed: u64,
     pub removed_entries: Vec<CacheCleanupEntryReport>,
     pub protected_entries: Vec<CacheCleanupEntryReport>,
+    /// Per-workspace snapshot files (`last-snapshot/`,
+    /// `last-audit-detail/`). Omitted from JSON when the cleanup pass
+    /// found no files of either kind.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_files: Option<WorkspaceFileCleanupSectionDto>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -435,6 +440,25 @@ pub struct CacheCleanupEntryReport {
     pub index_dir: PathBuf,
     pub disk_bytes: u64,
     pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkspaceFileCleanupSectionDto {
+    pub removable_count: usize,
+    pub protected_count: usize,
+    pub bytes_to_remove: u64,
+    pub bytes_removed: u64,
+    pub removed: Vec<WorkspaceFileCleanupEntryDto>,
+    pub protected: Vec<WorkspaceFileCleanupEntryDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkspaceFileCleanupEntryDto {
+    pub kind: &'static str,
+    pub fingerprint: String,
+    #[serde(serialize_with = "serialize_path_ref")]
+    pub path: PathBuf,
+    pub disk_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1213,7 +1237,13 @@ pub fn cache_diagnostics_report(diagnostics: CacheDiagnostics) -> CacheDiagnosti
     }
 }
 
-pub fn cache_cleanup_report(report: CacheCleanupReport) -> CacheCleanupReportDto {
+pub fn cache_cleanup_report(
+    report: CacheCleanupReport,
+    workspace_files: Option<WorkspaceFileCleanupReport>,
+) -> CacheCleanupReportDto {
+    let workspace_files = workspace_files
+        .filter(|w| w.removable_count + w.protected_count > 0)
+        .map(workspace_file_cleanup_section);
     CacheCleanupReportDto {
         status: report.status,
         cache_root: report.cache_root,
@@ -1232,6 +1262,7 @@ pub fn cache_cleanup_report(report: CacheCleanupReport) -> CacheCleanupReportDto
             .into_iter()
             .map(cache_cleanup_entry_report)
             .collect(),
+        workspace_files,
     }
 }
 
@@ -1241,6 +1272,26 @@ fn cache_cleanup_entry_report(entry: lean_dup_index::CacheCleanupEntry) -> Cache
         index_dir: entry.index_dir,
         disk_bytes: entry.disk_bytes,
         reason: entry.reason,
+    }
+}
+
+fn workspace_file_cleanup_section(report: WorkspaceFileCleanupReport) -> WorkspaceFileCleanupSectionDto {
+    WorkspaceFileCleanupSectionDto {
+        removable_count: report.removable_count,
+        protected_count: report.protected_count,
+        bytes_to_remove: report.bytes_to_remove,
+        bytes_removed: report.bytes_removed,
+        removed: report.removed.into_iter().map(workspace_file_cleanup_entry).collect(),
+        protected: report.protected.into_iter().map(workspace_file_cleanup_entry).collect(),
+    }
+}
+
+fn workspace_file_cleanup_entry(entry: WorkspaceFileCleanupEntry) -> WorkspaceFileCleanupEntryDto {
+    WorkspaceFileCleanupEntryDto {
+        kind: entry.kind,
+        fingerprint: entry.fingerprint,
+        path: entry.path,
+        disk_bytes: entry.disk_bytes,
     }
 }
 

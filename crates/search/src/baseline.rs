@@ -86,9 +86,16 @@ pub fn load(cache_root: &Path, name: &str) -> Result<(PathBuf, BaselineSnapshot)
     Ok((path, snapshot))
 }
 
+/// Directory holding implicit "last audit" snapshots, one per workspace
+/// fingerprint. Exposed crate-private so the workspace cleanup module can
+/// walk it without duplicating the path constant.
+pub(crate) fn last_snapshot_dir(cache_root: &Path) -> PathBuf {
+    cache_root.join("last-snapshot")
+}
+
 /// Path to the implicit "last audit" snapshot for a workspace.
 fn last_snapshot_path(cache_root: &Path, fingerprint: &str) -> PathBuf {
-    cache_root.join("last-snapshot").join(format!("{fingerprint}.json"))
+    last_snapshot_dir(cache_root).join(format!("{fingerprint}.json"))
 }
 
 /// Persist the most recent audit snapshot for a workspace fingerprint.
