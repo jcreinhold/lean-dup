@@ -21,7 +21,7 @@ pub enum Error {
         source: std::io::Error,
     },
 
-    #[error("index error: {message}")]
+    #[error("{message}")]
     Index { message: String },
 
     #[error("sqlite error")]

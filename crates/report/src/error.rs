@@ -8,7 +8,7 @@ pub enum Error {
     #[error("{0}")]
     Search(#[from] lean_dup_search::Error),
 
-    #[error("report error: {message}")]
+    #[error("{message}")]
     Report { message: String },
 
     #[error("could not render JSON output")]

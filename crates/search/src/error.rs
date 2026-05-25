@@ -24,7 +24,7 @@ pub enum Error {
         source: std::io::Error,
     },
 
-    #[error("search error: {message}")]
+    #[error("{message}")]
     Search { message: String },
 
     #[error("could not render JSON output")]

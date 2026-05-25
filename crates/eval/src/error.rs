@@ -27,7 +27,7 @@ pub enum Error {
         source: std::io::Error,
     },
 
-    #[error("evaluation error: {message}")]
+    #[error("{message}")]
     Eval { message: String },
 
     #[error("could not render JSON output")]
