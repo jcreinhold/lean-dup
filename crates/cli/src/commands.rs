@@ -116,7 +116,11 @@ pub fn run(cli: Cli) -> Result<Outcome> {
 }
 
 fn doctor(args: DoctorArgs, reporter: &mut Reporter) -> Result<DoctorReport> {
-    let foundation = foundation(workspace_or_cwd(args.workspace), args.module_root, reporter)?;
+    let foundation = foundation(
+        workspace_or_cwd(pick_workspace(args.workspace, args.workspace_positional)),
+        args.module_root,
+        reporter,
+    )?;
     let worker_version = reporter.measure("worker.version", |_| {
         WorkerClient::with_timeout(Duration::from_secs(60)).version(foundation.workspace.root.clone())
     })?;
@@ -206,7 +210,7 @@ fn worker_diagnostics(version: &WorkerVersion) -> lean_dup_report::WorkerDiagnos
 fn cache_cleanup(args: CacheCleanupArgs, reporter: &mut Reporter) -> Result<CacheCleanupReportDto> {
     let cache_root = args.cache_root.unwrap_or_else(lean_dup_index::cache_root);
     let store = IndexStore::new(cache_root.clone());
-    let expected_entries = if let Some(workspace_root) = args.workspace {
+    let expected_entries = if let Some(workspace_root) = pick_workspace(args.workspace, args.workspace_positional) {
         let workspace = resolve(
             WorkspaceRequest {
                 requested_root: workspace_root,
@@ -248,7 +252,11 @@ fn index(args: IndexArgs, reporter: &mut Reporter) -> Result<IndexReport> {
     let label = args.label.clone();
     let force = args.force;
     let require_oleans = args.require_oleans;
-    let foundation = foundation(workspace_or_cwd(args.workspace), Some(module_root.clone()), reporter)?;
+    let foundation = foundation(
+        workspace_or_cwd(pick_workspace(args.workspace, args.workspace_positional)),
+        Some(module_root.clone()),
+        reporter,
+    )?;
     let store = IndexStore::new(foundation.cache.root.clone());
     let summary = reporter.measure("index.build_or_reuse", |reporter| {
         store.build_or_reuse(
@@ -313,7 +321,7 @@ fn audit_request(args: AuditArgs) -> AuditRequest {
     let include_private = args.effective_include_private();
     let visibility = args.visibility_options();
     AuditRequest {
-        workspace: workspace_or_cwd(args.workspace),
+        workspace: workspace_or_cwd(pick_workspace(args.workspace, args.workspace_positional)),
         module_root: args.module_root,
         include_private,
         compare_indexes: args.compare_indexes,
@@ -348,19 +356,39 @@ fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<lean_dup_report::Eval
 }
 
 fn show(args: ShowArgs, reporter: &mut Reporter) -> Result<ShowReport> {
-    let requested_group = args.group.clone();
-    let workspace = args.workspace.clone();
+    let workspace = pick_workspace(args.workspace.clone(), args.workspace_positional.clone());
     let module_root = args.module_root.clone();
     let snapshot = if args.no_cache {
         None
     } else {
         load_snapshot_for(workspace.clone(), module_root.clone(), reporter)
     };
-    if let Some(snapshot) = snapshot.as_ref()
-        && !snapshot_contains_group(snapshot, &requested_group)
-    {
-        return Err(unknown_group_error(&requested_group, snapshot));
-    }
+    let requested_group = match snapshot.as_ref() {
+        Some(snapshot) => match resolve_group(snapshot, &args.group) {
+            ResolveOutcome::Exact(id) | ResolveOutcome::Unique(id) => id,
+            ResolveOutcome::Ambiguous(matches) => {
+                return Err(AppError::Cli {
+                    message: format!(
+                        "ambiguous group `{}` — matches: {}",
+                        args.group,
+                        matches.join(", ")
+                    ),
+                });
+            }
+            ResolveOutcome::TooShort => {
+                return Err(AppError::Cli {
+                    message: format!(
+                        "group `{}` is too short — provide at least 6 characters for prefix/suffix matching",
+                        args.group
+                    ),
+                });
+            }
+            ResolveOutcome::None => {
+                return Err(unknown_group_error(&args.group, snapshot));
+            }
+        },
+        None => args.group.clone(),
+    };
     match run_show(
         audit_request(default_audit_args(workspace, module_root)),
         &requested_group,
@@ -387,7 +415,7 @@ fn decorate_unknown_group(
     let Some(snapshot) = snapshot else {
         return AppError::Search(error);
     };
-    if !snapshot_contains_group(snapshot, requested) {
+    if matches!(resolve_group(snapshot, requested), ResolveOutcome::None | ResolveOutcome::TooShort) {
         return AppError::Search(error);
     }
     AppError::Cli {
@@ -419,10 +447,50 @@ fn load_snapshot_for(
     load_last_audit_snapshot(&cache.root, &cache.fingerprint)
 }
 
-fn snapshot_contains_group(snapshot: &BaselineSnapshot, requested: &str) -> bool {
-    snapshot.groups.iter().any(|group| {
-        group.id == requested || group.member_ids.iter().any(|member| member == requested)
-    })
+enum ResolveOutcome {
+    Exact(String),
+    Unique(String),
+    Ambiguous(Vec<String>),
+    TooShort,
+    None,
+}
+
+const GROUP_PREFIX_MIN: usize = 6;
+
+/// Match the user's group ID against the snapshot. Exact match wins
+/// outright; otherwise (provided the input is at least `GROUP_PREFIX_MIN`
+/// characters) try prefix then suffix match against group and member IDs.
+fn resolve_group(snapshot: &BaselineSnapshot, requested: &str) -> ResolveOutcome {
+    let mut all_ids: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for group in &snapshot.groups {
+        all_ids.insert(group.id.as_str());
+        for member in &group.member_ids {
+            all_ids.insert(member.as_str());
+        }
+    }
+    if all_ids.contains(requested) {
+        return ResolveOutcome::Exact(requested.to_owned());
+    }
+    if requested.len() < GROUP_PREFIX_MIN {
+        return ResolveOutcome::TooShort;
+    }
+    let mut hits: Vec<String> = all_ids
+        .iter()
+        .filter(|id| id.starts_with(requested))
+        .map(|id| (*id).to_owned())
+        .collect();
+    if hits.is_empty() {
+        hits = all_ids
+            .iter()
+            .filter(|id| id.ends_with(requested))
+            .map(|id| (*id).to_owned())
+            .collect();
+    }
+    match hits.len() {
+        0 => ResolveOutcome::None,
+        1 => ResolveOutcome::Unique(hits.into_iter().next().unwrap()),
+        _ => ResolveOutcome::Ambiguous(hits),
+    }
 }
 
 fn unknown_group_error(requested: &str, snapshot: &BaselineSnapshot) -> AppError {
@@ -443,7 +511,10 @@ fn diff(args: DiffArgs, reporter: &mut Reporter) -> Result<DiffReport> {
         return Ok(lean_dup_report::diff_report(output));
     }
     let output = run_diff(
-        audit_request(default_audit_args(args.workspace, args.module_root)),
+        audit_request(default_audit_args(
+            pick_workspace(args.workspace, args.workspace_positional),
+            args.module_root,
+        )),
         baseline_name,
         reporter,
     )?;
@@ -456,7 +527,7 @@ fn diff(args: DiffArgs, reporter: &mut Reporter) -> Result<DiffReport> {
 fn try_diff_from_snapshot(args: &DiffArgs, baseline_name: &str, reporter: &mut Reporter) -> Option<DiffOutput> {
     let resolved = resolve(
         WorkspaceRequest {
-            requested_root: workspace_or_cwd(args.workspace.clone()),
+            requested_root: workspace_or_cwd(pick_workspace(args.workspace.clone(), args.workspace_positional.clone())),
             module_root: args.module_root.clone(),
         },
         reporter,
@@ -551,6 +622,7 @@ fn origin_for_label(label: &str) -> String {
 fn default_audit_args(workspace: Option<PathBuf>, module_root: Option<String>) -> AuditArgs {
     AuditArgs {
         workspace,
+        workspace_positional: None,
         module_root,
         format: OutputFormat::Text,
         visibility: crate::cli::Visibility::All,
@@ -575,6 +647,12 @@ fn default_audit_args(workspace: Option<PathBuf>, module_root: Option<String>) -
 /// working directory. Used by every subcommand so the flag is optional.
 fn workspace_or_cwd(workspace: Option<PathBuf>) -> PathBuf {
     workspace.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+}
+
+/// Combine a `--workspace` flag with the optional positional form. Clap rejects
+/// "both given" via `conflicts_with`, so at most one is `Some`.
+fn pick_workspace(flag: Option<PathBuf>, positional: Option<PathBuf>) -> Option<PathBuf> {
+    flag.or(positional)
 }
 
 fn missing_oleans(workspace: &ResolvedWorkspace) -> Vec<String> {

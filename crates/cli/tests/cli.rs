@@ -1376,6 +1376,79 @@ fn show_fast_fails_on_unknown_group_after_recent_audit() {
 }
 
 #[test]
+fn show_resolves_group_by_prefix_and_rejects_short_or_ambiguous() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let root = repo_root();
+    let tiny = root.join("tests/fixtures/tiny");
+    let audit = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&tiny)
+        .args([
+            "--module",
+            "Tiny",
+            "--no-semantic-probes",
+            "--format",
+            "json",
+            "--low-priority",
+        ])
+        .assert()
+        .success();
+    let payload: Value = serde_json::from_str(&String::from_utf8(audit.get_output().stdout.clone()).unwrap()).unwrap();
+    let real_id = payload["visible_groups"][0]["id"].as_str().unwrap().to_owned();
+    // Prefix at least GROUP_PREFIX_MIN chars resolves to the full ID and runs.
+    let prefix = &real_id[..real_id.len().saturating_sub(2)];
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["show", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--group", prefix])
+        .assert()
+        .success();
+    // Too-short input is rejected with a clear hint.
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["show", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--group", "abc"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("at least 6 characters"));
+}
+
+#[test]
+fn audit_accepts_positional_workspace_and_rejects_combined_with_flag() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let root = repo_root();
+    let tiny = root.join("tests/fixtures/tiny");
+
+    // Positional path is honored.
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--module", "Tiny", "--no-semantic-probes", "--format", "json"])
+        .arg(&tiny)
+        .assert()
+        .success();
+
+    // Combined --workspace and positional is rejected by clap.
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&tiny)
+        .arg(&tiny)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+}
+
+#[test]
 fn baseline_diff_reports_appeared_disappeared_and_changed_groups() {
     let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();

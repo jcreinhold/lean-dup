@@ -104,6 +104,10 @@ pub struct DoctorArgs {
     #[arg(long)]
     pub workspace: Option<PathBuf>,
 
+    /// Positional form of `--workspace`.
+    #[arg(value_name = "WORKSPACE", conflicts_with = "workspace")]
+    pub workspace_positional: Option<PathBuf>,
+
     /// Lean module root inside the workspace (e.g. `Mathlib`). Defaults to the lakefile's first root.
     #[arg(long = "module")]
     pub module_root: Option<String>,
@@ -140,6 +144,10 @@ pub struct CacheCleanupArgs {
     #[arg(long)]
     pub workspace: Option<PathBuf>,
 
+    /// Positional form of `--workspace`.
+    #[arg(value_name = "WORKSPACE", conflicts_with = "workspace")]
+    pub workspace_positional: Option<PathBuf>,
+
     /// Lean module root inside the workspace (e.g. `Mathlib`).
     #[arg(long = "module")]
     pub module_root: Option<String>,
@@ -165,6 +173,10 @@ pub struct IndexArgs {
     /// Workspace root to index. Defaults to the current directory.
     #[arg(long)]
     pub workspace: Option<PathBuf>,
+
+    /// Positional form of `--workspace`.
+    #[arg(value_name = "WORKSPACE", conflicts_with = "workspace")]
+    pub workspace_positional: Option<PathBuf>,
 
     /// Lean module root to index (e.g. `Mathlib`).
     #[arg(long = "module")]
@@ -224,6 +236,10 @@ pub struct AuditArgs {
     /// Workspace root to audit. Defaults to the current directory.
     #[arg(long)]
     pub workspace: Option<PathBuf>,
+
+    /// Positional form of `--workspace`.
+    #[arg(value_name = "WORKSPACE", conflicts_with = "workspace")]
+    pub workspace_positional: Option<PathBuf>,
 
     /// Lean module root inside the workspace (e.g. `Mathlib`). Defaults to the lakefile's first root.
     #[arg(long = "module")]
@@ -375,6 +391,10 @@ pub struct ShowArgs {
     #[arg(long)]
     pub workspace: Option<PathBuf>,
 
+    /// Positional form of `--workspace`.
+    #[arg(value_name = "WORKSPACE", conflicts_with = "workspace")]
+    pub workspace_positional: Option<PathBuf>,
+
     /// Lean module root inside the workspace (e.g. `Mathlib`).
     #[arg(long = "module")]
     pub module_root: Option<String>,
@@ -406,6 +426,10 @@ pub struct DiffArgs {
     /// Workspace root to diff against the baseline. Defaults to the current directory.
     #[arg(long)]
     pub workspace: Option<PathBuf>,
+
+    /// Positional form of `--workspace`.
+    #[arg(value_name = "WORKSPACE", conflicts_with = "workspace")]
+    pub workspace_positional: Option<PathBuf>,
 
     /// Lean module root inside the workspace (e.g. `Mathlib`).
     #[arg(long = "module")]
