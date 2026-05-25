@@ -365,6 +365,16 @@ pub struct CacheEntryDiagnosticsReport {
     pub reasons: Vec<String>,
 }
 
+impl CacheEntryDiagnosticsReport {
+    /// True if `cache-cleanup` would remove this entry. Mirrors the predicate
+    /// in `lean_dup_index::cleanup_cache`: an entry is protected iff it is
+    /// pointed to by the latest pointer OR is the currently-expected index;
+    /// otherwise it is reclaimable.
+    pub fn is_reclaimable(&self) -> bool {
+        !self.active_latest && !self.expected_current
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CacheCleanupReportDto {
     pub status: &'static str,

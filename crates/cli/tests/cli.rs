@@ -750,22 +750,34 @@ fn eval_hidden_scorer_ablation_mode_writes_variant_artifact() {
 fn doctor_reports_workspace_facts_from_repo_root() {
     let _worker = worker_cli_lock();
     let root = repo_root();
+    // Default view: triaged summary. Headline, workspace+lean line, cache root,
+    // problems section, totals line with cleanup hint.
     Command::cargo_bin("lean-dup")
         .unwrap()
         .args(["doctor", "--workspace"])
         .arg(&root)
         .assert()
         .success()
-        .stdout(predicate::str::contains("command: doctor"))
+        .stdout(predicate::str::contains("lean-dup doctor — status: "))
+        .stdout(predicate::str::contains("workspace: workspace-root sha256:"))
+        .stdout(predicate::str::contains("cache root: cache-root sha256:"))
+        .stdout(predicate::str::contains("cache:"))
+        .stdout(predicate::str::contains("totals:"))
+        .stdout(predicate::str::contains("lean:"));
+
+    // --verbose adds the per-entry detail plus the previously-headlined facts
+    // (schema versions, worker protocol, module roots, cache fingerprint).
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .args(["doctor", "--workspace"])
+        .arg(&root)
+        .arg("--verbose")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verbose detail:"))
         .stdout(predicate::str::contains("report schema: lean-dup.report.v3"))
-        .stdout(predicate::str::contains("version: 0.1.0"))
-        .stdout(predicate::str::contains("requested workspace: workspace-root sha256:"))
-        .stdout(predicate::str::contains("resolved Lake root: workspace-root sha256:"))
         .stdout(predicate::str::contains("module roots: LeanDup"))
-        .stdout(predicate::str::contains("source files:"))
-        .stdout(predicate::str::contains("cache root:"))
-        .stdout(predicate::str::contains("lean:"))
-        .stdout(predicate::str::contains("worker protocol: lean-dup.worker.v1"))
+        .stdout(predicate::str::contains("worker commands:"))
         .stdout(predicate::str::contains("cache fingerprint: rust-cli-cache.v1:"));
 }
 

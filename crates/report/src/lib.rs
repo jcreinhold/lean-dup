@@ -9,7 +9,7 @@ mod report_contract;
 mod reports;
 
 pub use error::{Error, Result};
-pub use render::render_text;
+pub use render::{RenderOptions, render_text, render_text_with};
 pub use report_contract::{
     AuditExplanations, ComparisonProvenanceEntry, ComparisonProvenanceExplanation, GroupExplanation,
     HiddenGroupExplanation, REPORT_SCHEMA_VERSION, SemanticProbeExplanation, VisibleQueueExplanation,

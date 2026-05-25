@@ -63,8 +63,9 @@ pub(crate) const ALL_BUILT_IN_COMMANDS: &[&str] = &[
 
 #[derive(Debug, Clone, clap::Args)]
 pub struct DoctorArgs {
+    /// Workspace root to inspect. Defaults to the current directory.
     #[arg(long)]
-    pub workspace: PathBuf,
+    pub workspace: Option<PathBuf>,
 
     #[arg(long = "module")]
     pub module_root: Option<String>,
@@ -74,6 +75,10 @@ pub struct DoctorArgs {
 
     #[arg(long)]
     pub require_oleans: bool,
+
+    /// Print every cache entry (sha256, status, schema) in addition to the summary.
+    #[arg(long)]
+    pub verbose: bool,
 }
 
 #[derive(Debug, Clone, clap::Args)]
@@ -96,8 +101,9 @@ pub struct CacheCleanupArgs {
 
 #[derive(Debug, Clone, clap::Args)]
 pub struct IndexArgs {
+    /// Workspace root to index. Defaults to the current directory.
     #[arg(long)]
-    pub workspace: PathBuf,
+    pub workspace: Option<PathBuf>,
 
     #[arg(long = "module")]
     pub module_root: String,
@@ -126,8 +132,9 @@ pub struct IndexMathlibArgs {
 
 #[derive(Debug, Clone, clap::Args)]
 pub struct AuditArgs {
+    /// Workspace root to audit. Defaults to the current directory.
     #[arg(long)]
-    pub workspace: PathBuf,
+    pub workspace: Option<PathBuf>,
 
     #[arg(long = "module")]
     pub module_root: Option<String>,
@@ -241,8 +248,9 @@ pub struct PerfArgs {
 
 #[derive(Debug, Clone, clap::Args)]
 pub struct ShowArgs {
+    /// Workspace root to inspect. Defaults to the current directory.
     #[arg(long)]
-    pub workspace: PathBuf,
+    pub workspace: Option<PathBuf>,
 
     #[arg(long = "module")]
     pub module_root: Option<String>,
@@ -253,8 +261,9 @@ pub struct ShowArgs {
 
 #[derive(Debug, Clone, clap::Args)]
 pub struct DiffArgs {
+    /// Workspace root to diff against the baseline. Defaults to the current directory.
     #[arg(long)]
-    pub workspace: PathBuf,
+    pub workspace: Option<PathBuf>,
 
     #[arg(long = "module")]
     pub module_root: Option<String>,

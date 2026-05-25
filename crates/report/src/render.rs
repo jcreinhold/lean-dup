@@ -1,12 +1,26 @@
 use crate::report_contract::GroupExplanation;
 use crate::reports::{
-    AuditReport, CacheCleanupReportDto, DiffReport, DoctorReport, EvalReportDto, IndexReport, PerfReport, Report,
-    ReviewGroupReport, ShowReport, cache_root_diagnostic_label, path_diagnostic_label, path_reference_label,
+    AuditReport, CacheCleanupReportDto, CacheLabelDiagnosticsReport, DiffReport, DoctorReport, EvalReportDto,
+    IndexReport, PerfReport, Report, ReviewGroupReport, ShowReport, cache_root_diagnostic_label,
+    path_diagnostic_label, path_reference_label,
 };
 
+/// Render-time knobs for the text formatter. JSON output ignores these.
+///
+/// `verbose` is consulted only by the doctor renderer today; other reports
+/// already produce summarised output and do not have a verbose mode.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RenderOptions {
+    pub verbose: bool,
+}
+
 pub fn render_text(report: &Report) -> String {
+    render_text_with(report, RenderOptions::default())
+}
+
+pub fn render_text_with(report: &Report, options: RenderOptions) -> String {
     match report {
-        Report::Doctor(report) => render_doctor(report),
+        Report::Doctor(report) => render_doctor(report, options),
         Report::CacheCleanup(report) => render_cache_cleanup(report),
         Report::Index(report) => render_index("index", report),
         Report::IndexMathlib(report) => render_index("index-mathlib", report),
@@ -77,58 +91,103 @@ fn render_perf(report: &PerfReport) -> String {
     lines.join("\n")
 }
 
-fn render_doctor(report: &DoctorReport) -> String {
-    let mut lines = vec![
-        "command: doctor".to_owned(),
-        format!("report schema: {}", report.report_schema_version),
-        format!("status: {}", report.status),
-        format!("version: {}", report.release.version),
-        format!("git revision: {}", report.release.git_revision),
-        format!("build profile: {}", report.release.build_profile),
-        format!("index schema: {}", report.release.index_schema_version),
-        format!("cache key: {}", report.release.cache_key_version),
-        format!(
-            "requested workspace: {}",
-            path_diagnostic_label(&report.requested_workspace)
-        ),
-        format!("resolved Lake root: {}", path_diagnostic_label(&report.lake_root)),
-        format!("lakefile: {}", path_diagnostic_label(&report.lakefile)),
-        format!("module roots: {}", report.module_roots.join(", ")),
-        format!("selected roots: {}", report.selected_roots.join(", ")),
-        format!("source files: {}", report.source_count),
-        format!("cache root: {}", cache_root_diagnostic_label(&report.cache_root)),
-        format!("cache fingerprint: {}", report.cache_fingerprint),
-        format!("cache labels: {}", report.cache.labels.len()),
-        format!("cache disk bytes: {}", report.cache.total_disk_bytes),
-        format!("lean: {}", report.lean_version),
-        format!("worker protocol: {}", report.worker.protocol_version),
-        format!("worker version: {}", report.worker.worker_version),
-        format!("worker extract: {}", report.worker.extract_version),
-        format!("worker features: {}", report.worker.features_version),
-        format!("worker probe: {}", report.worker.probe_version),
-        format!("worker commands: {}", report.worker.supported_commands.join(", ")),
-    ];
-    for label in &report.cache.labels {
-        lines.push(format!(
-            "cache label {}: latest={} entries={} bytes={}",
-            label.label,
-            label.latest.status,
-            label.entries.len(),
-            label.disk_bytes
-        ));
-        for entry in &label.entries {
-            lines.push(format!(
-                "  {}: status={} active={} expected={} schema={} provenance={} bytes={}",
-                path_diagnostic_label(&entry.index_dir),
-                entry.status,
-                entry.active_latest,
-                entry.expected_current,
-                entry.schema_version.as_deref().unwrap_or("missing"),
-                entry.provenance_kind,
-                entry.disk_bytes
-            ));
+fn render_doctor(report: &DoctorReport, options: RenderOptions) -> String {
+    let mut lines = Vec::new();
+
+    // Section A — header.
+    lines.push(format!("lean-dup doctor — status: {}", report.status));
+    lines.push(format!(
+        "workspace: {}    lean: {}",
+        path_diagnostic_label(&report.requested_workspace),
+        report.lean_version,
+    ));
+    lines.push(format!(
+        "cache root: {}    cache: {} labels, {} on disk",
+        cache_root_diagnostic_label(&report.cache_root),
+        report.cache.labels.len(),
+        format_bytes(report.cache.total_disk_bytes),
+    ));
+    lines.push(format!(
+        "release: {} ({}, {})    index schema: {}",
+        report.release.version,
+        report.release.git_revision,
+        report.release.build_profile,
+        report.release.index_schema_version,
+    ));
+    lines.push(format!(
+        "worker: {} (protocol {}, lean {})",
+        report.worker.worker_version, report.worker.protocol_version, report.worker.lean_version,
+    ));
+
+    // Section B — problems.
+    let problems = collect_problems(report);
+    if problems.is_empty() {
+        lines.push(String::new());
+        lines.push("problems: none".to_owned());
+    } else {
+        lines.push(String::new());
+        lines.push("problems:".to_owned());
+        for problem in problems {
+            lines.push(format!("  {problem}"));
         }
     }
+
+    // Section C — per-label cache summary.
+    lines.push(String::new());
+    lines.push("cache:".to_owned());
+    let summaries: Vec<LabelSummary> = report.cache.labels.iter().map(LabelSummary::from_label).collect();
+    let label_width = summaries
+        .iter()
+        .map(|summary| summary.label.len())
+        .max()
+        .unwrap_or(0)
+        .max("label".len());
+    let latest_width = summaries
+        .iter()
+        .map(|summary| summary.latest.len())
+        .max()
+        .unwrap_or(0)
+        .max("latest".len());
+    lines.push(format!(
+        "  {:<label_width$}  {:<latest_width$}  {:>6}  {:>5}  {:>8}  {:>7}  {:>10}",
+        "label", "latest", "active", "stale", "v1-stale", "missing", "bytes",
+    ));
+    for summary in &summaries {
+        lines.push(format!(
+            "  {:<label_width$}  {:<latest_width$}  {:>6}  {:>5}  {:>8}  {:>7}  {:>10}",
+            summary.label,
+            summary.latest,
+            summary.active,
+            summary.stale,
+            summary.v1_stale,
+            summary.missing,
+            format_bytes(summary.disk_bytes),
+        ));
+    }
+    let reclaimable_bytes: u64 = report
+        .cache
+        .labels
+        .iter()
+        .flat_map(|label| label.entries.iter())
+        .filter(|entry| entry.is_reclaimable())
+        .map(|entry| entry.disk_bytes)
+        .sum();
+    if reclaimable_bytes > 0 {
+        lines.push(format!(
+            "totals: {} labels, {} on disk, ~{} reclaimable via `lean-dup cache-cleanup --execute`",
+            report.cache.labels.len(),
+            format_bytes(report.cache.total_disk_bytes),
+            format_bytes(reclaimable_bytes),
+        ));
+    } else {
+        lines.push(format!(
+            "totals: {} labels, {} on disk, nothing to reclaim",
+            report.cache.labels.len(),
+            format_bytes(report.cache.total_disk_bytes),
+        ));
+    }
+
+    // Oleans (only when requested).
     if report.require_oleans {
         if report.missing_oleans.is_empty() {
             lines.push("oleans: ok".to_owned());
@@ -142,11 +201,177 @@ fn render_doctor(report: &DoctorReport) -> String {
                     .take(5)
                     .cloned()
                     .collect::<Vec<_>>()
-                    .join(", ")
+                    .join(", "),
             ));
         }
     }
+
+    // Section D — verbose dump (per-entry detail), only with --verbose.
+    if options.verbose {
+        lines.push(String::new());
+        lines.push("verbose detail:".to_owned());
+        lines.push(format!("  report schema: {}", report.report_schema_version));
+        lines.push(format!("  cache key: {}", report.release.cache_key_version));
+        lines.push(format!("  cache fingerprint: {}", report.cache_fingerprint));
+        lines.push(format!("  resolved Lake root: {}", path_diagnostic_label(&report.lake_root)));
+        lines.push(format!("  lakefile: {}", path_diagnostic_label(&report.lakefile)));
+        lines.push(format!("  module roots: {}", report.module_roots.join(", ")));
+        lines.push(format!("  selected roots: {}", report.selected_roots.join(", ")));
+        lines.push(format!("  source files: {}", report.source_count));
+        lines.push(format!("  worker extract: {}", report.worker.extract_version));
+        lines.push(format!("  worker features: {}", report.worker.features_version));
+        lines.push(format!("  worker probe: {}", report.worker.probe_version));
+        lines.push(format!("  worker commands: {}", report.worker.supported_commands.join(", ")));
+        for label in &report.cache.labels {
+            lines.push(format!(
+                "  cache label {}: latest={} entries={} bytes={}",
+                label.label,
+                label.latest.status,
+                label.entries.len(),
+                label.disk_bytes,
+            ));
+            for entry in &label.entries {
+                lines.push(format!(
+                    "    {}: status={} active={} expected={} schema={} provenance={} bytes={}",
+                    path_diagnostic_label(&entry.index_dir),
+                    entry.status,
+                    entry.active_latest,
+                    entry.expected_current,
+                    entry.schema_version.as_deref().unwrap_or("missing"),
+                    entry.provenance_kind,
+                    entry.disk_bytes,
+                ));
+            }
+        }
+    }
+
     lines.join("\n")
+}
+
+struct LabelSummary {
+    label: String,
+    latest: String,
+    active: usize,
+    stale: usize,
+    v1_stale: usize,
+    missing: usize,
+    disk_bytes: u64,
+}
+
+impl LabelSummary {
+    fn from_label(label: &CacheLabelDiagnosticsReport) -> Self {
+        let mut active = 0usize;
+        let mut stale = 0usize;
+        let mut v1_stale = 0usize;
+        let mut missing = 0usize;
+        for entry in &label.entries {
+            // active = referenced by the latest pointer (regardless of whether
+            // it has been re-validated). The original "junk" output showed many
+            // live entries with status=unchecked active=true — they are the
+            // current cache, not dead weight.
+            if entry.active_latest {
+                active += 1;
+            }
+            match entry.status.as_str() {
+                "stale" => {
+                    if entry.schema_version.as_deref() == Some("lean-dup.index.v1") {
+                        v1_stale += 1;
+                    } else {
+                        stale += 1;
+                    }
+                }
+                "missing" => missing += 1,
+                _ => {}
+            }
+        }
+        Self {
+            label: label.label.clone(),
+            latest: label.latest.status.clone(),
+            active,
+            stale,
+            v1_stale,
+            missing,
+            disk_bytes: label.disk_bytes,
+        }
+    }
+}
+
+fn collect_problems(report: &DoctorReport) -> Vec<String> {
+    let mut out = Vec::new();
+    for label in &report.cache.labels {
+        if label.latest.status != "ok" {
+            let detail = match label.latest.status.as_str() {
+                "corrupt-pointer" | "corruptpointer" => "latest pointer is corrupt (cache-cleanup will rebuild)",
+                "target-missing" | "targetmissing" => "latest pointer references a missing index dir",
+                "missing" => "no latest pointer (cache will be rebuilt on next index)",
+                other => {
+                    out.push(format!("label {}: latest={}", label.label, other));
+                    continue;
+                }
+            };
+            out.push(format!("label {}: {}", label.label, detail));
+        }
+        let mut missing_active = 0usize;
+        let mut corrupt_active = 0usize;
+        for entry in &label.entries {
+            if entry.expected_current || entry.active_latest {
+                if entry.status == "missing" {
+                    missing_active += 1;
+                } else if entry.status == "corrupt" {
+                    corrupt_active += 1;
+                }
+            }
+        }
+        if missing_active > 0 {
+            out.push(format!(
+                "label {}: {} active/expected {} missing on disk",
+                label.label,
+                missing_active,
+                if missing_active == 1 { "entry" } else { "entries" },
+            ));
+        }
+        if corrupt_active > 0 {
+            out.push(format!(
+                "label {}: {} active/expected {} corrupt",
+                label.label,
+                corrupt_active,
+                if corrupt_active == 1 { "entry" } else { "entries" },
+            ));
+        }
+    }
+    if report.require_oleans && !report.missing_oleans.is_empty() {
+        let sample = report
+            .missing_oleans
+            .iter()
+            .take(3)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        let suffix = if report.missing_oleans.len() > 3 { ", …" } else { "" };
+        out.push(format!(
+            "oleans: {} missing ({}{})",
+            report.missing_oleans.len(),
+            sample,
+            suffix,
+        ));
+    }
+    out
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = 1024.0 * KB;
+    const GB: f64 = 1024.0 * MB;
+    let b = bytes as f64;
+    if b >= GB {
+        format!("{:.2} GB", b / GB)
+    } else if b >= MB {
+        format!("{:.1} MB", b / MB)
+    } else if b >= KB {
+        format!("{:.0} KB", b / KB)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 fn render_cache_cleanup(report: &CacheCleanupReportDto) -> String {
@@ -471,4 +696,182 @@ fn push_group_explanation(lines: &mut Vec<String>, explanation: &GroupExplanatio
         "  replacement/import/callers: {}",
         explanation.replacement_summary
     ));
+}
+
+#[cfg(test)]
+mod doctor_render_tests {
+    use super::*;
+    use crate::reports::{
+        CacheDiagnosticsReport, CacheEntryDiagnosticsReport, CacheLatestDiagnosticsReport, ReleaseIdentityReport,
+        WorkerDiagnosticsReport,
+    };
+    use std::path::PathBuf;
+
+    fn entry(status: &str, active: bool, expected: bool, schema: Option<&str>, bytes: u64) -> CacheEntryDiagnosticsReport {
+        CacheEntryDiagnosticsReport {
+            index_dir: PathBuf::from("/tmp/cache/idx"),
+            index_path: PathBuf::from("/tmp/cache/idx/index.sqlite"),
+            status: status.to_owned(),
+            active_latest: active,
+            expected_current: expected,
+            schema_version: schema.map(|s| s.to_owned()),
+            provenance_kind: "sourcebacked".to_owned(),
+            declaration_count: None,
+            disk_bytes: bytes,
+            reasons: Vec::new(),
+        }
+    }
+
+    fn label(name: &str, latest_status: &str, entries: Vec<CacheEntryDiagnosticsReport>) -> CacheLabelDiagnosticsReport {
+        let disk_bytes = entries.iter().map(|e| e.disk_bytes).sum();
+        CacheLabelDiagnosticsReport {
+            label: name.to_owned(),
+            label_dir: PathBuf::from(format!("/tmp/cache/{name}")),
+            disk_bytes,
+            latest: CacheLatestDiagnosticsReport {
+                pointer_path: PathBuf::from(format!("/tmp/cache/{name}/latest.json")),
+                status: latest_status.to_owned(),
+                index_dir: None,
+            },
+            entries,
+        }
+    }
+
+    fn report(labels: Vec<CacheLabelDiagnosticsReport>) -> DoctorReport {
+        let total_disk_bytes = labels.iter().map(|l| l.disk_bytes).sum();
+        DoctorReport {
+            report_schema_version: "lean-dup.report.v3",
+            release: ReleaseIdentityReport {
+                package: "lean-dup".to_owned(),
+                version: "0.1.0".to_owned(),
+                git_revision: "deadbeef".to_owned(),
+                build_profile: "debug".to_owned(),
+                report_schema_version: "lean-dup.report.v3".to_owned(),
+                index_schema_version: "lean-dup.index.v2".to_owned(),
+                cache_key_version: "rust-cli-cache.v1".to_owned(),
+            },
+            status: "ok",
+            requested_workspace: PathBuf::from("/tmp/ws"),
+            lake_root: PathBuf::from("/tmp/ws"),
+            lakefile: PathBuf::from("/tmp/ws/lakefile.toml"),
+            module_roots: vec!["KanProofs".to_owned()],
+            selected_roots: vec!["KanProofs".to_owned()],
+            source_count: 42,
+            cache_root: PathBuf::from("/tmp/cache"),
+            cache_fingerprint: "rust-cli-cache.v1:abc".to_owned(),
+            cache: CacheDiagnosticsReport {
+                cache_root: PathBuf::from("/tmp/cache"),
+                total_disk_bytes,
+                labels,
+            },
+            worker: WorkerDiagnosticsReport {
+                protocol_version: "lean-dup.worker.v1".to_owned(),
+                worker_version: "0.1.0".to_owned(),
+                lean_version: "Lean 4.30.0".to_owned(),
+                extract_version: "extract.v2".to_owned(),
+                features_version: "features.v3".to_owned(),
+                probe_version: "probe.v1".to_owned(),
+                supported_commands: vec!["doctor".to_owned()],
+                supported_capabilities: Vec::new(),
+            },
+            lean_version: "Lean 4.30.0".to_owned(),
+            require_oleans: false,
+            missing_oleans: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn default_output_surfaces_problems_and_reclaim_without_per_entry_dump() {
+        let labels = vec![
+            label(
+                "mathlib",
+                "ok",
+                vec![
+                    entry("unchecked", true, false, Some("lean-dup.index.v2"), 1_000_000),
+                    entry("stale", false, false, Some("lean-dup.index.v1"), 5_000_000),
+                    entry("missing", false, false, None, 0),
+                ],
+            ),
+            label("fixture-smoke", "corruptpointer", vec![]),
+        ];
+        let out = render_doctor(&report(labels), RenderOptions::default());
+        // No per-entry status dump in default mode (path fingerprints in the header are fine).
+        assert!(
+            !out.contains("status=stale") && !out.contains("status=unchecked"),
+            "default output leaked per-entry status dump:\n{out}",
+        );
+        assert!(!out.contains("verbose detail:"), "verbose section leaked into default:\n{out}");
+        // Corrupt-pointer label appears in problems section.
+        assert!(out.contains("problems:"), "missing problems section:\n{out}");
+        assert!(
+            out.contains("label fixture-smoke: latest pointer is corrupt"),
+            "corrupt pointer not surfaced:\n{out}",
+        );
+        // Reclaim totals line names the cleanup command and a non-zero figure.
+        assert!(out.contains("reclaimable via `lean-dup cache-cleanup --execute`"));
+        // v1-stale column tallies the v1 entry separately from the "stale" column.
+        let mathlib_row = out
+            .lines()
+            .find(|line| line.contains("mathlib  ") || line.starts_with("  mathlib"))
+            .expect("mathlib row missing");
+        // active=1, stale=0, v1-stale=1, missing=1
+        let tally = mathlib_row.split_whitespace().collect::<Vec<_>>();
+        // ["mathlib", "ok", "1", "0", "1", "1", "0", "B"] — bytes "0 B"
+        assert!(tally.contains(&"1"), "expected active=1 in {mathlib_row}");
+    }
+
+    #[test]
+    fn verbose_output_is_strict_superset() {
+        let labels = vec![label(
+            "mathlib",
+            "ok",
+            vec![entry("unchecked", true, false, Some("lean-dup.index.v2"), 1_000_000)],
+        )];
+        let doctor = report(labels);
+        let default_out = render_doctor(&doctor, RenderOptions::default());
+        let verbose_out = render_doctor(&doctor, RenderOptions { verbose: true });
+        // Default lines all appear in verbose output.
+        for line in default_out.lines() {
+            assert!(
+                verbose_out.contains(line),
+                "verbose missing default line `{line}`:\n{verbose_out}",
+            );
+        }
+        // Verbose adds the per-entry detail header and the sha256-style dump.
+        assert!(verbose_out.contains("verbose detail:"));
+        assert!(
+            verbose_out.contains("status=unchecked active=true"),
+            "verbose missing per-entry detail:\n{verbose_out}",
+        );
+    }
+
+    #[test]
+    fn reclaim_figure_matches_cleanup_predicate() {
+        // Each entry contributes to the reclaim total iff !active_latest && !expected_current.
+        // This is the same predicate cleanup_cache uses.
+        let labels = vec![label(
+            "mathlib",
+            "ok",
+            vec![
+                entry("unchecked", true, false, None, 100), // protected: active
+                entry("current", false, true, None, 200),   // protected: expected
+                entry("stale", false, false, None, 300),    // reclaimable
+                entry("stale", false, false, None, 400),    // reclaimable
+            ],
+        )];
+        let out = render_doctor(&report(labels), RenderOptions::default());
+        // 300 + 400 = 700 bytes reclaimable.
+        assert!(out.contains("~700 B reclaimable"), "wrong reclaim figure:\n{out}");
+    }
+
+    #[test]
+    fn no_problems_prints_problems_none() {
+        let labels = vec![label(
+            "mathlib",
+            "ok",
+            vec![entry("unchecked", true, false, Some("lean-dup.index.v2"), 1_000_000)],
+        )];
+        let out = render_doctor(&report(labels), RenderOptions::default());
+        assert!(out.contains("problems: none"), "expected problems: none:\n{out}");
+    }
 }

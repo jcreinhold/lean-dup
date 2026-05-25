@@ -11,7 +11,9 @@ use lean_dup_index::CleanupPolicy;
 use lean_dup_index::{self, CacheFacts};
 use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexStore, IndexSummary};
 use lean_dup_project::{ResolvedWorkspace, WorkspaceRequest, resolve, resolve_project_mathlib};
-use lean_dup_report::{AuditReport, CacheCleanupReportDto, DiffReport, DoctorReport, IndexReport, Report, ShowReport};
+use lean_dup_report::{
+    AuditReport, CacheCleanupReportDto, DiffReport, DoctorReport, IndexReport, RenderOptions, Report, ShowReport,
+};
 use lean_dup_search::{AuditRequest, run_audit, run_diff, run_show};
 use lean_dup_worker::{WorkerClient, WorkerVersion};
 
@@ -23,6 +25,7 @@ pub struct Outcome {
     pub output_format: OutputFormat,
     pub output_path: Option<PathBuf>,
     pub reporter: Reporter,
+    pub render_options: RenderOptions,
 }
 
 struct Foundation {
@@ -35,9 +38,11 @@ pub fn run(cli: Cli) -> Result<Outcome> {
     let command = cli.command.ok_or_else(|| AppError::Cli {
         message: "missing command; run `lean-dup --help`".to_owned(),
     })?;
+    let mut render_options = RenderOptions::default();
     let (report, output_format, output_path) = match command {
         Command::Doctor(args) => {
             let format = args.format;
+            render_options.verbose = args.verbose;
             (Report::Doctor(doctor(args, &mut reporter)?), format, None)
         }
         Command::CacheCleanup(args) => {
@@ -85,11 +90,12 @@ pub fn run(cli: Cli) -> Result<Outcome> {
         output_format,
         output_path,
         reporter,
+        render_options,
     })
 }
 
 fn doctor(args: DoctorArgs, reporter: &mut Reporter) -> Result<DoctorReport> {
-    let foundation = foundation(args.workspace, args.module_root, reporter)?;
+    let foundation = foundation(workspace_or_cwd(args.workspace), args.module_root, reporter)?;
     let worker_version = reporter.measure("worker.version", |_| {
         WorkerClient::with_timeout(Duration::from_secs(60)).version(foundation.workspace.root.clone())
     })?;
@@ -208,7 +214,7 @@ fn index(args: IndexArgs, reporter: &mut Reporter) -> Result<IndexReport> {
     let label = args.label.clone();
     let force = args.force;
     let require_oleans = args.require_oleans;
-    let foundation = foundation(args.workspace, Some(module_root.clone()), reporter)?;
+    let foundation = foundation(workspace_or_cwd(args.workspace), Some(module_root.clone()), reporter)?;
     let store = IndexStore::new(foundation.cache.root.clone());
     let summary = reporter.measure("index.build_or_reuse", |reporter| {
         store.build_or_reuse(
@@ -233,9 +239,7 @@ fn index(args: IndexArgs, reporter: &mut Reporter) -> Result<IndexReport> {
 
 fn index_mathlib(args: IndexMathlibArgs, reporter: &mut Reporter) -> Result<IndexReport> {
     let force = args.force;
-    let requested_workspace = args
-        .workspace
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let requested_workspace = workspace_or_cwd(args.workspace);
     let project_mathlib = resolve_project_mathlib(requested_workspace, args.mathlib_workspace, reporter)?;
     let project_workspace = project_mathlib.project.clone();
     let mathlib_source = project_mathlib.source.clone();
@@ -275,7 +279,7 @@ fn audit_request(args: AuditArgs) -> AuditRequest {
     let include_private = args.effective_include_private();
     let visibility = args.visibility_options();
     AuditRequest {
-        workspace: args.workspace,
+        workspace: workspace_or_cwd(args.workspace),
         module_root: args.module_root,
         include_private,
         compare_indexes: args.compare_indexes,
@@ -397,7 +401,7 @@ fn origin_for_label(label: &str) -> String {
     }
 }
 
-fn default_audit_args(workspace: PathBuf, module_root: Option<String>) -> AuditArgs {
+fn default_audit_args(workspace: Option<PathBuf>, module_root: Option<String>) -> AuditArgs {
     AuditArgs {
         workspace,
         module_root,
@@ -418,6 +422,12 @@ fn default_audit_args(workspace: PathBuf, module_root: Option<String>) -> AuditA
         probe_policy: crate::cli::CliProbePolicy::Actionable,
         probe_chunk_size: 16,
     }
+}
+
+/// Resolve a user-supplied `--workspace` argument, defaulting to the current
+/// working directory. Used by every subcommand so the flag is optional.
+fn workspace_or_cwd(workspace: Option<PathBuf>) -> PathBuf {
+    workspace.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
 fn missing_oleans(workspace: &ResolvedWorkspace) -> Vec<String> {

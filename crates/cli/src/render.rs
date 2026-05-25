@@ -11,7 +11,7 @@ pub fn write_outcome<O: Write, E: Write>(mut outcome: Outcome, stdout: &mut O, s
         write_report(&mut outcome.reporter, stderr)?;
         let rendered = match outcome.output_format {
             OutputFormat::Json => serde_json::to_string_pretty(&outcome.report)?,
-            OutputFormat::Text => lean_dup_report::render_text(&outcome.report),
+            OutputFormat::Text => lean_dup_report::render_text_with(&outcome.report, outcome.render_options),
         };
         if let Some(path) = outcome.output_path {
             if let Some(parent) = path.parent() {
