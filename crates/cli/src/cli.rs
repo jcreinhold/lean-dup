@@ -78,6 +78,12 @@ pub(crate) const ALL_BUILT_IN_COMMANDS: &[&str] = &[
 ];
 
 #[derive(Debug, Clone, clap::Args)]
+#[command(after_help = "\
+Examples:
+  lean-dup doctor                       Check the current workspace
+  lean-dup doctor --verbose             Include every cache entry
+  lean-dup doctor --format json         Machine-readable diagnostics
+")]
 pub struct DoctorArgs {
     /// Workspace root to inspect. Defaults to the current directory.
     #[arg(long)]
@@ -101,6 +107,11 @@ pub struct DoctorArgs {
 }
 
 #[derive(Debug, Clone, clap::Args)]
+#[command(after_help = "\
+Examples:
+  lean-dup cache-cleanup                Dry run: list what would be removed
+  lean-dup cache-cleanup --execute      Actually delete the entries
+")]
 pub struct CacheCleanupArgs {
     /// Output format.
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
@@ -124,6 +135,13 @@ pub struct CacheCleanupArgs {
 }
 
 #[derive(Debug, Clone, clap::Args)]
+#[command(after_help = "\
+Examples:
+  lean-dup index --module MyLib --label local
+                                        Index the workspace's `MyLib` root under label `local`
+  lean-dup index --module MyLib --label local --force
+                                        Rebuild even if the cache is hot
+")]
 pub struct IndexArgs {
     /// Workspace root to index. Defaults to the current directory.
     #[arg(long)]
@@ -151,6 +169,11 @@ pub struct IndexArgs {
 }
 
 #[derive(Debug, Clone, clap::Args)]
+#[command(after_help = "\
+Examples:
+  lean-dup index-mathlib                Index the project's resolved mathlib
+  lean-dup index-mathlib --force        Rebuild the mathlib index from scratch
+")]
 pub struct IndexMathlibArgs {
     /// Project workspace whose mathlib dependency should be indexed. Defaults to the current directory.
     #[arg(long)]
@@ -170,6 +193,14 @@ pub struct IndexMathlibArgs {
 }
 
 #[derive(Debug, Clone, clap::Args)]
+#[command(after_help = "\
+Examples:
+  lean-dup audit                        Audit the current workspace (top groups, terse)
+  lean-dup audit --verbose              Include provenance and per-group detail
+  lean-dup audit --visibility public    Skip private declarations in the corpus
+  lean-dup audit --save-baseline v1     Save these findings as baseline `v1`
+                                        (replay later with `lean-dup diff --baseline v1`)
+")]
 pub struct AuditArgs {
     /// Workspace root to audit. Defaults to the current directory.
     #[arg(long)]
@@ -238,6 +269,13 @@ pub struct AuditArgs {
 }
 
 #[derive(Debug, Clone, clap::Args)]
+#[command(after_help = "\
+Examples:
+  lean-dup eval                         Run the default suite, print a TSV table
+  lean-dup eval --suite hard-negatives --format json
+                                        Hard-negatives suite, machine-readable
+  lean-dup eval --k 1,5                 Override the recall-at-k cutoffs
+")]
 pub struct EvalArgs {
     /// Evaluation suite to run.
     #[arg(long, value_enum, default_value_t = CliEvalSuite::Default)]
@@ -302,6 +340,13 @@ pub struct PerfArgs {
 }
 
 #[derive(Debug, Clone, clap::Args)]
+#[command(after_help = "\
+Examples:
+  lean-dup show --group exact-statement-0f780280dc04
+                                        Print evidence for one group (ID from `audit`)
+  lean-dup show --group <id> --format json
+                                        Same, as JSON
+")]
 pub struct ShowArgs {
     /// Workspace root to inspect. Defaults to the current directory.
     #[arg(long)]
@@ -321,6 +366,11 @@ pub struct ShowArgs {
 }
 
 #[derive(Debug, Clone, clap::Args)]
+#[command(after_help = "\
+Examples:
+  lean-dup diff --baseline v1           Compare current findings to baseline `v1`
+                                        (save one first with `audit --save-baseline v1`)
+")]
 pub struct DiffArgs {
     /// Workspace root to diff against the baseline. Defaults to the current directory.
     #[arg(long)]
