@@ -431,11 +431,20 @@ pub struct DiffArgs {
 #[derive(Debug, Clone, clap::Args)]
 #[command(after_help = "\
 Examples:
-  lean-dup baseline list                List every saved baseline
+  lean-dup baseline list                List baselines for the current workspace
+  lean-dup baseline list --all          List every baseline under the cache root
   lean-dup baseline show v1             Inspect baseline `v1`
+  lean-dup baseline show v1 --format json
+                                        Same, as JSON
   lean-dup baseline delete v1           Remove baseline `v1`
 ")]
 pub struct BaselineArgs {
+    #[command(subcommand)]
+    pub action: BaselineAction,
+}
+
+#[derive(Debug, Clone, clap::Args)]
+pub struct BaselineCommonArgs {
     /// Output format. `text` is human-readable; `json` is the stable wire schema.
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
     pub format: OutputFormat,
@@ -448,23 +457,34 @@ pub struct BaselineArgs {
     #[arg(long)]
     pub verbose: bool,
 
-    #[command(subcommand)]
-    pub action: BaselineAction,
+    /// Filter `list` to baselines saved for this workspace's cache fingerprint.
+    /// Defaults to the current directory; pass `--all` to list every saved
+    /// baseline regardless of workspace.
+    #[arg(long)]
+    pub workspace: Option<PathBuf>,
+
+    /// List every saved baseline under the cache root (overrides the cwd filter).
+    #[arg(long, conflicts_with = "workspace")]
+    pub all: bool,
 }
 
 #[derive(Debug, Clone, Subcommand)]
 pub enum BaselineAction {
     /// List saved baselines.
-    List,
+    List(BaselineCommonArgs),
     /// Print the contents of one baseline.
     Show {
         /// Baseline name (as passed to `audit --save-baseline`).
         name: String,
+        #[command(flatten)]
+        common: BaselineCommonArgs,
     },
     /// Remove a saved baseline.
     Delete {
         /// Baseline name.
         name: String,
+        #[command(flatten)]
+        common: BaselineCommonArgs,
     },
 }
 

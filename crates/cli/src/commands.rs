@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::cli::{
-    AuditArgs, BaselineAction, BaselineArgs, CacheCleanupArgs, Cli, Command, DiffArgs, DoctorArgs, EvalArgs, EvalFormat,
-    IndexArgs, IndexMathlibArgs, OutputFormat, ShowArgs,
+    AuditArgs, BaselineAction, BaselineArgs, BaselineCommonArgs, CacheCleanupArgs, Cli, Command, DiffArgs, DoctorArgs,
+    EvalArgs, EvalFormat, IndexArgs, IndexMathlibArgs, OutputFormat, ShowArgs,
 };
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_eval::EvalRequest;
@@ -94,9 +94,10 @@ pub fn run(cli: Cli) -> Result<Outcome> {
             (Report::Diff(diff(args, &mut reporter)?), format, None)
         }
         Command::Baseline(args) => {
-            let format = args.format;
-            render_options.verbose = args.verbose;
-            (Report::Baseline(baseline(args)?), format, None)
+            let common = baseline_common(&args.action);
+            let format = common.format;
+            render_options.verbose = common.verbose;
+            (Report::Baseline(baseline(args, &mut reporter)?), format, None)
         }
         Command::External(_) => {
             return Err(AppError::Cli {
@@ -584,16 +585,48 @@ fn missing_oleans(workspace: &ResolvedWorkspace) -> Vec<String> {
         .collect()
 }
 
-fn baseline(args: BaselineArgs) -> Result<BaselineReport> {
-    let cache_root = args.cache_root.unwrap_or_else(lean_dup_index::cache_root);
-    match args.action {
-        BaselineAction::List => baseline_list(cache_root),
-        BaselineAction::Show { name } => baseline_show(cache_root, name),
-        BaselineAction::Delete { name } => baseline_delete(cache_root, name),
+fn baseline_common(action: &BaselineAction) -> &BaselineCommonArgs {
+    match action {
+        BaselineAction::List(common) => common,
+        BaselineAction::Show { common, .. } => common,
+        BaselineAction::Delete { common, .. } => common,
     }
 }
 
-fn baseline_list(cache_root: PathBuf) -> Result<BaselineReport> {
+fn baseline(args: BaselineArgs, reporter: &mut Reporter) -> Result<BaselineReport> {
+    match args.action {
+        BaselineAction::List(common) => {
+            let cache_root = common.cache_root.clone().unwrap_or_else(lean_dup_index::cache_root);
+            baseline_list(cache_root, common, reporter)
+        }
+        BaselineAction::Show { name, common } => {
+            let cache_root = common.cache_root.unwrap_or_else(lean_dup_index::cache_root);
+            baseline_show(cache_root, name)
+        }
+        BaselineAction::Delete { name, common } => {
+            let cache_root = common.cache_root.unwrap_or_else(lean_dup_index::cache_root);
+            baseline_delete(cache_root, name)
+        }
+    }
+}
+
+/// Resolve the current workspace's cache fingerprint cheaply, for filtering
+/// `baseline list` to entries that belong to this workspace. Returns `None`
+/// (with a note on stderr) when there is no workspace to resolve, so the
+/// caller falls back to listing everything.
+fn current_workspace_fingerprint(workspace: Option<PathBuf>, reporter: &mut Reporter) -> Option<String> {
+    let resolved = resolve(
+        WorkspaceRequest {
+            requested_root: workspace_or_cwd(workspace),
+            module_root: None,
+        },
+        reporter,
+    )
+    .ok()?;
+    lean_dup_index::resolve_cache(&resolved).ok().map(|cache| cache.fingerprint)
+}
+
+fn baseline_list(cache_root: PathBuf, common: BaselineCommonArgs, reporter: &mut Reporter) -> Result<BaselineReport> {
     let dir = baselines_dir(&cache_root);
     let mut entries: Vec<BaselineSummaryReport> = Vec::new();
     if let Ok(read_dir) = std::fs::read_dir(&dir) {
@@ -611,6 +644,20 @@ fn baseline_list(cache_root: PathBuf) -> Result<BaselineReport> {
         }
     }
     entries.sort_by(|a, b| a.name.cmp(&b.name));
+
+    if !common.all {
+        match current_workspace_fingerprint(common.workspace.clone(), reporter) {
+            Some(fp) => {
+                entries.retain(|entry| entry.workspace_fingerprint == fp);
+            }
+            None => {
+                eprintln!(
+                    "note: could not resolve a workspace to filter by; showing all baselines (pass --all to silence)"
+                );
+            }
+        }
+    }
+
     Ok(BaselineReport {
         status: "ok",
         cache_root,

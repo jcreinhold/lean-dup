@@ -1438,7 +1438,7 @@ fn baseline_subcommand_lists_shows_and_deletes() {
     Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
-        .args(["baseline", "list"])
+        .args(["baseline", "list", "--all"])
         .assert()
         .success()
         .stdout(predicate::str::contains("alpha"))
@@ -1447,7 +1447,7 @@ fn baseline_subcommand_lists_shows_and_deletes() {
     let show = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
-        .args(["baseline", "--format", "json", "show", "alpha"])
+        .args(["baseline", "show", "alpha", "--format", "json"])
         .assert()
         .success();
     let payload: Value = serde_json::from_str(&String::from_utf8(show.get_output().stdout.clone()).unwrap()).unwrap();
@@ -1481,7 +1481,7 @@ fn baseline_subcommand_lists_shows_and_deletes() {
     let show = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
-        .args(["baseline", "--verbose", "show", "beta"])
+        .args(["baseline", "show", "beta", "--verbose"])
         .assert()
         .success();
     let stdout = String::from_utf8(show.get_output().stdout.clone()).unwrap();
@@ -1508,6 +1508,67 @@ fn baseline_subcommand_lists_shows_and_deletes() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("baseline not found"));
+}
+
+#[test]
+fn baseline_list_filters_by_current_workspace() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let root = repo_root();
+    let tiny = root.join("tests/fixtures/tiny");
+
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&tiny)
+        .args(["--no-semantic-probes", "--save-baseline", "tiny-one"])
+        .assert()
+        .success();
+
+    // Plant a baseline file claiming a different workspace fingerprint, so
+    // the filter has something to exclude.
+    let planted_path = cache.path().join("baselines").join("from-elsewhere.json");
+    let real = std::fs::read_to_string(cache.path().join("baselines").join("tiny-one.json")).unwrap();
+    let mut payload: Value = serde_json::from_str(&real).unwrap();
+    payload["workspace_fingerprint"] = Value::String("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_owned());
+    std::fs::write(&planted_path, serde_json::to_string(&payload).unwrap()).unwrap();
+
+    // Default `list` (filter by cwd workspace) hides the planted entry;
+    // `--all` shows both.
+    let scoped = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .current_dir(&tiny)
+        .args(["baseline", "list", "--format", "json"])
+        .assert()
+        .success();
+    let payload: Value =
+        serde_json::from_str(&String::from_utf8(scoped.get_output().stdout.clone()).unwrap()).unwrap();
+    let names: Vec<&str> = payload["baselines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"tiny-one"), "expected tiny-one in scoped list, got {names:?}");
+    assert!(!names.contains(&"from-elsewhere"), "unexpected from-elsewhere in scoped list: {names:?}");
+
+    let all = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .current_dir(&tiny)
+        .args(["baseline", "list", "--all", "--format", "json"])
+        .assert()
+        .success();
+    let payload: Value = serde_json::from_str(&String::from_utf8(all.get_output().stdout.clone()).unwrap()).unwrap();
+    let names: Vec<&str> = payload["baselines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"tiny-one") && names.contains(&"from-elsewhere"), "expected both with --all, got {names:?}");
 }
 
 #[test]
