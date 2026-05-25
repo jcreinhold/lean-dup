@@ -1,8 +1,8 @@
 use crate::report_contract::GroupExplanation;
 use crate::reports::{
-    AuditReport, CacheCleanupReportDto, CacheLabelDiagnosticsReport, DiffReport, DoctorReport, EvalReportDto,
-    IndexReport, PerfReport, Report, ReviewGroupReport, ShowReport, cache_root_diagnostic_label,
-    path_diagnostic_label, path_reference_label,
+    AuditReport, BaselineReport, BaselineSummaryReport, CacheCleanupReportDto, CacheLabelDiagnosticsReport, DiffReport,
+    DoctorReport, EvalReportDto, IndexReport, PerfReport, Report, ReviewGroupReport, ShowReport,
+    cache_root_diagnostic_label, path_diagnostic_label, path_reference_label,
 };
 
 /// Render-time knobs for the text formatter. JSON output ignores these.
@@ -32,6 +32,79 @@ pub fn render_text_with(report: &Report, options: RenderOptions) -> String {
         Report::Audit(report) => render_audit(report, options),
         Report::Eval(report) => render_eval(report),
         Report::Perf(report) => render_perf(report),
+        Report::Baseline(report) => render_baseline(report, options),
+    }
+}
+
+fn render_baseline(report: &BaselineReport, options: RenderOptions) -> String {
+    let mut lines = vec![format!(
+        "lean-dup baseline — status: {}    action: {}",
+        report.status, report.action
+    )];
+    match report.action {
+        "list" => {
+            if report.baselines.is_empty() {
+                lines.push("(no saved baselines under this cache root)".to_owned());
+            } else {
+                lines.push(String::new());
+                push_baseline_table(&mut lines, &report.baselines);
+            }
+        }
+        "show" => {
+            if let Some(entry) = report.baselines.first() {
+                lines.push(String::new());
+                push_baseline_table(&mut lines, std::slice::from_ref(entry));
+                lines.push(String::new());
+                let id_cap = if options.verbose { entry.group_ids.len() } else { 20 };
+                let shown = id_cap.min(entry.group_ids.len());
+                lines.push(format!("group ids ({} of {}):", shown, entry.group_ids.len()));
+                for id in entry.group_ids.iter().take(id_cap) {
+                    lines.push(format!("  {id}"));
+                }
+                if !options.verbose && entry.group_ids.len() > shown {
+                    lines.push("(pass --verbose for the full list)".to_owned());
+                }
+            }
+        }
+        "delete" => {
+            if let Some(name) = &report.deleted {
+                lines.push(format!("deleted baseline '{name}'"));
+            }
+        }
+        _ => {}
+    }
+    if options.verbose {
+        lines.push(String::new());
+        lines.push(format!("cache root: {}", cache_root_diagnostic_label(&report.cache_root)));
+    }
+    lines.join("\n")
+}
+
+fn push_baseline_table(lines: &mut Vec<String>, entries: &[BaselineSummaryReport]) {
+    let name_w = entries
+        .iter()
+        .map(|entry| entry.name.len())
+        .max()
+        .unwrap_or(0)
+        .max("name".len());
+    let count_w = entries
+        .iter()
+        .map(|entry| entry.group_count.to_string().len())
+        .max()
+        .unwrap_or(0)
+        .max("groups".len());
+    lines.push(format!(
+        "  {:<name_w$}  {:>count_w$}  {:>9}  {}",
+        "name", "groups", "size", "workspace",
+    ));
+    for entry in entries {
+        lines.push(format!(
+            "  {:<name_w$}  {:>count_w$}  {:>9}  {}",
+            entry.name,
+            entry.group_count,
+            format_bytes(entry.disk_bytes),
+            entry.workspace_fingerprint,
+        ));
     }
 }
 

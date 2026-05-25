@@ -58,6 +58,7 @@ fn help_lists_foundation_commands() {
         "eval",
         "show",
         "diff",
+        "baseline",
     ] {
         assert!(stdout.contains(command), "missing {command} in help:\n{stdout}");
     }
@@ -1414,6 +1415,64 @@ fn baseline_diff_reports_appeared_disappeared_and_changed_groups() {
         .stdout(predicate::str::contains("appeared: 1"))
         .stdout(predicate::str::contains("disappeared: 1"))
         .stdout(predicate::str::contains("changed: 1"));
+}
+
+#[test]
+fn baseline_subcommand_lists_shows_and_deletes() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let root = repo_root();
+    let tiny = root.join("tests/fixtures/tiny");
+
+    for name in ["alpha", "beta"] {
+        Command::cargo_bin("lean-dup")
+            .unwrap()
+            .env("LEAN_DUP_CACHE_DIR", cache.path())
+            .args(["audit", "--workspace"])
+            .arg(&tiny)
+            .args(["--module", "Tiny", "--no-semantic-probes", "--format", "json", "--save-baseline", name])
+            .assert()
+            .success();
+    }
+
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["baseline", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("alpha"))
+        .stdout(predicate::str::contains("beta"));
+
+    let show = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["baseline", "--format", "json", "show", "alpha"])
+        .assert()
+        .success();
+    let payload: Value = serde_json::from_str(&String::from_utf8(show.get_output().stdout.clone()).unwrap()).unwrap();
+    assert_eq!(payload["command"], "baseline");
+    assert_eq!(payload["action"], "show");
+    let summaries = payload["baselines"].as_array().unwrap();
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(summaries[0]["name"], "alpha");
+    assert!(summaries[0]["group_count"].as_u64().unwrap() > 0);
+
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["baseline", "delete", "alpha"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("deleted baseline 'alpha'"));
+
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["baseline", "show", "alpha"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("baseline not found"));
 }
 
 #[test]

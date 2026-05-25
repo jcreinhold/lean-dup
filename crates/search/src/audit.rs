@@ -28,6 +28,21 @@ pub fn load_named_baseline(cache_root: &Path, name: &str) -> crate::Result<(Path
     baseline::load(cache_root, name)
 }
 
+/// Directory under the cache root that holds named baseline snapshots.
+pub fn baselines_dir(cache_root: &Path) -> PathBuf {
+    baseline::baselines_dir(cache_root)
+}
+
+/// Resolve the on-disk path for a named baseline; validates the name.
+pub fn baseline_path(cache_root: &Path, name: &str) -> crate::Result<PathBuf> {
+    baseline::path_for(cache_root, name)
+}
+
+/// True if `name` is a syntactically valid baseline name.
+pub fn baseline_name_is_valid(name: &str) -> bool {
+    baseline::is_valid_name(name)
+}
+
 /// Diff two baseline snapshots and project the result to the search-facing
 /// diff DTO (the same shape `run_diff` produces).
 pub fn diff_snapshots(

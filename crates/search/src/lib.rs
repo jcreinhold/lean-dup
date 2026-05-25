@@ -25,7 +25,8 @@ pub use audit::{
     AuditProbeSummary, AuditQueueCounts, AuditQueueSummary, AuditReplacementHint, AuditRequest, AuditRetrievalSummary,
     AuditReview, AuditReviewDiagnostics, AuditSourceReference, AuditVisibility, AuditVisibilityOptions, BaselineGroup,
     BaselineSnapshot, DiffOutput, SearchBaselineChange, SearchBaselineDiff, SearchBaselineGroup, ShowOutput,
-    diff_snapshots, load_last_audit_snapshot, load_named_baseline, run_audit, run_diff, run_show,
+    baseline_name_is_valid, baseline_path, baselines_dir, diff_snapshots, load_last_audit_snapshot,
+    load_named_baseline, run_audit, run_diff, run_show,
 };
 pub use error::{Error, Result};
 pub use observation::{

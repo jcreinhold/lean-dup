@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::cli::{
-    AuditArgs, CacheCleanupArgs, Cli, Command, DiffArgs, DoctorArgs, EvalArgs, EvalFormat, IndexArgs, IndexMathlibArgs,
-    OutputFormat, ShowArgs,
+    AuditArgs, BaselineAction, BaselineArgs, CacheCleanupArgs, Cli, Command, DiffArgs, DoctorArgs, EvalArgs, EvalFormat,
+    IndexArgs, IndexMathlibArgs, OutputFormat, ShowArgs,
 };
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_eval::EvalRequest;
@@ -12,11 +12,12 @@ use lean_dup_index::{self, CacheFacts};
 use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexStore, IndexSummary};
 use lean_dup_project::{ResolvedWorkspace, WorkspaceRequest, resolve, resolve_project_mathlib};
 use lean_dup_report::{
-    AuditReport, CacheCleanupReportDto, DiffReport, DoctorReport, IndexReport, RenderOptions, Report, ShowReport,
+    AuditReport, BaselineReport, BaselineSummaryReport, CacheCleanupReportDto, DiffReport, DoctorReport, IndexReport,
+    RenderOptions, Report, ShowReport,
 };
 use lean_dup_search::{
-    AuditRequest, BaselineSnapshot, DiffOutput, diff_snapshots, load_last_audit_snapshot, load_named_baseline,
-    run_audit, run_diff, run_show,
+    AuditRequest, BaselineSnapshot, DiffOutput, baseline_name_is_valid, baseline_path, baselines_dir, diff_snapshots,
+    load_last_audit_snapshot, load_named_baseline, run_audit, run_diff, run_show,
 };
 use lean_dup_worker::{WorkerClient, WorkerVersion};
 
@@ -91,6 +92,11 @@ pub fn run(cli: Cli) -> Result<Outcome> {
             let format = args.format;
             render_options.verbose = args.verbose;
             (Report::Diff(diff(args, &mut reporter)?), format, None)
+        }
+        Command::Baseline(args) => {
+            let format = args.format;
+            render_options.verbose = args.verbose;
+            (Report::Baseline(baseline(args)?), format, None)
         }
         Command::External(_) => {
             return Err(AppError::Cli {
@@ -576,4 +582,105 @@ fn missing_oleans(workspace: &ResolvedWorkspace) -> Vec<String> {
         .into_iter()
         .map(|source| source.module.clone())
         .collect()
+}
+
+fn baseline(args: BaselineArgs) -> Result<BaselineReport> {
+    let cache_root = args.cache_root.unwrap_or_else(lean_dup_index::cache_root);
+    match args.action {
+        BaselineAction::List => baseline_list(cache_root),
+        BaselineAction::Show { name } => baseline_show(cache_root, name),
+        BaselineAction::Delete { name } => baseline_delete(cache_root, name),
+    }
+}
+
+fn baseline_list(cache_root: PathBuf) -> Result<BaselineReport> {
+    let dir = baselines_dir(&cache_root);
+    let mut entries: Vec<BaselineSummaryReport> = Vec::new();
+    if let Ok(read_dir) = std::fs::read_dir(&dir) {
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            if let Some(summary) = baseline_summary(&cache_root, name, false) {
+                entries.push(summary);
+            }
+        }
+    }
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(BaselineReport {
+        status: "ok",
+        cache_root,
+        action: "list",
+        baselines: entries,
+        deleted: None,
+    })
+}
+
+fn baseline_show(cache_root: PathBuf, name: String) -> Result<BaselineReport> {
+    if !baseline_name_is_valid(&name) {
+        return Err(AppError::Cli {
+            message: format!("invalid baseline name: {name}"),
+        });
+    }
+    let summary = baseline_summary(&cache_root, &name, true).ok_or_else(|| AppError::Cli {
+        message: format!("baseline not found: {name}"),
+    })?;
+    Ok(BaselineReport {
+        status: "ok",
+        cache_root,
+        action: "show",
+        baselines: vec![summary],
+        deleted: None,
+    })
+}
+
+fn baseline_delete(cache_root: PathBuf, name: String) -> Result<BaselineReport> {
+    let path = baseline_path(&cache_root, &name).map_err(|_| AppError::Cli {
+        message: format!("invalid baseline name: {name}"),
+    })?;
+    if !path.exists() {
+        return Err(AppError::Cli {
+            message: format!("baseline not found: {name}"),
+        });
+    }
+    std::fs::remove_file(&path).map_err(|source| AppError::Io {
+        message: "could not delete baseline",
+        path: path.clone(),
+        source,
+    })?;
+    Ok(BaselineReport {
+        status: "ok",
+        cache_root,
+        action: "delete",
+        baselines: Vec::new(),
+        deleted: Some(name),
+    })
+}
+
+/// Load summary metadata for one baseline. Returns `None` if the name is
+/// invalid or the file can't be opened/parsed — callers filter these out
+/// silently in list mode and raise a friendly error in show mode.
+fn baseline_summary(cache_root: &std::path::Path, name: &str, include_ids: bool) -> Option<BaselineSummaryReport> {
+    if !baseline_name_is_valid(name) {
+        return None;
+    }
+    let (path, snapshot) = load_named_baseline(cache_root, name).ok()?;
+    let disk_bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    let group_ids = if include_ids {
+        snapshot.groups.iter().map(|group| group.id.clone()).collect()
+    } else {
+        Vec::new()
+    };
+    Some(BaselineSummaryReport {
+        name: name.to_owned(),
+        path,
+        workspace_fingerprint: snapshot.workspace_fingerprint,
+        group_count: snapshot.groups.len(),
+        disk_bytes,
+        group_ids,
+    })
 }

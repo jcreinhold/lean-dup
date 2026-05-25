@@ -220,6 +220,22 @@ fn baseline_path(cache_root: &Path, name: &str) -> Result<PathBuf> {
     Ok(cache_root.join("baselines").join(format!("{safe}.json")))
 }
 
+/// Directory under the cache root that holds named baseline snapshots.
+pub fn baselines_dir(cache_root: &Path) -> PathBuf {
+    cache_root.join("baselines")
+}
+
+/// Resolved on-disk path for a named baseline; validates the name.
+pub fn path_for(cache_root: &Path, name: &str) -> Result<PathBuf> {
+    baseline_path(cache_root, name)
+}
+
+/// True if `name` is acceptable as a baseline name (matches the rules used
+/// by `save` and `load`). Exposed so the CLI can validate before doing I/O.
+pub fn is_valid_name(name: &str) -> bool {
+    safe_name(name).is_ok()
+}
+
 fn safe_name(name: &str) -> Result<String> {
     let trimmed = name.trim();
     if trimmed.is_empty()

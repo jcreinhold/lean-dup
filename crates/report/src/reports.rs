@@ -25,6 +25,34 @@ pub enum Report {
     Perf(PerfReport),
     Show(Box<ShowReport>),
     Diff(DiffReport),
+    Baseline(BaselineReport),
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BaselineReport {
+    pub status: &'static str,
+    #[serde(serialize_with = "serialize_cache_root_ref")]
+    pub cache_root: PathBuf,
+    pub action: &'static str,
+    /// Populated by `list` and `show`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub baselines: Vec<BaselineSummaryReport>,
+    /// Populated by `delete` (the removed baseline name).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BaselineSummaryReport {
+    pub name: String,
+    #[serde(serialize_with = "serialize_path_ref")]
+    pub path: PathBuf,
+    pub workspace_fingerprint: String,
+    pub group_count: usize,
+    pub disk_bytes: u64,
+    /// Populated by `show` only.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub group_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

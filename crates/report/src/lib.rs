@@ -15,7 +15,8 @@ pub use report_contract::{
     HiddenGroupExplanation, REPORT_SCHEMA_VERSION, SemanticProbeExplanation, VisibleQueueExplanation,
 };
 pub use reports::{
-    AuditReport, BaselineChangeReport, BaselineDiffReport, BaselineGroupReport, CacheCleanupEntryReport,
+    AuditReport, BaselineChangeReport, BaselineDiffReport, BaselineGroupReport, BaselineReport, BaselineSummaryReport,
+    CacheCleanupEntryReport,
     CacheCleanupReportDto, CacheDiagnosticsReport, CacheEntryDiagnosticsReport, CacheLabelDiagnosticsReport,
     CacheLatestDiagnosticsReport, ComparisonProvenanceReportDto, DiffReport, DoctorReport, EvalCountAtKDto,
     EvalCountMetricDto, EvalHardNegativeSurvivalDto, EvalMetricsDto, EvalRecallAtKDto, EvalReportDto, EvalRunReportDto,

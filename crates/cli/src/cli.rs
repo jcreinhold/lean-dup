@@ -59,14 +59,25 @@ pub enum Command {
     Show(ShowArgs),
     /// Compare current findings against a saved baseline.
     Diff(DiffArgs),
+    /// List, inspect, or delete saved baselines (see `audit --save-baseline`).
+    Baseline(BaselineArgs),
     #[command(hide = true)]
     Perf(PerfArgs),
     #[command(external_subcommand)]
     External(Vec<OsString>),
 }
 
-pub(crate) const VISIBLE_BUILT_IN_COMMANDS: &[&str] =
-    &["doctor", "cache-cleanup", "index", "index-mathlib", "audit", "eval", "show", "diff"];
+pub(crate) const VISIBLE_BUILT_IN_COMMANDS: &[&str] = &[
+    "doctor",
+    "cache-cleanup",
+    "index",
+    "index-mathlib",
+    "audit",
+    "eval",
+    "show",
+    "diff",
+    "baseline",
+];
 
 pub(crate) const ALL_BUILT_IN_COMMANDS: &[&str] = &[
     "doctor",
@@ -77,6 +88,7 @@ pub(crate) const ALL_BUILT_IN_COMMANDS: &[&str] = &[
     "eval",
     "show",
     "diff",
+    "baseline",
     "perf",
 ];
 
@@ -414,6 +426,46 @@ pub struct DiffArgs {
     /// Skip the last-audit snapshot fast-path. Always re-run the full audit.
     #[arg(long = "no-cache")]
     pub no_cache: bool,
+}
+
+#[derive(Debug, Clone, clap::Args)]
+#[command(after_help = "\
+Examples:
+  lean-dup baseline list                List every saved baseline
+  lean-dup baseline show v1             Inspect baseline `v1`
+  lean-dup baseline delete v1           Remove baseline `v1`
+")]
+pub struct BaselineArgs {
+    /// Output format. `text` is human-readable; `json` is the stable wire schema.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub format: OutputFormat,
+
+    /// Override the cache root. Defaults to the platform user cache dir (or `$LEAN_DUP_CACHE_DIR`).
+    #[arg(long)]
+    pub cache_root: Option<PathBuf>,
+
+    /// Include the full group ID list (otherwise the first ~20 are shown).
+    #[arg(long)]
+    pub verbose: bool,
+
+    #[command(subcommand)]
+    pub action: BaselineAction,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum BaselineAction {
+    /// List saved baselines.
+    List,
+    /// Print the contents of one baseline.
+    Show {
+        /// Baseline name (as passed to `audit --save-baseline`).
+        name: String,
+    },
+    /// Remove a saved baseline.
+    Delete {
+        /// Baseline name.
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]

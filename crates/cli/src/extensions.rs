@@ -68,6 +68,7 @@ fn built_in_about(name: &str) -> Option<&'static str> {
         "eval" => Some("Run the recall/precision evaluation suites."),
         "show" => Some("Print the full evidence for one duplicate group."),
         "diff" => Some("Compare current findings against a saved baseline."),
+        "baseline" => Some("List, inspect, or delete saved baselines."),
         _ => None,
     }
 }
