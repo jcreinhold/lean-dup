@@ -183,17 +183,9 @@ pub struct AuditArgs {
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
     pub format: OutputFormat,
 
-    /// Exclude private declarations from the audit corpus (equivalent to --no-include-private).
-    #[arg(long)]
-    pub public_only: bool,
-
-    /// Include private declarations in the audit corpus (default).
-    #[arg(long, default_value_t = true, action = clap::ArgAction::SetTrue)]
-    pub include_private: bool,
-
-    /// Exclude private declarations from the audit corpus.
-    #[arg(long = "no-include-private", action = clap::ArgAction::SetFalse)]
-    pub no_include_private: bool,
+    /// Which corpus to audit: `all` (default), `public`, or `private`.
+    #[arg(long, value_enum, default_value_t = Visibility::default())]
+    pub visibility: Visibility,
 
     /// Add an external named index to the comparison set. May be repeated.
     #[arg(long = "compare-index")]
@@ -211,7 +203,10 @@ pub struct AuditArgs {
     #[arg(long)]
     pub include_generated: bool,
 
-    #[arg(long = "private", help = "Show otherwise-actionable private helper findings")]
+    /// Surface actionable findings about private helpers (otherwise suppressed
+    /// because users typically cannot act on someone else's private decl).
+    /// Independent of `--visibility`, which controls the audit *corpus*.
+    #[arg(long = "show-private-actionable", help = "Surface actionable findings about private helpers")]
     pub show_private: bool,
 
     #[arg(long = "low-priority", help = "Include lower-priority structural findings")]
@@ -380,6 +375,18 @@ impl From<CliEvalSuite> for EvalSuite {
     }
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum Visibility {
+    /// Include both public and private declarations (default).
+    #[default]
+    All,
+    /// Public declarations only.
+    Public,
+    /// Private declarations only (rare; for `private`-helper audits).
+    Private,
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum CliProbePolicy {
@@ -429,8 +436,10 @@ impl PerfWorkload {
 }
 
 impl AuditArgs {
+    /// Whether the audit *corpus* includes private declarations.
+    /// Controlled by `--visibility`; default is `all`.
     pub fn effective_include_private(&self) -> bool {
-        self.include_private && self.no_include_private && !self.public_only
+        matches!(self.visibility, Visibility::All | Visibility::Private)
     }
 
     pub fn visibility_options(&self) -> AuditVisibilityOptions {

@@ -245,10 +245,21 @@ fn audit_help_omits_removed_noop_flags_and_rejects_them() {
         .assert()
         .success();
     let stdout = String::from_utf8(help.get_output().stdout.clone()).unwrap();
-    for present in ["--private", "--low-priority", "--diagnostics"] {
+    for present in [
+        "--show-private-actionable",
+        "--low-priority",
+        "--diagnostics",
+        "--visibility",
+    ] {
         assert!(
             stdout.contains(present),
             "audit help did not mention visibility flag {present}"
+        );
+    }
+    for removed_visibility in ["--public-only", "--include-private", "--no-include-private"] {
+        assert!(
+            !stdout.contains(removed_visibility),
+            "collapsed visibility flag {removed_visibility} still appears in audit help"
         );
     }
     for removed in [
@@ -936,7 +947,7 @@ fn audit_visibility_flags_compose_in_json_options() {
             "--no-semantic-probes",
             "--format",
             "json",
-            "--private",
+            "--show-private-actionable",
             "--low-priority",
         ])
         .assert()
@@ -968,6 +979,44 @@ fn audit_visibility_flags_compose_in_json_options() {
     assert_eq!(payload["options"]["visibility"]["include_low_priority"], false);
     assert_eq!(payload["options"]["visibility"]["diagnostics"], true);
     assert_eq!(payload["visible_group_count"], payload["queue_counts"]["diagnostics"]);
+}
+
+#[test]
+fn audit_visibility_public_excludes_private_corpus() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let tiny = repo_root().join("tests/fixtures/tiny");
+
+    let all = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--no-semantic-probes", "--format", "json"])
+        .assert()
+        .success();
+    let all_payload: Value = serde_json::from_str(&String::from_utf8(all.get_output().stdout.clone()).unwrap()).unwrap();
+    assert_eq!(all_payload["options"]["include_private"], true);
+
+    let public = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&tiny)
+        .args([
+            "--module",
+            "Tiny",
+            "--no-semantic-probes",
+            "--format",
+            "json",
+            "--visibility",
+            "public",
+        ])
+        .assert()
+        .success();
+    let public_payload: Value =
+        serde_json::from_str(&String::from_utf8(public.get_output().stdout.clone()).unwrap()).unwrap();
+    assert_eq!(public_payload["options"]["include_private"], false);
 }
 
 #[test]
