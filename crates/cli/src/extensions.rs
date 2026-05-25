@@ -143,6 +143,26 @@ fn nearest_built_in(name: &str) -> Option<&'static str> {
     best.map(|(candidate, _)| candidate)
 }
 
+/// Return the candidate closest to `name` within `max_distance` edits, if any.
+/// Used by both subcommand dispatch and group-ID fast-fail.
+pub(crate) fn nearest_match<'a, I>(name: &str, candidates: I, max_distance: usize) -> Option<&'a str>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let mut best: Option<(&'a str, usize)> = None;
+    for candidate in candidates {
+        let distance = levenshtein(name, candidate);
+        if distance > max_distance {
+            continue;
+        }
+        match best {
+            Some((_, current)) if distance >= current => {}
+            _ => best = Some((candidate, distance)),
+        }
+    }
+    best.map(|(candidate, _)| candidate)
+}
+
 fn levenshtein(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();

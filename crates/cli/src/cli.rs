@@ -13,8 +13,11 @@ use serde::{Deserialize, Serialize};
 #[command(disable_version_flag = true)]
 #[command(after_help = ENV_VAR_HELP)]
 pub struct Cli {
-    #[arg(long, global = true, help = "Stream phase-by-phase progress events to stderr (useful for long audits)")]
+    #[arg(long, global = true, help = "Force progress on (default: on when stderr is a TTY)")]
     pub progress: bool,
+
+    #[arg(long = "no-progress", global = true, help = "Suppress phase-by-phase progress events on stderr")]
+    pub no_progress: bool,
 
     #[arg(long, global = true, help = "Print per-phase timings to stderr after the command finishes")]
     pub profile: bool,
@@ -132,6 +135,10 @@ pub struct CacheCleanupArgs {
     /// Actually delete the entries. Without this flag the command is a dry run.
     #[arg(long)]
     pub execute: bool,
+
+    /// Include per-entry detail (sha256, reasons) in the text output.
+    #[arg(long)]
+    pub verbose: bool,
 }
 
 #[derive(Debug, Clone, clap::Args)]
@@ -258,6 +265,10 @@ pub struct AuditArgs {
     #[arg(long)]
     pub verbose: bool,
 
+    /// Show at most N groups in the text table (default: 20). Has no effect on JSON output.
+    #[arg(long)]
+    pub limit: Option<usize>,
+
     #[arg(long = "probe-budget", hide = true, default_value_t = 500)]
     pub probe_budget: usize,
 
@@ -363,6 +374,14 @@ pub struct ShowArgs {
     /// Group or pair ID. Obtain one from the `lean-dup audit` output table.
     #[arg(long)]
     pub group: String,
+
+    /// Skip the last-audit snapshot fast-fail. Always run the full pipeline.
+    #[arg(long = "no-cache")]
+    pub no_cache: bool,
+
+    /// Include workspace and cache provenance lines in the text output.
+    #[arg(long)]
+    pub verbose: bool,
 }
 
 #[derive(Debug, Clone, clap::Args)]
@@ -387,6 +406,10 @@ pub struct DiffArgs {
     /// Name of a previously-saved baseline (see `lean-dup audit --save-baseline`).
     #[arg(long)]
     pub baseline: String,
+
+    /// Include workspace and cache provenance lines in the text output.
+    #[arg(long)]
+    pub verbose: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]

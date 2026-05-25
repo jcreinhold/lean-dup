@@ -23,8 +23,9 @@ mod source_refs;
 pub use audit::{
     AuditEvidence, AuditGroup, AuditHiddenGroupCounts, AuditHiddenReason, AuditMember, AuditOutput, AuditPairEvidence,
     AuditProbeSummary, AuditQueueCounts, AuditQueueSummary, AuditReplacementHint, AuditRequest, AuditRetrievalSummary,
-    AuditReview, AuditReviewDiagnostics, AuditSourceReference, AuditVisibility, AuditVisibilityOptions, DiffOutput,
-    SearchBaselineChange, SearchBaselineDiff, SearchBaselineGroup, ShowOutput, run_audit, run_diff, run_show,
+    AuditReview, AuditReviewDiagnostics, AuditSourceReference, AuditVisibility, AuditVisibilityOptions, BaselineGroup,
+    BaselineSnapshot, DiffOutput, SearchBaselineChange, SearchBaselineDiff, SearchBaselineGroup, ShowOutput,
+    load_last_audit_snapshot, run_audit, run_diff, run_show,
 };
 pub use error::{Error, Result};
 pub use observation::{

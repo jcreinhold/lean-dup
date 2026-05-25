@@ -99,7 +99,11 @@ pub fn resolve(request: WorkspaceRequest, reporter: &mut Reporter) -> Result<Res
     };
     let source_files = enumerate_sources(&root, &selected_roots)?;
     if source_files.is_empty() {
-        return Err(Error::NoSourceFiles(root));
+        return Err(Error::NoSourceFiles {
+            root,
+            selected_roots,
+            available_roots: discovered_roots,
+        });
     }
 
     reporter.event(

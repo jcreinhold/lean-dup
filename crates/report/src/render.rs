@@ -12,6 +12,9 @@ use crate::reports::{
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RenderOptions {
     pub verbose: bool,
+    /// Cap on the number of groups printed in the audit text table. `None`
+    /// uses the renderer's built-in default (20).
+    pub audit_limit: Option<usize>,
 }
 
 pub fn render_text(report: &Report) -> String {
@@ -21,11 +24,11 @@ pub fn render_text(report: &Report) -> String {
 pub fn render_text_with(report: &Report, options: RenderOptions) -> String {
     match report {
         Report::Doctor(report) => render_doctor(report, options),
-        Report::CacheCleanup(report) => render_cache_cleanup(report),
+        Report::CacheCleanup(report) => render_cache_cleanup(report, options),
         Report::Index(report) => render_index("index", report),
         Report::IndexMathlib(report) => render_index("index-mathlib", report),
-        Report::Show(report) => render_show(report),
-        Report::Diff(report) => render_diff(report),
+        Report::Show(report) => render_show(report, options),
+        Report::Diff(report) => render_diff(report, options),
         Report::Audit(report) => render_audit(report, options),
         Report::Eval(report) => render_eval(report),
         Report::Perf(report) => render_perf(report),
@@ -374,88 +377,102 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
-fn render_cache_cleanup(report: &CacheCleanupReportDto) -> String {
+fn render_cache_cleanup(report: &CacheCleanupReportDto, options: RenderOptions) -> String {
     let mut lines = vec![
-        "command: cache-cleanup".to_owned(),
-        format!("status: {}", report.status),
-        format!("cache root: {}", cache_root_diagnostic_label(&report.cache_root)),
-        format!("executed: {}", report.executed),
-        format!("removable entries: {}", report.removable_count),
-        format!("protected entries: {}", report.protected_count),
-        format!("bytes to remove: {}", report.bytes_to_remove),
-        format!("bytes removed: {}", report.bytes_removed),
+        format!("lean-dup cache-cleanup — status: {}", report.status),
+        format!(
+            "{} entries to remove ({})    {} protected",
+            report.removable_count,
+            format_bytes(report.bytes_to_remove),
+            report.protected_count,
+        ),
     ];
-    for entry in &report.removed_entries {
-        lines.push(format!(
-            "  removable {} {} bytes ({})",
-            path_diagnostic_label(&entry.index_dir),
-            entry.disk_bytes,
-            entry.reason
-        ));
-    }
-    for entry in &report.protected_entries {
-        lines.push(format!(
-            "  protected {} {} bytes ({})",
-            path_diagnostic_label(&entry.index_dir),
-            entry.disk_bytes,
-            entry.reason
-        ));
-    }
     if report.executed {
         lines.push(format!(
-            "removed {} bytes across {} entries.",
-            report.bytes_removed, report.removable_count,
+            "removed {} across {} {}.",
+            format_bytes(report.bytes_removed),
+            report.removable_count,
+            if report.removable_count == 1 { "entry" } else { "entries" },
         ));
     } else {
         lines.push(format!(
-            "dry run: no files removed. Pass --execute to delete the {} removable {} ({} bytes).",
+            "dry run: pass --execute to delete the {} removable {} ({}).",
             report.removable_count,
             if report.removable_count == 1 { "entry" } else { "entries" },
-            report.bytes_to_remove,
+            format_bytes(report.bytes_to_remove),
         ));
+    }
+    if options.verbose {
+        lines.push(String::new());
+        lines.push(format!("cache root: {}", cache_root_diagnostic_label(&report.cache_root)));
+        if !report.removed_entries.is_empty() {
+            lines.push("removable entries:".to_owned());
+            for entry in &report.removed_entries {
+                lines.push(format!(
+                    "  {} {} ({})",
+                    path_diagnostic_label(&entry.index_dir),
+                    format_bytes(entry.disk_bytes),
+                    entry.reason,
+                ));
+            }
+        }
+        if !report.protected_entries.is_empty() {
+            lines.push("protected entries:".to_owned());
+            for entry in &report.protected_entries {
+                lines.push(format!(
+                    "  {} {} ({})",
+                    path_diagnostic_label(&entry.index_dir),
+                    format_bytes(entry.disk_bytes),
+                    entry.reason,
+                ));
+            }
+        }
+    } else if report.removable_count + report.protected_count > 0 {
+        lines.push("(pass --verbose for the per-entry list.)".to_owned());
     }
     lines.join("\n")
 }
 
-fn render_show(report: &ShowReport) -> String {
+fn render_show(report: &ShowReport, options: RenderOptions) -> String {
     let mut lines = vec![
-        "command: show".to_owned(),
-        format!("status: {}", report.status),
-        format!(
+        format!("lean-dup show — status: {}    group: {}", report.status, report.group.id),
+    ];
+    if options.verbose {
+        lines.push(format!(
             "requested workspace: {}",
             path_diagnostic_label(&report.requested_workspace)
-        ),
-        format!("resolved Lake root: {}", path_diagnostic_label(&report.lake_root)),
-        format!("selected roots: {}", report.selected_roots.join(", ")),
-        format!("source files: {}", report.source_count),
-        format!("cache root: {}", cache_root_diagnostic_label(&report.cache_root)),
-        format!("cache fingerprint: {}", report.cache_fingerprint),
-    ];
+        ));
+        lines.push(format!("resolved Lake root: {}", path_diagnostic_label(&report.lake_root)));
+        lines.push(format!("selected roots: {}", report.selected_roots.join(", ")));
+        lines.push(format!("source files: {}", report.source_count));
+        lines.push(format!("cache root: {}", cache_root_diagnostic_label(&report.cache_root)));
+        lines.push(format!("cache fingerprint: {}", report.cache_fingerprint));
+    }
     lines.push(String::new());
     push_group_detail(&mut lines, &report.group);
     push_group_explanation(&mut lines, &report.explanation);
     lines.join("\n")
 }
 
-fn render_diff(report: &DiffReport) -> String {
+fn render_diff(report: &DiffReport, options: RenderOptions) -> String {
     let mut lines = vec![
-        "command: diff".to_owned(),
-        format!("status: {}", report.status),
         format!(
-            "requested workspace: {}",
-            path_diagnostic_label(&report.requested_workspace)
+            "lean-dup diff — status: {}    baseline: {}",
+            report.status, report.diff.baseline
         ),
-        format!("resolved Lake root: {}", path_diagnostic_label(&report.lake_root)),
-        format!("selected roots: {}", report.selected_roots.join(", ")),
-        format!("source files: {}", report.source_count),
-        format!("cache root: {}", cache_root_diagnostic_label(&report.cache_root)),
-        format!("cache fingerprint: {}", report.cache_fingerprint),
-        format!("baseline: {}", report.diff.baseline),
-        format!("baseline path: {}", path_diagnostic_label(&report.diff.baseline_path)),
-        format!("appeared: {}", report.diff.appeared.len()),
-        format!("disappeared: {}", report.diff.disappeared.len()),
-        format!("changed: {}", report.diff.changed.len()),
+        format!(
+            "appeared: {}    disappeared: {}    changed: {}",
+            report.diff.appeared.len(),
+            report.diff.disappeared.len(),
+            report.diff.changed.len(),
+        ),
     ];
+    if !report.diff.appeared.is_empty()
+        || !report.diff.disappeared.is_empty()
+        || !report.diff.changed.is_empty()
+    {
+        lines.push(String::new());
+    }
     for group in report.diff.appeared.iter().take(20) {
         lines.push(format!("  appeared {}", group.id));
     }
@@ -464,6 +481,19 @@ fn render_diff(report: &DiffReport) -> String {
     }
     for change in report.diff.changed.iter().take(20) {
         lines.push(format!("  changed {}", change.id));
+    }
+    if options.verbose {
+        lines.push(String::new());
+        lines.push(format!(
+            "requested workspace: {}",
+            path_diagnostic_label(&report.requested_workspace)
+        ));
+        lines.push(format!("resolved Lake root: {}", path_diagnostic_label(&report.lake_root)));
+        lines.push(format!("selected roots: {}", report.selected_roots.join(", ")));
+        lines.push(format!("source files: {}", report.source_count));
+        lines.push(format!("cache root: {}", cache_root_diagnostic_label(&report.cache_root)));
+        lines.push(format!("cache fingerprint: {}", report.cache_fingerprint));
+        lines.push(format!("baseline path: {}", path_diagnostic_label(&report.diff.baseline_path)));
     }
     lines.join("\n")
 }
@@ -508,9 +538,20 @@ fn render_audit(report: &AuditReport, options: RenderOptions) -> String {
         },
     ));
     let truncated = if report.visible_groups_truncated { " (truncated)" } else { "" };
+    let table_limit = options.audit_limit.unwrap_or(20);
+    let table_shown = table_limit.min(report.visible_groups.len());
+    let limit_hint = if table_shown < report.visible_groups_emitted {
+        format!(" (showing top {table_shown}; pass --limit to widen)")
+    } else {
+        String::new()
+    };
     lines.push(format!(
-        "review queue: {} visible families, top {} emitted{}    suppressed: {}",
-        report.visible_group_count, report.visible_groups_emitted, truncated, report.review.suppressed_count,
+        "review queue: {} visible families, top {} emitted{}{}    suppressed: {}",
+        report.visible_group_count,
+        report.visible_groups_emitted,
+        truncated,
+        limit_hint,
+        report.review.suppressed_count,
     ));
     if let Some(path) = &report.saved_baseline {
         lines.push(format!("saved baseline: {}", path.display()));
@@ -522,7 +563,12 @@ fn render_audit(report: &AuditReport, options: RenderOptions) -> String {
         lines.push(format!("no review-priority duplicates: {}", report.explanations.visible_queue.reason));
     } else {
         lines.push("groups:".to_owned());
-        let rows: Vec<GroupRow> = report.visible_groups.iter().take(20).map(GroupRow::from_group).collect();
+        let rows: Vec<GroupRow> = report
+            .visible_groups
+            .iter()
+            .take(table_limit)
+            .map(GroupRow::from_group)
+            .collect();
         let prio_w = rows.iter().map(|r| r.priority.len()).max().unwrap_or(0).max("priority".len());
         let action_w = rows.iter().map(|r| r.action.len()).max().unwrap_or(0).max("action".len());
         let relation_w = rows.iter().map(|r| r.relation.len()).max().unwrap_or(0).max("relation".len());
@@ -671,7 +717,13 @@ fn push_group_detail(lines: &mut Vec<String>, group: &ReviewGroupReport) {
         let span = member
             .source_span
             .as_ref()
-            .map(|span| format!(" {}:{}", path_reference_label(&span.file), span.start.line))
+            .map(|span| {
+                let location = span
+                    .local_path
+                    .clone()
+                    .unwrap_or_else(|| path_reference_label(&span.file));
+                format!(" {}:{}", location, span.start.line)
+            })
             .unwrap_or_default();
         lines.push(format!(
             "  {} {} {}{}",
@@ -887,7 +939,7 @@ mod doctor_render_tests {
         )];
         let doctor = report(labels);
         let default_out = render_doctor(&doctor, RenderOptions::default());
-        let verbose_out = render_doctor(&doctor, RenderOptions { verbose: true });
+        let verbose_out = render_doctor(&doctor, RenderOptions { verbose: true, ..RenderOptions::default() });
         // Default lines all appear in verbose output.
         for line in default_out.lines() {
             assert!(

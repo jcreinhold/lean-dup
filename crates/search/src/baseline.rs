@@ -86,6 +86,49 @@ pub fn load(cache_root: &Path, name: &str) -> Result<(PathBuf, BaselineSnapshot)
     Ok((path, snapshot))
 }
 
+/// Path to the implicit "last audit" snapshot for a workspace.
+fn last_snapshot_path(cache_root: &Path, fingerprint: &str) -> PathBuf {
+    cache_root.join("last-snapshot").join(format!("{fingerprint}.json"))
+}
+
+/// Persist the most recent audit snapshot for a workspace fingerprint.
+///
+/// The file is written atomically (tmp + rename) so concurrent audits never
+/// expose a half-written snapshot. Best-effort: failures are reported but
+/// must not break the audit command itself; callers should log and continue.
+pub fn save_last(cache_root: &Path, snapshot: &BaselineSnapshot) -> Result<PathBuf> {
+    let path = last_snapshot_path(cache_root, &snapshot.workspace_fingerprint);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|source| Error::Io {
+            message: "could not create last-snapshot directory",
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    let body = serde_json::to_vec(snapshot)?;
+    std::fs::write(&tmp, &body).map_err(|source| Error::Io {
+        message: "could not write last-snapshot",
+        path: tmp.clone(),
+        source,
+    })?;
+    std::fs::rename(&tmp, &path).map_err(|source| Error::Io {
+        message: "could not finalize last-snapshot",
+        path: path.clone(),
+        source,
+    })?;
+    Ok(path)
+}
+
+/// Load the most recent audit snapshot for a workspace fingerprint, if one
+/// is on disk and parses. Any read or parse error returns `None`; callers
+/// fall through to the slow path.
+pub fn load_last(cache_root: &Path, fingerprint: &str) -> Option<BaselineSnapshot> {
+    let path = last_snapshot_path(cache_root, fingerprint);
+    let body = std::fs::read_to_string(&path).ok()?;
+    serde_json::from_str(&body).ok()
+}
+
 /// Compare current audit evidence against a named baseline.
 pub fn diff(
     name: String,

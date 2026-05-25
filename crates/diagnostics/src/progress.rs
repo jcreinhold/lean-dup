@@ -1,4 +1,4 @@
-use std::io::{Write, stderr};
+use std::io::{IsTerminal, Write, stderr};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -23,6 +23,7 @@ pub struct Reporter {
     progress_enabled: bool,
     profile_enabled: bool,
     live_progress: bool,
+    tty: bool,
     started: Instant,
     events: Vec<ProgressEvent>,
     timings: Vec<ProfileTiming>,
@@ -43,6 +44,7 @@ impl Reporter {
             progress_enabled,
             profile_enabled,
             live_progress: false,
+            tty: stderr().is_terminal(),
             started: Instant::now(),
             events: Vec::new(),
             timings: Vec::new(),
@@ -133,9 +135,15 @@ impl Reporter {
         }
 
         let mut stderr = stderr();
-        let _ = write!(stderr, "\r{}", format_progress_bar(event, key));
+        if self.tty {
+            let _ = write!(stderr, "\r{}", format_progress_bar(event, key));
+        } else if phase_changed || finished {
+            let _ = writeln!(stderr, "{}", format_progress_event(event));
+        } else {
+            return;
+        }
         let _ = stderr.flush();
-        self.live_state.active = true;
+        self.live_state.active = self.tty;
         self.live_state.last_rendered_at = Some(now);
         self.live_state.last_key = Some(key);
         self.live_state.last_bucket = bucket;

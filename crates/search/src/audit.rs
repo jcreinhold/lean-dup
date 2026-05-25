@@ -12,6 +12,15 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::baseline;
+use std::path::Path;
+pub use crate::baseline::{BaselineGroup, BaselineSnapshot};
+
+/// Load the most recent persisted audit snapshot for a workspace fingerprint,
+/// if one is on disk. Used by `show`/`diff` to validate group IDs without
+/// re-running the full audit pipeline.
+pub fn load_last_audit_snapshot(cache_root: &Path, fingerprint: &str) -> Option<BaselineSnapshot> {
+    baseline::load_last(cache_root, fingerprint)
+}
 use crate::ranking::{
     ConfidenceTier, RankedGroup, RankedReview, RankingDiagnostics, RankingInput, RankingProfile, ReviewAction,
     ReviewEvidence, ReviewEvidenceMode, ReviewFilter, ReviewMember, ReviewPriority, ReviewRelation, rank_candidates,
@@ -497,8 +506,16 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
     let review = perf::measure(CostClass::RetrievalRanking, "ranking.replacement_hints", || {
         attach_replacement_hints(review, &source_facts, ReplacementHintProfile::default())
     });
+    let snapshot = baseline::snapshot(&review, foundation.cache.fingerprint.clone());
+    if let Err(error) = baseline::save_last(&foundation.cache.root, &snapshot) {
+        reporter.event(
+            "baseline.last",
+            None,
+            None,
+            format!("could not persist last-snapshot: {error}"),
+        );
+    }
     let saved_baseline = if let Some(name) = request.save_baseline {
-        let snapshot = baseline::snapshot(&review, foundation.cache.fingerprint.clone());
         Some(baseline::save(&foundation.cache.root, &name, &snapshot)?)
     } else {
         None

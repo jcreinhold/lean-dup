@@ -14,7 +14,7 @@ use lean_dup_project::{ResolvedWorkspace, WorkspaceRequest, resolve, resolve_pro
 use lean_dup_report::{
     AuditReport, CacheCleanupReportDto, DiffReport, DoctorReport, IndexReport, RenderOptions, Report, ShowReport,
 };
-use lean_dup_search::{AuditRequest, run_audit, run_diff, run_show};
+use lean_dup_search::{AuditRequest, BaselineSnapshot, load_last_audit_snapshot, run_audit, run_diff, run_show};
 use lean_dup_worker::{WorkerClient, WorkerVersion};
 
 use crate::error::{AppError, Result};
@@ -34,7 +34,9 @@ struct Foundation {
 }
 
 pub fn run(cli: Cli) -> Result<Outcome> {
-    let mut reporter = Reporter::new_live(cli.progress, cli.profile);
+    let progress = !cli.no_progress
+        && (cli.progress || std::io::IsTerminal::is_terminal(&std::io::stderr()));
+    let mut reporter = Reporter::new_live(progress, cli.profile);
     let command = cli.command.ok_or_else(|| AppError::Cli {
         message: "missing command; run `lean-dup --help`".to_owned(),
     })?;
@@ -47,6 +49,7 @@ pub fn run(cli: Cli) -> Result<Outcome> {
         }
         Command::CacheCleanup(args) => {
             let format = args.format;
+            render_options.verbose = args.verbose;
             (Report::CacheCleanup(cache_cleanup(args, &mut reporter)?), format, None)
         }
         Command::Index(args) => {
@@ -60,6 +63,7 @@ pub fn run(cli: Cli) -> Result<Outcome> {
         Command::Audit(args) => {
             let format = args.format;
             render_options.verbose = render_options.verbose || args.verbose;
+            render_options.audit_limit = args.limit;
             (Report::Audit(Box::new(audit(args, &mut reporter)?)), format, None)
         }
         Command::Eval(args) => {
@@ -77,10 +81,12 @@ pub fn run(cli: Cli) -> Result<Outcome> {
         }
         Command::Show(args) => {
             let format = args.format;
+            render_options.verbose = args.verbose;
             (Report::Show(Box::new(show(args, &mut reporter)?)), format, None)
         }
         Command::Diff(args) => {
             let format = args.format;
+            render_options.verbose = args.verbose;
             (Report::Diff(diff(args, &mut reporter)?), format, None)
         }
         Command::External(_) => {
@@ -135,11 +141,24 @@ fn doctor(args: DoctorArgs, reporter: &mut Reporter) -> Result<DoctorReport> {
     } else {
         Vec::new()
     };
+    let cache_has_problems = cache_diagnostics.labels.iter().any(|label| {
+        // `missing` is the natural state of a fresh or never-audited cache;
+        // only flag genuinely broken pointers or damaged entries.
+        matches!(label.latest.status.as_str(), "corrupt-pointer" | "target-missing")
+            || label.entries.iter().any(|entry| {
+                (entry.active_latest || entry.expected_current)
+                    && matches!(entry.status.as_str(), "corrupt" | "stale")
+            })
+    });
 
     Ok(DoctorReport {
         report_schema_version: lean_dup_report::REPORT_SCHEMA_VERSION,
         release: crate::release::identity(),
-        status: if missing_oleans.is_empty() { "ok" } else { "warning" },
+        status: if missing_oleans.is_empty() && !cache_has_problems {
+            "ok"
+        } else {
+            "warning"
+        },
         requested_workspace: foundation.workspace.requested_root,
         lake_root: foundation.workspace.root,
         lakefile: foundation.workspace.lakefile,
@@ -320,12 +339,57 @@ fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<lean_dup_report::Eval
 
 fn show(args: ShowArgs, reporter: &mut Reporter) -> Result<ShowReport> {
     let requested_group = args.group.clone();
+    let workspace = args.workspace.clone();
+    let module_root = args.module_root.clone();
+    if !args.no_cache
+        && let Some(snapshot) = load_snapshot_for(workspace.clone(), module_root.clone(), reporter)
+        && !snapshot_contains_group(&snapshot, &requested_group)
+    {
+        return Err(unknown_group_error(&requested_group, &snapshot));
+    }
     let output = run_show(
-        audit_request(default_audit_args(args.workspace, args.module_root)),
+        audit_request(default_audit_args(workspace, module_root)),
         &requested_group,
         reporter,
     )?;
     Ok(lean_dup_report::show_report(output))
+}
+
+/// Resolve the workspace just enough to look up the cache root and fingerprint,
+/// then load the persisted "last audit" snapshot for that workspace if one
+/// exists. Returns `None` on any error so callers fall through to the slow
+/// audit pipeline (which produces its own diagnostics).
+fn load_snapshot_for(
+    workspace: Option<PathBuf>,
+    module_root: Option<String>,
+    reporter: &mut Reporter,
+) -> Option<BaselineSnapshot> {
+    let resolved = resolve(
+        WorkspaceRequest {
+            requested_root: workspace_or_cwd(workspace),
+            module_root,
+        },
+        reporter,
+    )
+    .ok()?;
+    let cache = lean_dup_index::resolve_cache(&resolved).ok()?;
+    load_last_audit_snapshot(&cache.root, &cache.fingerprint)
+}
+
+fn snapshot_contains_group(snapshot: &BaselineSnapshot, requested: &str) -> bool {
+    snapshot.groups.iter().any(|group| {
+        group.id == requested || group.member_ids.iter().any(|member| member == requested)
+    })
+}
+
+fn unknown_group_error(requested: &str, snapshot: &BaselineSnapshot) -> AppError {
+    let ids: Vec<&str> = snapshot.groups.iter().map(|group| group.id.as_str()).collect();
+    let hint = crate::extensions::nearest_match(requested, ids.iter().copied(), 4)
+        .map(|suggestion| format!(" — did you mean `{suggestion}`?"))
+        .unwrap_or_default();
+    AppError::Cli {
+        message: format!("unknown audit group: {requested}{hint}"),
+    }
 }
 
 fn diff(args: DiffArgs, reporter: &mut Reporter) -> Result<DiffReport> {
@@ -422,6 +486,7 @@ fn default_audit_args(workspace: Option<PathBuf>, module_root: Option<String>) -
         save_baseline: None,
         semantic_probes: true,
         verbose: false,
+        limit: None,
         probe_budget: 500,
         probe_policy: crate::cli::CliProbePolicy::Actionable,
         probe_chunk_size: 16,

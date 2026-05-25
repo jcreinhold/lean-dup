@@ -710,6 +710,12 @@ pub struct SourceSpanReport {
     pub file: PathReferenceReport,
     pub start: SourcePointReport,
     pub end: SourcePointReport,
+    /// Resolved absolute path on the current machine. Populated only when the
+    /// caller (currently `show`) has the workspace root in scope. Optional and
+    /// additive on the JSON wire schema; consumers that want stable fingerprints
+    /// keep using `file`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1108,6 +1114,17 @@ pub fn audit_report(output: AuditOutput) -> AuditReport {
     }
 }
 
+/// Serialize a unit-like serde enum (e.g. `CorruptPointer`) to its kebab-case
+/// label (e.g. `corrupt-pointer`) by going through the enum's `Serialize` impl.
+/// Avoids re-deriving on each enum and avoids `format!("{:?}", x)` which
+/// collapses CamelCase into one lowercase word.
+fn kebab_case_label<T: Serialize>(value: &T) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|v| v.as_str().map(|s| s.to_owned()))
+        .unwrap_or_default()
+}
+
 pub fn cache_diagnostics_report(diagnostics: CacheDiagnostics) -> CacheDiagnosticsReport {
     CacheDiagnosticsReport {
         cache_root: diagnostics.cache_root,
@@ -1121,7 +1138,7 @@ pub fn cache_diagnostics_report(diagnostics: CacheDiagnostics) -> CacheDiagnosti
                 disk_bytes: label.disk_bytes,
                 latest: CacheLatestDiagnosticsReport {
                     pointer_path: label.latest.pointer_path,
-                    status: format!("{:?}", label.latest.status).to_ascii_lowercase(),
+                    status: kebab_case_label(&label.latest.status),
                     index_dir: label.latest.index_dir,
                 },
                 entries: label
@@ -1130,14 +1147,14 @@ pub fn cache_diagnostics_report(diagnostics: CacheDiagnostics) -> CacheDiagnosti
                     .map(|entry| CacheEntryDiagnosticsReport {
                         index_dir: entry.index_dir,
                         index_path: entry.index_path,
-                        status: format!("{:?}", entry.status).to_ascii_lowercase(),
+                        status: kebab_case_label(&entry.status),
                         active_latest: entry.active_latest,
                         expected_current: entry.expected_current,
                         schema_version: entry
                             .schema_version
                             .as_deref()
                             .map(lean_dup_index::diagnostic_index_schema_version),
-                        provenance_kind: format!("{:?}", entry.provenance_kind).to_ascii_lowercase(),
+                        provenance_kind: kebab_case_label(&entry.provenance_kind),
                         declaration_count: entry.declaration_count,
                         disk_bytes: entry.disk_bytes,
                         reasons: entry.reasons,
@@ -1181,7 +1198,7 @@ fn cache_cleanup_entry_report(entry: lean_dup_index::CacheCleanupEntry) -> Cache
 
 pub fn show_report(output: ShowOutput) -> ShowReport {
     let explanation = crate::report_contract::explain_group(&output.group);
-    let group = group_report(&output.group);
+    let group = group_report_with_lake(&output.group, Some(&output.audit.lake_root));
     ShowReport {
         status: "ok",
         requested_workspace: output.audit.requested_workspace,
@@ -1273,16 +1290,28 @@ fn review_report(review: &AuditReview) -> ReviewReport {
 }
 
 fn group_report(group: &AuditGroup) -> ReviewGroupReport {
+    group_report_with_lake(group, None)
+}
+
+/// Project an `AuditGroup` to a wire-shaped report. When `lake_root` is
+/// supplied, each member span gains a resolved `local_path`; otherwise it
+/// stays `None`. Only `show` passes the lake root through — `audit` keeps
+/// fingerprint-only paths so the JSON wire format stays portable.
+fn group_report_with_lake(group: &AuditGroup, lake_root: Option<&Path>) -> ReviewGroupReport {
     ReviewGroupReport {
         family_id: group.family_id.clone(),
         id: group.id.clone(),
         pair_id: group.pair_id.clone(),
         pair_count: group.pair_count,
         pair_ids: group.pair_ids.clone(),
-        pair_evidence: group.pair_evidence.iter().map(pair_evidence_report).collect(),
+        pair_evidence: group
+            .pair_evidence
+            .iter()
+            .map(|pair| pair_evidence_report(pair, lake_root))
+            .collect(),
         pair_evidence_truncated: group.pair_evidence_truncated,
         relation: group.relation.clone(),
-        members: group.members.iter().map(member_report).collect(),
+        members: group.members.iter().map(|m| member_report(m, lake_root)).collect(),
         evidence: group.evidence.iter().map(evidence_report).collect(),
         signals: group.signals.clone(),
         blockers: group.blockers.clone(),
@@ -1299,12 +1328,15 @@ fn group_report(group: &AuditGroup) -> ReviewGroupReport {
     }
 }
 
-fn pair_evidence_report(pair: &lean_dup_search::AuditPairEvidence) -> ReviewPairEvidenceReport {
+fn pair_evidence_report(
+    pair: &lean_dup_search::AuditPairEvidence,
+    lake_root: Option<&Path>,
+) -> ReviewPairEvidenceReport {
     ReviewPairEvidenceReport {
         id: pair.id.clone(),
         pair_id: pair.pair_id.clone(),
         relation: pair.relation.clone(),
-        members: pair.members.iter().map(member_report).collect(),
+        members: pair.members.iter().map(|m| member_report(m, lake_root)).collect(),
         evidence: pair.evidence.iter().map(evidence_report).collect(),
         signals: pair.signals.clone(),
         blockers: pair.blockers.clone(),
@@ -1319,7 +1351,7 @@ fn pair_evidence_report(pair: &lean_dup_search::AuditPairEvidence) -> ReviewPair
     }
 }
 
-fn member_report(member: &AuditMember) -> ReviewMemberReport {
+fn member_report(member: &AuditMember, lake_root: Option<&Path>) -> ReviewMemberReport {
     ReviewMemberReport {
         declaration_id: member.declaration_id.clone(),
         origin: member.origin.clone(),
@@ -1338,6 +1370,7 @@ fn member_report(member: &AuditMember) -> ReviewMemberReport {
                 line: span.end.line as usize,
                 column: span.end.column as usize,
             },
+            local_path: lake_root.map(|root| root.join(&span.file).to_string_lossy().into_owned()),
         }),
         status_flags: member.status_flags.clone(),
     }

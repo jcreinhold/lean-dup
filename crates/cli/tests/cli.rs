@@ -428,8 +428,8 @@ fn hidden_cache_cleanup_dry_run_and_execute_preserve_latest_entry() {
         .args(["cache-cleanup", "--execute"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("executed: true"))
-        .stdout(predicate::str::contains("removable entries: 1"));
+        .stdout(predicate::str::contains("removed"))
+        .stdout(predicate::str::contains("1 entries to remove"));
 
     assert!(active.exists());
     assert!(!stale.exists());
@@ -836,8 +836,7 @@ fn audit_json_keeps_progress_and_profile_off_stdout() {
         .args(["--format", "json"])
         .assert()
         .success()
-        .stderr(predicate::str::contains("["))
-        .stderr(predicate::str::contains("workspace"))
+        .stderr(predicate::str::contains("progress.workspace"))
         .stderr(predicate::str::contains("profile.workspace.resolve"));
 
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
@@ -1311,7 +1310,7 @@ fn show_renders_evidence_blockers_probe_hint_and_callers_for_group() {
         .args(["--module", "Tiny", "--group", group_id])
         .assert()
         .success()
-        .stdout(predicate::str::contains("command: show"))
+        .stdout(predicate::str::contains("lean-dup show — status:"))
         .stdout(predicate::str::contains(format!("group: {group_id}")))
         .stdout(predicate::str::contains("evidence:"))
         .stdout(predicate::str::contains("explanation:"))
@@ -1327,7 +1326,52 @@ fn show_renders_evidence_blockers_probe_hint_and_callers_for_group() {
     assert!(!stdout.contains("feature_row"));
     assert!(!stdout.contains("declaration_row"));
     assert!(!stdout.contains("probe_result"));
-    assert!(!stdout.contains(tiny.to_string_lossy().as_ref()));
+    assert!(
+        stdout.contains(tiny.to_string_lossy().as_ref()),
+        "show should print absolute member paths so they can be opened directly: {stdout}"
+    );
+    assert!(stdout.contains(".lean:"), "show member lines should end with `.lean:<line>`");
+}
+
+#[test]
+fn show_fast_fails_on_unknown_group_after_recent_audit() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let root = repo_root();
+    let tiny = root.join("tests/fixtures/tiny");
+    let audit = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&tiny)
+        .args([
+            "--module",
+            "Tiny",
+            "--no-semantic-probes",
+            "--format",
+            "json",
+            "--low-priority",
+        ])
+        .assert()
+        .success();
+    let payload: Value = serde_json::from_str(&String::from_utf8(audit.get_output().stdout.clone()).unwrap()).unwrap();
+    let real_id = payload["visible_groups"][0]["id"].as_str().unwrap().to_owned();
+    let suggestion_target = real_id
+        .chars()
+        .enumerate()
+        .map(|(i, ch)| if i == real_id.len() - 1 { 'x' } else { ch })
+        .collect::<String>();
+
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["show", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--group", &suggestion_target])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unknown audit group"))
+        .stderr(predicate::str::contains(&real_id));
 }
 
 #[test]
@@ -1366,7 +1410,7 @@ fn baseline_diff_reports_appeared_disappeared_and_changed_groups() {
         .args(["--module", "Tiny", "--baseline", "before"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("command: diff"))
+        .stdout(predicate::str::contains("lean-dup diff — status:"))
         .stdout(predicate::str::contains("appeared: 1"))
         .stdout(predicate::str::contains("disappeared: 1"))
         .stdout(predicate::str::contains("changed: 1"));
