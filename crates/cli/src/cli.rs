@@ -228,6 +228,10 @@ pub struct AuditArgs {
     #[arg(long = "no-semantic-probes", action = clap::ArgAction::SetFalse)]
     pub semantic_probes: bool,
 
+    /// Print full provenance, semantic-probe stats, and per-group detail in addition to the summary.
+    #[arg(long)]
+    pub verbose: bool,
+
     #[arg(long = "probe-budget", hide = true, default_value_t = 500)]
     pub probe_budget: usize,
 

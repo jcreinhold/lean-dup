@@ -1019,6 +1019,7 @@ fn audit_text_reports_queue_probe_and_provenance_explanations() {
     let cache = tempfile::TempDir::new().unwrap();
     let tiny = repo_root().join("tests/fixtures/tiny");
 
+    // Default (triaged) view: header + groups table; no provenance section.
     let assert = Command::cargo_bin("lean-dup")
         .unwrap()
         .env("LEAN_DUP_CACHE_DIR", cache.path())
@@ -1028,16 +1029,31 @@ fn audit_text_reports_queue_probe_and_provenance_explanations() {
         .assert()
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
-
-    assert!(stdout.contains("report schema: lean-dup.report.v3"));
-    assert!(stdout.contains("visible families emitted:"));
-    assert!(stdout.contains("visible queue:"));
-    assert!(stdout.contains("hidden groups: total="));
-    assert!(stdout.contains("probe summary: semantic probes disabled"));
-    assert!(stdout.contains("comparison provenance: no comparison indexes"));
+    assert!(stdout.contains("lean-dup audit — status:"));
+    assert!(stdout.contains("review queue:"));
+    assert!(!stdout.contains("report schema:"), "verbose-only line in default output:\n{stdout}");
+    assert!(!stdout.contains("probe summary:"), "verbose-only line in default output:\n{stdout}");
+    assert!(!stdout.contains("comparison provenance:"), "verbose-only line in default output:\n{stdout}");
     assert!(!stdout.contains("feature_row"));
     assert!(!stdout.contains("declaration_row"));
     assert!(!stdout.contains("probe_result"));
+
+    // --verbose: full provenance + per-group detail (strict superset of default).
+    let verbose = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--no-semantic-probes", "--verbose"])
+        .assert()
+        .success();
+    let verbose_stdout = String::from_utf8(verbose.get_output().stdout.clone()).unwrap();
+    assert!(verbose_stdout.contains("verbose detail:"));
+    assert!(verbose_stdout.contains("report schema: lean-dup.report.v3"));
+    assert!(verbose_stdout.contains("visible queue:"));
+    assert!(verbose_stdout.contains("hidden groups: total="));
+    assert!(verbose_stdout.contains("probe summary: semantic probes disabled"));
+    assert!(verbose_stdout.contains("comparison provenance: no comparison indexes"));
 }
 
 #[test]
@@ -1208,7 +1224,7 @@ fn audit_default_text_hides_noise_blockers() {
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
 
-    assert!(stdout.contains("command: audit"));
+    assert!(stdout.contains("lean-dup audit — status:"));
     assert!(!stdout.contains("generated-declaration"));
     assert!(!stdout.contains("broad-head-only"));
 }

@@ -59,6 +59,7 @@ pub fn run(cli: Cli) -> Result<Outcome> {
         }
         Command::Audit(args) => {
             let format = args.format;
+            render_options.verbose = render_options.verbose || args.verbose;
             (Report::Audit(Box::new(audit(args, &mut reporter)?)), format, None)
         }
         Command::Eval(args) => {
@@ -422,6 +423,7 @@ fn default_audit_args(workspace: Option<PathBuf>, module_root: Option<String>) -
         diagnostics: false,
         save_baseline: None,
         semantic_probes: true,
+        verbose: false,
         probe_budget: 500,
         probe_policy: crate::cli::CliProbePolicy::Actionable,
         probe_chunk_size: 16,

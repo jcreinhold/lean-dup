@@ -26,7 +26,7 @@ pub fn render_text_with(report: &Report, options: RenderOptions) -> String {
         Report::IndexMathlib(report) => render_index("index-mathlib", report),
         Report::Show(report) => render_show(report),
         Report::Diff(report) => render_diff(report),
-        Report::Audit(report) => render_audit(report),
+        Report::Audit(report) => render_audit(report, options),
         Report::Eval(report) => render_eval(report),
         Report::Perf(report) => render_perf(report),
     }
@@ -493,118 +493,163 @@ fn render_index(command: &str, report: &IndexReport) -> String {
     lines.join("\n")
 }
 
-fn render_audit(report: &AuditReport) -> String {
-    let mut lines = vec![
-        "command: audit".to_owned(),
-        format!("report schema: {}", report.report_schema_version),
-        format!("status: {}", report.status),
-        format!(
-            "requested workspace: {}",
-            path_diagnostic_label(&report.workspace.requested_workspace)
-        ),
-        format!(
-            "resolved Lake root: {}",
-            path_diagnostic_label(&report.workspace.lake_root)
-        ),
-        format!("selected roots: {}", report.workspace.selected_roots.join(", ")),
-        format!("source files: {}", report.workspace.source_count),
-        format!("cache root: {}", cache_root_diagnostic_label(&report.cache.root)),
-        format!("cache fingerprint: {}", report.cache.fingerprint),
-        format!("include private: {}", report.options.include_private),
-        format!("compare mathlib: {}", report.options.compare_mathlib),
-        format!(
-            "visibility: private={} low-priority={} diagnostics={}",
+fn render_audit(report: &AuditReport, options: RenderOptions) -> String {
+    let mut lines = Vec::new();
+
+    // Section A — header.
+    lines.push(format!("lean-dup audit — status: {}", report.status));
+    lines.push(format!(
+        "workspace: {}    selected roots: {}",
+        path_diagnostic_label(&report.workspace.requested_workspace),
+        if report.workspace.selected_roots.is_empty() {
+            "(none)".to_owned()
+        } else {
+            report.workspace.selected_roots.join(", ")
+        },
+    ));
+    let truncated = if report.visible_groups_truncated { " (truncated)" } else { "" };
+    lines.push(format!(
+        "review queue: {} visible families, top {} emitted{}    suppressed: {}",
+        report.visible_group_count, report.visible_groups_emitted, truncated, report.review.suppressed_count,
+    ));
+    if let Some(path) = &report.saved_baseline {
+        lines.push(format!("saved baseline: {}", path.display()));
+    }
+
+    // Section B — groups table.
+    lines.push(String::new());
+    if report.visible_groups.is_empty() {
+        lines.push(format!("no review-priority duplicates: {}", report.explanations.visible_queue.reason));
+    } else {
+        lines.push("groups:".to_owned());
+        let rows: Vec<GroupRow> = report.visible_groups.iter().take(20).map(GroupRow::from_group).collect();
+        let prio_w = rows.iter().map(|r| r.priority.len()).max().unwrap_or(0).max("priority".len());
+        let action_w = rows.iter().map(|r| r.action.len()).max().unwrap_or(0).max("action".len());
+        let relation_w = rows.iter().map(|r| r.relation.len()).max().unwrap_or(0).max("relation".len());
+        let id_w = rows.iter().map(|r| r.id.len()).max().unwrap_or(0).max("id".len());
+        lines.push(format!(
+            "  {:<prio_w$}  {:<action_w$}  {:<relation_w$}  {:<id_w$}  {}",
+            "priority", "action", "relation", "id", "target",
+        ));
+        for row in &rows {
+            lines.push(format!(
+                "  {:<prio_w$}  {:<action_w$}  {:<relation_w$}  {:<id_w$}  {}",
+                row.priority, row.action, row.relation, row.id, row.target,
+            ));
+        }
+        lines.push(String::new());
+        lines.push("run `lean-dup show --group <id>` for evidence on one group.".to_owned());
+    }
+
+    // Section C — verbose dump (provenance, semantic probes, hidden groups, queue counts, per-group detail).
+    if options.verbose {
+        lines.push(String::new());
+        lines.push("verbose detail:".to_owned());
+        lines.push(format!("  report schema: {}", report.report_schema_version));
+        lines.push(format!(
+            "  resolved Lake root: {}",
+            path_diagnostic_label(&report.workspace.lake_root),
+        ));
+        lines.push(format!("  source files: {}", report.workspace.source_count));
+        lines.push(format!("  cache root: {}", cache_root_diagnostic_label(&report.cache.root)));
+        lines.push(format!("  cache fingerprint: {}", report.cache.fingerprint));
+        lines.push(format!("  include private: {}", report.options.include_private));
+        lines.push(format!("  compare mathlib: {}", report.options.compare_mathlib));
+        lines.push(format!(
+            "  visibility: private={} low-priority={} diagnostics={}",
             report.options.visibility.include_private,
             report.options.visibility.include_low_priority,
-            report.options.visibility.diagnostics
-        ),
-        format!("candidates: {}", report.retrieval.candidate_count),
-        format!(
-            "comparison provenance: {}",
-            report.explanations.comparison_provenance.summary
-        ),
-        format!(
-            "semantic probes: planned={} cached={} worker={} verified={} rejected={} unavailable={}",
+            report.options.visibility.diagnostics,
+        ));
+        lines.push(format!("  candidates: {}", report.retrieval.candidate_count));
+        lines.push(format!(
+            "  comparison provenance: {}",
+            report.explanations.comparison_provenance.summary,
+        ));
+        lines.push(format!(
+            "  semantic probes: planned={} cached={} worker={} verified={} rejected={} unavailable={}",
             report.semantic_verification.planned_pairs,
             report.semantic_verification.cached_hits,
             report.semantic_verification.worker_pairs,
             report.semantic_verification.verified_results,
             report.semantic_verification.rejected_results,
-            report.semantic_verification.unavailable_results
-        ),
-        format!(
-            "semantic reranking: {}",
-            report.semantic_verification.semantic_reranking.version
-        ),
-        format!("review pair groups: {}", report.review.group_count),
-        format!("visible families: {}", report.visible_group_count),
-        format!(
-            "visible families emitted: {} / {}{}",
-            report.visible_groups_emitted,
-            report.visible_group_limit,
-            if report.visible_groups_truncated {
-                " (truncated)"
-            } else {
-                ""
-            }
-        ),
-        format!("visible queue: {}", report.explanations.visible_queue.reason),
-        format!(
-            "hidden groups: total={} visibility/noise={} generated={} unverified-proof-grade={} unavailable-probe={} other={}",
+            report.semantic_verification.unavailable_results,
+        ));
+        lines.push(format!(
+            "  semantic reranking: {}",
+            report.semantic_verification.semantic_reranking.version,
+        ));
+        lines.push(format!("  review pair groups: {}", report.review.group_count));
+        lines.push(format!("  visible queue: {}", report.explanations.visible_queue.reason));
+        lines.push(format!(
+            "  hidden groups: total={} visibility/noise={} generated={} unverified-proof-grade={} unavailable-probe={} other={}",
             report.explanations.hidden_groups.total,
             report.explanations.hidden_groups.visibility_or_noise,
             report.explanations.hidden_groups.generated,
             report.explanations.hidden_groups.unverified_proof_grade,
             report.explanations.hidden_groups.unavailable_probe,
-            report.explanations.hidden_groups.other_blockers
-        ),
-        format!("probe summary: {}", report.explanations.semantic_probes.summary),
-        format!(
-            "queue counts: cleanup={} with-private={} with-low-priority={} diagnostics={}",
+            report.explanations.hidden_groups.other_blockers,
+        ));
+        lines.push(format!("  probe summary: {}", report.explanations.semantic_probes.summary));
+        lines.push(format!(
+            "  queue counts: cleanup={} with-private={} with-low-priority={} diagnostics={}",
             report.queue_counts.cleanup,
             report.queue_counts.with_private,
             report.queue_counts.with_low_priority,
-            report.queue_counts.diagnostics
-        ),
-        format!("suppressed groups: {}", report.review.suppressed_count),
-        format!("message: {}", report.message),
-    ];
-    if let Some(path) = &report.saved_baseline {
-        lines.push(format!("saved baseline: {}", path.display()));
-    }
-    for group in report.visible_groups.iter().take(20) {
-        let target = group
-            .target_decl
-            .as_deref()
-            .map(|target| format!(" -> {target}"))
-            .unwrap_or_default();
-        lines.push(format!(
-            "{}: {} {} {}{}",
-            group.id, group.review_priority, group.recommended_action, group.relation, target
+            report.queue_counts.diagnostics,
         ));
-        if group.pair_count > 1 {
+        lines.push(format!("  message: {}", report.message));
+        for group in report.visible_groups.iter().take(20) {
+            let target = group
+                .target_decl
+                .as_deref()
+                .map(|target| format!(" -> {target}"))
+                .unwrap_or_default();
             lines.push(format!(
-                "  family: {} pairs{}",
-                group.pair_count,
-                if group.pair_evidence_truncated {
-                    " (summaries truncated)"
-                } else {
-                    ""
-                }
+                "  {}: {} {} {}{}",
+                group.id, group.review_priority, group.recommended_action, group.relation, target,
             ));
+            if group.pair_count > 1 {
+                lines.push(format!(
+                    "    family: {} pairs{}",
+                    group.pair_count,
+                    if group.pair_evidence_truncated { " (summaries truncated)" } else { "" },
+                ));
+            }
+            if let Some(hint) = &group.replacement_hint {
+                lines.push(format!(
+                    "    hint: import={} impact={} callers={} target_module={}",
+                    hint.import_status, hint.caller_impact, hint.caller_count, hint.target_module,
+                ));
+            }
+            if !group.blockers.is_empty() {
+                lines.push(format!("    blockers: {}", group.blockers.join(", ")));
+            }
+            lines.push(format!("    evidence mode: {}", group.evidence_mode));
         }
-        if let Some(hint) = &group.replacement_hint {
-            lines.push(format!(
-                "  hint: import={} impact={} callers={} target_module={}",
-                hint.import_status, hint.caller_impact, hint.caller_count, hint.target_module
-            ));
-        }
-        if !group.blockers.is_empty() {
-            lines.push(format!("  blockers: {}", group.blockers.join(", ")));
-        }
-        lines.push(format!("  evidence mode: {}", group.evidence_mode));
     }
+
     lines.join("\n")
+}
+
+struct GroupRow {
+    priority: String,
+    action: String,
+    relation: String,
+    id: String,
+    target: String,
+}
+
+impl GroupRow {
+    fn from_group(group: &ReviewGroupReport) -> Self {
+        Self {
+            priority: group.review_priority.clone(),
+            action: group.recommended_action.clone(),
+            relation: group.relation.clone(),
+            id: group.id.clone(),
+            target: group.target_decl.clone().unwrap_or_default(),
+        }
+    }
 }
 
 fn push_group_detail(lines: &mut Vec<String>, group: &ReviewGroupReport) {
