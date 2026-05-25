@@ -4,9 +4,10 @@ use lean_dup_diagnostics::perf::{PerfEvent, PerfSummary};
 use lean_dup_eval::EvalOutput;
 use lean_dup_index::{CacheCleanupReport, CacheDiagnostics, CacheStatus, ComparisonEvidenceMode};
 use lean_dup_search::{
-    AuditEvidence, AuditGroup, AuditMember, AuditOutput, AuditProbeSummary, AuditReplacementHint, AuditReview,
-    AuditVisibilityOptions, DiffOutput, SearchBaselineDiff, SearchBaselineGroup, SearchScoringSummary,
-    SearchSemanticObligationFact, SearchSemanticObligationYield, SearchSemanticRerankingSummary, ShowOutput,
+    AuditDetailSnapshot, AuditEvidence, AuditGroup, AuditMember, AuditOutput, AuditProbeSummary,
+    AuditReplacementHint, AuditReview, AuditVisibilityOptions, DiffOutput, SearchBaselineDiff, SearchBaselineGroup,
+    SearchScoringSummary, SearchSemanticObligationFact, SearchSemanticObligationYield, SearchSemanticRerankingSummary,
+    ShowOutput,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1255,6 +1256,25 @@ pub fn show_report(output: ShowOutput) -> ShowReport {
         cache_root: output.audit.cache_root,
         cache_fingerprint: output.audit.cache_fingerprint,
         group,
+        explanation,
+    }
+}
+
+/// Build a `ShowReport` from the persisted audit-detail snapshot and one of
+/// its groups. Used by the `show` fast path so the rendered output matches
+/// the slow path byte-for-byte without re-running the audit pipeline.
+pub fn show_report_from_detail(snapshot: &AuditDetailSnapshot, group: AuditGroup) -> ShowReport {
+    let explanation = crate::report_contract::explain_group(&group);
+    let group_report = group_report_with_lake(&group, Some(&snapshot.lake_root));
+    ShowReport {
+        status: "ok",
+        requested_workspace: snapshot.requested_workspace.clone(),
+        lake_root: snapshot.lake_root.clone(),
+        selected_roots: snapshot.selected_roots.clone(),
+        source_count: snapshot.source_count,
+        cache_root: snapshot.cache_root.clone(),
+        cache_fingerprint: snapshot.workspace_fingerprint.clone(),
+        group: group_report,
         explanation,
     }
 }

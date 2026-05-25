@@ -26,5 +26,5 @@ pub use reports::{
     ReviewEvidenceReport, ReviewGroupReport, ReviewMemberReport, ReviewPairEvidenceReport, ReviewQueueCounts,
     ReviewReport, SemanticVerificationReport, ShowReport, SourcePointReport, SourceReferenceReport, SourceSpanReport,
     WorkerDiagnosticsReport, audit_report, cache_cleanup_report, cache_diagnostics_report, diff_report, eval_report,
-    show_report,
+    show_report, show_report_from_detail,
 };

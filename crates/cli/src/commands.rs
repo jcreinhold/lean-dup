@@ -17,7 +17,7 @@ use lean_dup_report::{
 };
 use lean_dup_search::{
     AuditRequest, BaselineSnapshot, DiffOutput, baseline_name_is_valid, baseline_path, baselines_dir, diff_snapshots,
-    load_last_audit_snapshot, load_named_baseline, run_audit, run_diff, run_show,
+    load_last_audit_detail, load_last_audit_snapshot, load_named_baseline, run_audit, run_diff, run_show,
 };
 use lean_dup_worker::{WorkerClient, WorkerVersion};
 
@@ -389,6 +389,11 @@ fn show(args: ShowArgs, reporter: &mut Reporter) -> Result<ShowReport> {
         },
         None => args.group.clone(),
     };
+    if !args.no_cache
+        && let Some(report) = try_show_from_detail(workspace.clone(), module_root.clone(), &requested_group, reporter)
+    {
+        return Ok(report);
+    }
     match run_show(
         audit_request(default_audit_args(workspace, module_root)),
         &requested_group,
@@ -397,6 +402,30 @@ fn show(args: ShowArgs, reporter: &mut Reporter) -> Result<ShowReport> {
         Ok(output) => Ok(lean_dup_report::show_report(output)),
         Err(error) => Err(decorate_unknown_group(error, &requested_group, snapshot.as_ref())),
     }
+}
+
+/// Try to render `show` from the persisted per-audit detail snapshot, skipping
+/// the full audit pipeline. Returns `None` on any miss (no workspace, no
+/// cache facts, no detail file, schema mismatch, or group not present), so
+/// the caller falls through to the slow path.
+fn try_show_from_detail(
+    workspace: Option<PathBuf>,
+    module_root: Option<String>,
+    requested_group: &str,
+    reporter: &mut Reporter,
+) -> Option<ShowReport> {
+    let resolved = resolve(
+        WorkspaceRequest {
+            requested_root: workspace_or_cwd(workspace),
+            module_root,
+        },
+        reporter,
+    )
+    .ok()?;
+    let cache = lean_dup_index::resolve_cache(&resolved).ok()?;
+    let detail = load_last_audit_detail(&cache.root, &cache.fingerprint)?;
+    let group = detail.resolve(requested_group)?;
+    Some(lean_dup_report::show_report_from_detail(&detail, group))
 }
 
 /// If `run_show` reports the group is unknown but the snapshot we loaded does

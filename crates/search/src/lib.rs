@@ -7,6 +7,7 @@
 use serde::Serialize;
 
 mod audit;
+mod audit_detail;
 mod baseline;
 mod error;
 mod observation;
@@ -21,12 +22,12 @@ mod semantic_verification;
 mod source_refs;
 
 pub use audit::{
-    AuditEvidence, AuditGroup, AuditHiddenGroupCounts, AuditHiddenReason, AuditMember, AuditOutput, AuditPairEvidence,
-    AuditProbeSummary, AuditQueueCounts, AuditQueueSummary, AuditReplacementHint, AuditRequest, AuditRetrievalSummary,
-    AuditReview, AuditReviewDiagnostics, AuditSourceReference, AuditVisibility, AuditVisibilityOptions, BaselineGroup,
-    BaselineSnapshot, DiffOutput, SearchBaselineChange, SearchBaselineDiff, SearchBaselineGroup, ShowOutput,
-    baseline_name_is_valid, baseline_path, baselines_dir, diff_snapshots, load_last_audit_snapshot,
-    load_named_baseline, run_audit, run_diff, run_show,
+    AuditDetailSnapshot, AuditEvidence, AuditGroup, AuditHiddenGroupCounts, AuditHiddenReason, AuditMember,
+    AuditOutput, AuditPairEvidence, AuditProbeSummary, AuditQueueCounts, AuditQueueSummary, AuditReplacementHint,
+    AuditRequest, AuditRetrievalSummary, AuditReview, AuditReviewDiagnostics, AuditSourceReference, AuditVisibility,
+    AuditVisibilityOptions, BaselineGroup, BaselineSnapshot, DiffOutput, SearchBaselineChange, SearchBaselineDiff,
+    SearchBaselineGroup, ShowOutput, baseline_name_is_valid, baseline_path, baselines_dir, diff_snapshots,
+    load_last_audit_detail, load_last_audit_snapshot, load_named_baseline, run_audit, run_diff, run_show,
 };
 pub use error::{Error, Result};
 pub use observation::{

@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub(crate) const SEMANTIC_RERANKING_VERSION: &str = "lean-dup.semantic-reranking.v1";
 
@@ -20,7 +20,7 @@ impl Default for SearchSemanticRerankingSummary {
 }
 
 /// Stable proof-obligation classes used by semantic reranking artifacts.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SearchSemanticObligationKind {
     #[default]
@@ -46,7 +46,7 @@ impl SearchSemanticObligationKind {
 }
 
 /// Result status for one planned semantic obligation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SearchSemanticObligationStatus {
     Planned,
@@ -57,7 +57,7 @@ pub enum SearchSemanticObligationStatus {
 }
 
 /// Stable reason labels for unavailable semantic obligations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SearchSemanticUnavailableReason {
     MissingDeclaration,
@@ -81,7 +81,7 @@ pub struct SearchSemanticObligationYield {
 }
 
 /// Per-pair semantic obligation fact for search-quality datasets and reports.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SearchSemanticObligationFact {
     pub kind: SearchSemanticObligationKind,
     pub status: SearchSemanticObligationStatus,

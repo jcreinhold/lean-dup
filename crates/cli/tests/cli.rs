@@ -1376,6 +1376,73 @@ fn show_fast_fails_on_unknown_group_after_recent_audit() {
 }
 
 #[test]
+fn show_fast_path_returns_under_slow_path_budget_and_matches_slow_path_output() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let root = repo_root();
+    let tiny = root.join("tests/fixtures/tiny");
+
+    // Use the same probe settings on the original audit that `show --no-cache`
+    // will use when it re-runs the pipeline (which always defaults to probes
+    // on). Otherwise the fast path replays a probe-less snapshot while the
+    // slow path generates richer evidence, and the comparison is invalid.
+    let audit = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--format", "json", "--low-priority"])
+        .assert()
+        .success();
+    let payload: Value = serde_json::from_str(&String::from_utf8(audit.get_output().stdout.clone()).unwrap()).unwrap();
+    let group_id = payload["visible_groups"][0]["id"].as_str().unwrap().to_owned();
+
+    // Fast path: snapshot is fresh from the audit above.
+    let fast_start = std::time::Instant::now();
+    let fast = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["show", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--group", &group_id, "--format", "json"])
+        .assert()
+        .success();
+    let fast_elapsed: std::time::Duration = fast_start.elapsed();
+    let fast_json: Value = serde_json::from_str(&String::from_utf8(fast.get_output().stdout.clone()).unwrap()).unwrap();
+
+    // Slow path: --no-cache forces a fresh audit pipeline run.
+    let slow_start = std::time::Instant::now();
+    let slow = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["show", "--workspace"])
+        .arg(&tiny)
+        .args([
+            "--module",
+            "Tiny",
+            "--group",
+            &group_id,
+            "--format",
+            "json",
+            "--no-cache",
+        ])
+        .assert()
+        .success();
+    let slow_elapsed = slow_start.elapsed();
+    let slow_json: Value = serde_json::from_str(&String::from_utf8(slow.get_output().stdout.clone()).unwrap()).unwrap();
+
+    assert_eq!(
+        fast_json, slow_json,
+        "fast-path JSON must match slow-path JSON byte-for-byte"
+    );
+
+    assert!(
+        fast_elapsed < slow_elapsed,
+        "fast path ({fast_elapsed:?}) should beat slow path ({slow_elapsed:?})"
+    );
+}
+
+#[test]
 fn show_resolves_group_by_prefix_and_rejects_short_or_ambiguous() {
     let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();

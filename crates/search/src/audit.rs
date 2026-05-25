@@ -8,11 +8,13 @@ use lean_dup_index::{ComparisonProvenance, ComparisonProvenanceReport};
 use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
 use lean_dup_project::{ResolvedWorkspace, WorkspaceRequest, resolve, resolve_workspace_mathlib};
 use lean_dup_worker::WorkerClient;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::audit_detail;
 use crate::baseline;
 use std::path::Path;
+pub use crate::audit_detail::AuditDetailSnapshot;
 pub use crate::baseline::{BaselineGroup, BaselineSnapshot};
 
 /// Load the most recent persisted audit snapshot for a workspace fingerprint,
@@ -20,6 +22,13 @@ pub use crate::baseline::{BaselineGroup, BaselineSnapshot};
 /// re-running the full audit pipeline.
 pub fn load_last_audit_snapshot(cache_root: &Path, fingerprint: &str) -> Option<BaselineSnapshot> {
     baseline::load_last(cache_root, fingerprint)
+}
+
+/// Load the most recent per-audit detail snapshot for a workspace fingerprint,
+/// if one is on disk and matches the schema and fingerprint. Backs the `show`
+/// fast path.
+pub fn load_last_audit_detail(cache_root: &Path, fingerprint: &str) -> Option<AuditDetailSnapshot> {
+    audit_detail::load_last(cache_root, fingerprint)
 }
 
 /// Load a previously-saved named baseline, returning its on-disk path and
@@ -248,7 +257,7 @@ pub struct AuditReviewDiagnostics {
 }
 
 /// One audit group in the stable search workflow output.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AuditGroup {
     pub family_id: String,
     pub id: String,
@@ -281,7 +290,7 @@ pub struct AuditGroup {
 /// without exposing retrieval rows or forcing users to reconstruct the family
 /// from unbounded pair-shaped findings. `show` may request the full selected
 /// family evidence through the same stable shape.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AuditPairEvidence {
     pub id: String,
     pub pair_id: String,
@@ -300,7 +309,7 @@ pub struct AuditPairEvidence {
     pub replacement_hint: Option<AuditReplacementHint>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuditMember {
     pub declaration_id: String,
     pub origin: String,
@@ -313,7 +322,7 @@ pub struct AuditMember {
     pub status_flags: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AuditEvidence {
     pub kind: String,
     pub role: Option<String>,
@@ -322,7 +331,7 @@ pub struct AuditEvidence {
     pub summary: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuditReplacementHint {
     pub target_decl: String,
     pub target_module: String,
@@ -335,7 +344,7 @@ pub struct AuditReplacementHint {
     pub blockers: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuditSourceReference {
     pub file: PathBuf,
     pub line: usize,
@@ -343,14 +352,15 @@ pub struct AuditSourceReference {
     pub text: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuditVisibility {
     pub visible: bool,
     pub reason: String,
     pub hidden_reason: Option<AuditHiddenReason>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum AuditHiddenReason {
     Generated,
     UnverifiedProofGrade,
@@ -551,6 +561,26 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
             None,
             None,
             format!("could not persist last-snapshot: {error}"),
+        );
+    }
+    let detail_filter = review_filter(request.visibility, request.include_generated);
+    let detail_groups = audit_families(review.groups.iter(), detail_filter, usize::MAX);
+    let detail = audit_detail::build(
+        foundation.cache.fingerprint.clone(),
+        foundation.workspace.requested_root.clone(),
+        foundation.workspace.root.clone(),
+        foundation.workspace.selected_roots.clone(),
+        foundation.workspace.source_files.len(),
+        foundation.cache.root.clone(),
+        detail_groups,
+        Vec::new(),
+    );
+    if let Err(error) = audit_detail::save_last(&foundation.cache.root, &detail) {
+        reporter.event(
+            "audit.detail.last",
+            None,
+            None,
+            format!("could not persist last-audit-detail: {error}"),
         );
     }
     let snapshot_group_count = snapshot.groups.len();
