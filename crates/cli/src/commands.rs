@@ -344,18 +344,51 @@ fn show(args: ShowArgs, reporter: &mut Reporter) -> Result<ShowReport> {
     let requested_group = args.group.clone();
     let workspace = args.workspace.clone();
     let module_root = args.module_root.clone();
-    if !args.no_cache
-        && let Some(snapshot) = load_snapshot_for(workspace.clone(), module_root.clone(), reporter)
-        && !snapshot_contains_group(&snapshot, &requested_group)
+    let snapshot = if args.no_cache {
+        None
+    } else {
+        load_snapshot_for(workspace.clone(), module_root.clone(), reporter)
+    };
+    if let Some(snapshot) = snapshot.as_ref()
+        && !snapshot_contains_group(snapshot, &requested_group)
     {
-        return Err(unknown_group_error(&requested_group, &snapshot));
+        return Err(unknown_group_error(&requested_group, snapshot));
     }
-    let output = run_show(
+    match run_show(
         audit_request(default_audit_args(workspace, module_root)),
         &requested_group,
         reporter,
-    )?;
-    Ok(lean_dup_report::show_report(output))
+    ) {
+        Ok(output) => Ok(lean_dup_report::show_report(output)),
+        Err(error) => Err(decorate_unknown_group(error, &requested_group, snapshot.as_ref())),
+    }
+}
+
+/// If `run_show` reports the group is unknown but the snapshot we loaded does
+/// contain it, the snapshot is stale: source files changed between the last
+/// `audit` and now. Steer the user toward `lean-dup audit` rather than
+/// repeating the bare error.
+fn decorate_unknown_group(
+    error: lean_dup_search::Error,
+    requested: &str,
+    snapshot: Option<&BaselineSnapshot>,
+) -> AppError {
+    let message = error.to_string();
+    if !message.contains("unknown audit group") {
+        return AppError::Search(error);
+    }
+    let Some(snapshot) = snapshot else {
+        return AppError::Search(error);
+    };
+    if !snapshot_contains_group(snapshot, requested) {
+        return AppError::Search(error);
+    }
+    AppError::Cli {
+        message: format!(
+            "{message}\nhelp: this group was in the last audit snapshot but is missing from current findings — \
+             source files may have changed; run `lean-dup audit` again to refresh"
+        ),
+    }
 }
 
 /// Resolve the workspace just enough to look up the cache root and fingerprint,
