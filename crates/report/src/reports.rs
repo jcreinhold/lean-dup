@@ -502,6 +502,10 @@ pub struct AuditReport {
     pub visible_group_limit: usize,
     pub visible_groups_truncated: bool,
     pub saved_baseline: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub saved_baseline_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub saved_baseline_group_count: Option<usize>,
     pub message: &'static str,
 }
 
@@ -1109,7 +1113,9 @@ pub fn audit_report(output: AuditOutput) -> AuditReport {
         visible_groups_emitted,
         visible_group_limit: output.visible_group_limit,
         visible_groups_truncated: output.visible_groups_truncated,
+        saved_baseline_group_count: output.saved_baseline.as_ref().map(|_| output.saved_baseline_group_count),
         saved_baseline: output.saved_baseline,
+        saved_baseline_name: output.saved_baseline_name,
         message: "audit ranking queue generated",
     }
 }

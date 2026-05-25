@@ -96,6 +96,8 @@ pub struct AuditOutput {
     pub visible_group_limit: usize,
     pub visible_groups_truncated: bool,
     pub saved_baseline: Option<PathBuf>,
+    pub saved_baseline_name: Option<String>,
+    pub saved_baseline_group_count: usize,
 }
 
 /// Result of resolving one audit group through the search workflow.
@@ -380,6 +382,8 @@ struct WorkflowOutput {
     semantic_verification: ProbeDiagnostics,
     review: RankedReview,
     saved_baseline: Option<PathBuf>,
+    saved_baseline_name: Option<String>,
+    saved_baseline_group_count: usize,
 }
 
 struct Foundation {
@@ -515,10 +519,13 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
             format!("could not persist last-snapshot: {error}"),
         );
     }
-    let saved_baseline = if let Some(name) = request.save_baseline {
-        Some(baseline::save(&foundation.cache.root, &name, &snapshot)?)
-    } else {
-        None
+    let snapshot_group_count = snapshot.groups.len();
+    let (saved_baseline, saved_baseline_name) = match request.save_baseline {
+        Some(name) => {
+            let path = baseline::save(&foundation.cache.root, &name, &snapshot)?;
+            (Some(path), Some(name))
+        }
+        None => (None, None),
     };
 
     Ok(WorkflowOutput {
@@ -538,6 +545,8 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
         semantic_verification: verification.diagnostics,
         review,
         saved_baseline,
+        saved_baseline_name,
+        saved_baseline_group_count: snapshot_group_count,
     })
 }
 
@@ -657,6 +666,8 @@ fn project_audit_output(workflow: WorkflowOutput) -> AuditOutput {
         visible_group_limit,
         visible_groups_truncated,
         saved_baseline: workflow.saved_baseline,
+        saved_baseline_name: workflow.saved_baseline_name,
+        saved_baseline_group_count: workflow.saved_baseline_group_count,
     }
 }
 

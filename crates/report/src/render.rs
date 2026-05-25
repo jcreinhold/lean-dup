@@ -97,6 +97,15 @@ fn render_perf(report: &PerfReport) -> String {
 fn render_doctor(report: &DoctorReport, options: RenderOptions) -> String {
     let mut lines = Vec::new();
 
+    let reclaimable_bytes: u64 = report
+        .cache
+        .labels
+        .iter()
+        .flat_map(|label| label.entries.iter())
+        .filter(|entry| entry.is_reclaimable())
+        .map(|entry| entry.disk_bytes)
+        .sum();
+
     // Section A — header.
     lines.push(format!("lean-dup doctor — status: {}", report.status));
     lines.push(format!(
@@ -104,11 +113,17 @@ fn render_doctor(report: &DoctorReport, options: RenderOptions) -> String {
         path_diagnostic_label(&report.requested_workspace),
         report.lean_version,
     ));
+    let reclaimable_summary = if reclaimable_bytes > 0 {
+        format!(", ~{} reclaimable", format_bytes(reclaimable_bytes))
+    } else {
+        String::new()
+    };
     lines.push(format!(
-        "cache root: {}    cache: {} labels, {} on disk",
+        "cache root: {}    cache: {} labels, {} on disk{}",
         cache_root_diagnostic_label(&report.cache_root),
         report.cache.labels.len(),
         format_bytes(report.cache.total_disk_bytes),
+        reclaimable_summary,
     ));
     lines.push(format!(
         "release: {} ({}, {})    index schema: {}",
@@ -167,14 +182,6 @@ fn render_doctor(report: &DoctorReport, options: RenderOptions) -> String {
             format_bytes(summary.disk_bytes),
         ));
     }
-    let reclaimable_bytes: u64 = report
-        .cache
-        .labels
-        .iter()
-        .flat_map(|label| label.entries.iter())
-        .filter(|entry| entry.is_reclaimable())
-        .map(|entry| entry.disk_bytes)
-        .sum();
     if reclaimable_bytes > 0 {
         lines.push(format!(
             "totals: {} labels, {} on disk, ~{} reclaimable via `lean-dup cache-cleanup --execute`",
@@ -541,7 +548,12 @@ fn render_audit(report: &AuditReport, options: RenderOptions) -> String {
     let table_limit = options.audit_limit.unwrap_or(20);
     let table_shown = table_limit.min(report.visible_groups.len());
     let limit_hint = if table_shown < report.visible_groups_emitted {
-        format!(" (showing top {table_shown}; pass --limit to widen)")
+        let explicit = options.audit_limit.is_some();
+        if explicit {
+            format!(" (showing top {table_shown} of {}; pass --limit to widen)", report.visible_groups_emitted)
+        } else {
+            format!(" (showing top {table_shown} of {}; pass --limit N to widen, default 20)", report.visible_groups_emitted)
+        }
     } else {
         String::new()
     };
@@ -554,7 +566,10 @@ fn render_audit(report: &AuditReport, options: RenderOptions) -> String {
         report.review.suppressed_count,
     ));
     if let Some(path) = &report.saved_baseline {
-        lines.push(format!("saved baseline: {}", path.display()));
+        let name = report.saved_baseline_name.as_deref().unwrap_or("baseline");
+        let count = report.saved_baseline_group_count.unwrap_or(0);
+        let suffix = if count == 1 { "group" } else { "groups" };
+        lines.push(format!("saved baseline '{name}' ({count} {suffix}) → {}", path.display()));
     }
 
     // Section B — groups table.

@@ -33,7 +33,7 @@ pub enum AppError {
         source: std::io::Error,
     },
 
-    #[error("CLI error: {message}")]
+    #[error("{message}")]
     Cli { message: String },
 
     #[error("could not render JSON output")]
