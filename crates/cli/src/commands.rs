@@ -722,11 +722,14 @@ fn baseline_list(cache_root: PathBuf, common: BaselineCommonArgs, reporter: &mut
         }
     }
     entries.sort_by(|a, b| a.name.cmp(&b.name));
+    let total_before_filter = entries.len();
+    let mut filtered = false;
 
     if !common.all {
         match current_workspace_fingerprint(common.workspace.clone(), reporter) {
             Some(fp) => {
                 entries.retain(|entry| entry.workspace_fingerprint == fp);
+                filtered = true;
             }
             None => {
                 eprintln!(
@@ -742,6 +745,7 @@ fn baseline_list(cache_root: PathBuf, common: BaselineCommonArgs, reporter: &mut
         action: "list",
         baselines: entries,
         deleted: None,
+        total_before_filter: filtered.then_some(total_before_filter),
     })
 }
 
@@ -760,6 +764,7 @@ fn baseline_show(cache_root: PathBuf, name: String) -> Result<BaselineReport> {
         action: "show",
         baselines: vec![summary],
         deleted: None,
+        total_before_filter: None,
     })
 }
 
@@ -783,6 +788,7 @@ fn baseline_delete(cache_root: PathBuf, name: String) -> Result<BaselineReport> 
         action: "delete",
         baselines: Vec::new(),
         deleted: Some(name),
+        total_before_filter: None,
     })
 }
 

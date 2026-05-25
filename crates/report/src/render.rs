@@ -44,7 +44,16 @@ fn render_baseline(report: &BaselineReport, options: RenderOptions) -> String {
     match report.action {
         "list" => {
             if report.baselines.is_empty() {
-                lines.push("(no saved baselines under this cache root)".to_owned());
+                match report.total_before_filter {
+                    Some(total) if total > 0 => {
+                        lines.push(format!(
+                            "(0 of {total} baselines match this workspace; pass --all to see them)"
+                        ));
+                    }
+                    _ => {
+                        lines.push("(no saved baselines under this cache root)".to_owned());
+                    }
+                }
             } else {
                 lines.push(String::new());
                 push_baseline_table(&mut lines, &report.baselines);

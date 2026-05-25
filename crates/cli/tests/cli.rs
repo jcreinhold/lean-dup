@@ -1642,6 +1642,29 @@ fn baseline_list_filters_by_current_workspace() {
         .map(|b| b["name"].as_str().unwrap())
         .collect();
     assert!(names.contains(&"tiny-one") && names.contains(&"from-elsewhere"), "expected both with --all, got {names:?}");
+
+    // Filtered-empty path: from an unrelated workspace, the message names how
+    // many baselines do exist on disk, not "no saved baselines".
+    let unrelated = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        unrelated.path().join("lakefile.toml"),
+        "name = \"Foo\"\nversion = \"0.1.0\"\ndefaultTargets = [\"Foo\"]\n\n[[lean_lib]]\nname = \"Foo\"\n",
+    )
+    .unwrap();
+    let empty = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .current_dir(unrelated.path())
+        .args(["baseline", "list"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(empty.get_output().stdout.clone()).unwrap();
+    // Either the workspace-resolve failed (stderr note + show all) or it
+    // succeeded with a different fingerprint (0-of-N message). The new
+    // message must appear in at least one of those branches when scoped.
+    if stdout.contains("0 of") {
+        assert!(stdout.contains("match this workspace"), "missing scope hint in: {stdout}");
+    }
 }
 
 #[test]

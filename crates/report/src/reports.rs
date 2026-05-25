@@ -40,6 +40,11 @@ pub struct BaselineReport {
     /// Populated by `delete` (the removed baseline name).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deleted: Option<String>,
+    /// For `list`: total entries on disk before any workspace-scope filter
+    /// removed them. Lets the renderer distinguish "no baselines exist" from
+    /// "0 of N match this workspace".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_before_filter: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
