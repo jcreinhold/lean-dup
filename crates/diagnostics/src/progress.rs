@@ -1,6 +1,7 @@
 use std::io::{IsTerminal, Write, stderr};
 use std::time::{Duration, Instant};
 
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
@@ -27,15 +28,16 @@ pub struct Reporter {
     started: Instant,
     events: Vec<ProgressEvent>,
     timings: Vec<ProfileTiming>,
-    live_state: LiveProgressState,
+    live: Option<LivePhase>,
 }
 
-#[derive(Debug, Default)]
-struct LiveProgressState {
-    active: bool,
-    last_rendered_at: Option<Instant>,
-    last_key: Option<&'static str>,
-    last_bucket: Option<u64>,
+/// Indicatif bar for the phase currently being reported, plus the friendly
+/// key it was started under. Bars are scoped to a phase: when the key
+/// changes we finish the old bar and spawn a fresh one.
+#[derive(Debug)]
+struct LivePhase {
+    bar: ProgressBar,
+    key: &'static str,
 }
 
 impl Reporter {
@@ -48,7 +50,7 @@ impl Reporter {
             started: Instant::now(),
             events: Vec::new(),
             timings: Vec::new(),
-            live_state: LiveProgressState::default(),
+            live: None,
         }
     }
 
@@ -112,41 +114,48 @@ impl Reporter {
     }
 
     pub fn finish_live_progress(&mut self) {
-        if self.live_state.active {
-            let _ = writeln!(stderr());
-            self.live_state.active = false;
+        if let Some(phase) = self.live.take() {
+            phase.bar.finish_and_clear();
         }
     }
 
     fn render_live_progress(&mut self, event: &ProgressEvent) {
         let key = progress_key(&event.phase);
-        let bucket = progress_bucket(event);
-        let now = Instant::now();
-        let phase_changed = self.live_state.last_key != Some(key);
-        let bucket_changed = self.live_state.last_bucket != bucket;
-        let finished = matches!((event.current, event.total), (Some(current), Some(total)) if current >= total);
-        let stale = self
-            .live_state
-            .last_rendered_at
-            .is_none_or(|last| now.duration_since(last) >= Duration::from_millis(250));
+        let phase_changed = self.live.as_ref().is_none_or(|live| live.key != key);
 
-        if !phase_changed && !finished && (!bucket_changed || !stale) {
-            return;
+        if phase_changed {
+            // Close out the previous bar before starting a new one.
+            if let Some(prev) = self.live.take() {
+                prev.bar.finish_and_clear();
+            }
+            self.live = Some(LivePhase {
+                bar: new_phase_bar(key, event, self.tty),
+                key,
+            });
+            if !self.tty {
+                // Non-TTY: print one summary line per phase transition.
+                let _ = writeln!(stderr(), "{}", format_progress_event(event));
+            }
         }
 
-        let mut stderr = stderr();
-        if self.tty {
-            let _ = write!(stderr, "\r{}", format_progress_bar(event, key));
-        } else if phase_changed || finished {
-            let _ = writeln!(stderr, "{}", format_progress_event(event));
+        let live = self.live.as_ref().expect("just set");
+        if let Some(total) = event.total {
+            if live.bar.length() != Some(total) {
+                live.bar.set_length(total);
+            }
+        }
+        if let Some(current) = event.current {
+            live.bar.set_position(current);
         } else {
-            return;
+            live.bar.tick();
         }
-        let _ = stderr.flush();
-        self.live_state.active = self.tty;
-        self.live_state.last_rendered_at = Some(now);
-        self.live_state.last_key = Some(key);
-        self.live_state.last_bucket = bucket;
+        live.bar.set_message(event.message.clone());
+
+        let finished = matches!((event.current, event.total), (Some(c), Some(t)) if c >= t);
+        if finished {
+            // Hold the completed state on screen until the next phase replaces it.
+            live.bar.finish_with_message(event.message.clone());
+        }
     }
 }
 
@@ -154,6 +163,37 @@ impl Drop for Reporter {
     fn drop(&mut self) {
         self.finish_live_progress();
     }
+}
+
+fn new_phase_bar(key: &'static str, event: &ProgressEvent, tty: bool) -> ProgressBar {
+    let bar = if let Some(total) = event.total {
+        ProgressBar::new(total)
+    } else {
+        ProgressBar::new_spinner()
+    };
+    let target = if tty {
+        ProgressDrawTarget::stderr_with_hz(8)
+    } else {
+        ProgressDrawTarget::hidden()
+    };
+    bar.set_draw_target(target);
+    bar.set_prefix(key);
+    bar.set_style(if event.total.is_some() { bar_style() } else { spinner_style() });
+    bar.set_message(event.message.clone());
+    bar
+}
+
+fn bar_style() -> ProgressStyle {
+    ProgressStyle::with_template(
+        "{prefix:24} [{bar:28.cyan/blue}] {percent:>3}% {pos}/{len} {msg} ({elapsed})",
+    )
+    .expect("bar template is static and valid")
+    .progress_chars("█▉▊▋▌▍▎▏ ")
+}
+
+fn spinner_style() -> ProgressStyle {
+    ProgressStyle::with_template("{prefix:24} {spinner:.cyan} {msg} ({elapsed})")
+        .expect("spinner template is static and valid")
 }
 
 pub fn format_progress_event(event: &ProgressEvent) -> String {
@@ -194,47 +234,6 @@ fn progress_key(phase: &str) -> &'static str {
     }
 }
 
-fn progress_bucket(event: &ProgressEvent) -> Option<u64> {
-    let (Some(current), Some(total)) = (event.current, event.total) else {
-        return None;
-    };
-    if total == 0 {
-        return Some(0);
-    }
-    Some(current.saturating_mul(1000) / total)
-}
-
-fn format_progress_bar(event: &ProgressEvent, key: &str) -> String {
-    let elapsed = format_elapsed(event.elapsed_ms);
-    let Some(total) = event.total else {
-        return format!(
-            "{key:24} [----------------------------]       {} ({elapsed})",
-            event.message
-        );
-    };
-    let current = event.current.unwrap_or(0).min(total);
-    let width = 28_u64;
-    let filled = current.saturating_mul(width).checked_div(total).unwrap_or(width);
-    let empty = width.saturating_sub(filled);
-    let percent = if total != 0 {
-        (current as f64 / total as f64) * 100.0
-    } else {
-        100.0
-    };
-    format!(
-        "{key:24} [{done}{todo}] {percent:5.1}% {current}/{total} ({elapsed})",
-        done = "#".repeat(filled as usize),
-        todo = "-".repeat(empty as usize),
-    )
-}
-
-fn format_elapsed(elapsed_ms: u128) -> String {
-    let seconds = elapsed_ms / 1000;
-    let minutes = seconds / 60;
-    let seconds = seconds % 60;
-    format!("{minutes:02}:{seconds:02}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::Reporter;
@@ -260,20 +259,10 @@ mod tests {
     }
 
     #[test]
-    fn live_progress_formats_as_bar() {
-        let event = super::ProgressEvent {
-            phase: "worker.lean.index.chunk".to_owned(),
-            current: Some(50),
-            total: Some(100),
-            message: "indexed declarations".to_owned(),
-            elapsed_ms: 65_000,
-        };
-
-        let rendered = super::format_progress_bar(&event, super::progress_key(&event.phase));
-
-        assert!(rendered.contains("mathlib declarations"));
-        assert!(rendered.contains("50.0%"));
-        assert!(rendered.contains("50/100"));
-        assert!(rendered.contains("01:05"));
+    fn progress_key_maps_worker_phases_to_friendly_labels() {
+        assert_eq!(super::progress_key("worker.lean.index.chunk.7"), "mathlib declarations");
+        assert_eq!(super::progress_key("worker.lean.semantic.probe.batch"), "Lean semantics");
+        assert_eq!(super::progress_key("workspace.resolve"), "workspace");
+        assert_eq!(super::progress_key("unrelated.phase"), "progress");
     }
 }
