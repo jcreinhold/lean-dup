@@ -14,7 +14,10 @@ use lean_dup_project::{ResolvedWorkspace, WorkspaceRequest, resolve, resolve_pro
 use lean_dup_report::{
     AuditReport, CacheCleanupReportDto, DiffReport, DoctorReport, IndexReport, RenderOptions, Report, ShowReport,
 };
-use lean_dup_search::{AuditRequest, BaselineSnapshot, load_last_audit_snapshot, run_audit, run_diff, run_show};
+use lean_dup_search::{
+    AuditRequest, BaselineSnapshot, DiffOutput, diff_snapshots, load_last_audit_snapshot, load_named_baseline,
+    run_audit, run_diff, run_show,
+};
 use lean_dup_worker::{WorkerClient, WorkerVersion};
 
 use crate::error::{AppError, Result};
@@ -394,12 +397,47 @@ fn unknown_group_error(requested: &str, snapshot: &BaselineSnapshot) -> AppError
 
 fn diff(args: DiffArgs, reporter: &mut Reporter) -> Result<DiffReport> {
     let baseline_name = args.baseline.clone();
+    if !args.no_cache
+        && let Some(output) = try_diff_from_snapshot(&args, &baseline_name, reporter)
+    {
+        return Ok(lean_dup_report::diff_report(output));
+    }
     let output = run_diff(
         audit_request(default_audit_args(args.workspace, args.module_root)),
         baseline_name,
         reporter,
     )?;
     Ok(lean_dup_report::diff_report(output))
+}
+
+/// Build a `DiffOutput` from on-disk snapshots without running the audit
+/// pipeline. Returns `None` (so the caller falls through to the slow path)
+/// if any of the inputs is missing, unparseable, or fingerprint-mismatched.
+fn try_diff_from_snapshot(args: &DiffArgs, baseline_name: &str, reporter: &mut Reporter) -> Option<DiffOutput> {
+    let resolved = resolve(
+        WorkspaceRequest {
+            requested_root: workspace_or_cwd(args.workspace.clone()),
+            module_root: args.module_root.clone(),
+        },
+        reporter,
+    )
+    .ok()?;
+    let cache = lean_dup_index::resolve_cache(&resolved).ok()?;
+    let current = load_last_audit_snapshot(&cache.root, &cache.fingerprint)?;
+    if current.workspace_fingerprint != cache.fingerprint {
+        return None;
+    }
+    let (baseline_path, baseline) = load_named_baseline(&cache.root, baseline_name).ok()?;
+    let diff = diff_snapshots(baseline_name.to_owned(), baseline_path, baseline, current);
+    Some(DiffOutput {
+        requested_workspace: resolved.requested_root,
+        lake_root: resolved.root,
+        selected_roots: resolved.selected_roots,
+        source_count: resolved.source_files.len(),
+        cache_root: cache.root,
+        cache_fingerprint: cache.fingerprint,
+        diff,
+    })
 }
 
 fn foundation(requested_root: PathBuf, module_root: Option<String>, reporter: &mut Reporter) -> Result<Foundation> {

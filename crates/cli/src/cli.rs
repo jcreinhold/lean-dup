@@ -410,6 +410,10 @@ pub struct DiffArgs {
     /// Include workspace and cache provenance lines in the text output.
     #[arg(long)]
     pub verbose: bool,
+
+    /// Skip the last-audit snapshot fast-path. Always re-run the full audit.
+    #[arg(long = "no-cache")]
+    pub no_cache: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, Serialize, PartialEq, Eq)]

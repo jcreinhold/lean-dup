@@ -1417,6 +1417,52 @@ fn baseline_diff_reports_appeared_disappeared_and_changed_groups() {
 }
 
 #[test]
+fn diff_fast_path_skips_audit_pipeline_when_snapshot_is_fresh() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let root = repo_root();
+    let tiny = root.join("tests/fixtures/tiny");
+
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--no-semantic-probes", "--format", "json", "--save-baseline", "fp"])
+        .assert()
+        .success();
+
+    let fast = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["--progress", "diff", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--baseline", "fp"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("lean-dup diff — status:"));
+    let fast_stderr = String::from_utf8(fast.get_output().stderr.clone()).unwrap();
+    assert!(
+        !fast_stderr.contains("progress.retrieval") && !fast_stderr.contains("progress.semantic"),
+        "fast path should skip audit-pipeline phases; got stderr: {fast_stderr}"
+    );
+
+    let slow = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["--progress", "diff", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--baseline", "fp", "--no-cache"])
+        .assert()
+        .success();
+    let slow_stderr = String::from_utf8(slow.get_output().stderr.clone()).unwrap();
+    assert!(
+        slow_stderr.contains("progress.retrieval") || slow_stderr.contains("progress.index"),
+        "slow path should still emit audit-pipeline phases; got stderr: {slow_stderr}"
+    );
+}
+
+#[test]
 fn index_builds_canonical_sqlite_and_reuses_cache() {
     let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();

@@ -21,6 +21,23 @@ pub use crate::baseline::{BaselineGroup, BaselineSnapshot};
 pub fn load_last_audit_snapshot(cache_root: &Path, fingerprint: &str) -> Option<BaselineSnapshot> {
     baseline::load_last(cache_root, fingerprint)
 }
+
+/// Load a previously-saved named baseline, returning its on-disk path and
+/// the deserialized snapshot.
+pub fn load_named_baseline(cache_root: &Path, name: &str) -> crate::Result<(PathBuf, BaselineSnapshot)> {
+    baseline::load(cache_root, name)
+}
+
+/// Diff two baseline snapshots and project the result to the search-facing
+/// diff DTO (the same shape `run_diff` produces).
+pub fn diff_snapshots(
+    name: String,
+    baseline_path: PathBuf,
+    baseline: BaselineSnapshot,
+    current: BaselineSnapshot,
+) -> SearchBaselineDiff {
+    search_baseline_diff(baseline::diff(name, baseline_path, baseline, current))
+}
 use crate::ranking::{
     ConfidenceTier, RankedGroup, RankedReview, RankingDiagnostics, RankingInput, RankingProfile, ReviewAction,
     ReviewEvidence, ReviewEvidenceMode, ReviewFilter, ReviewMember, ReviewPriority, ReviewRelation, rank_candidates,
