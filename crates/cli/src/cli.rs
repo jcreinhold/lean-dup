@@ -137,6 +137,10 @@ pub struct IndexArgs {
     #[arg(long)]
     pub label: String,
 
+    /// Output format. `text` is human-readable; `json` is the stable wire schema.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub format: OutputFormat,
+
     /// Rebuild the index even if a cached entry would have been reused.
     #[arg(long)]
     pub force: bool,
@@ -155,6 +159,10 @@ pub struct IndexMathlibArgs {
     /// Override the resolved mathlib workspace root (rare; for non-standard layouts).
     #[arg(long)]
     pub mathlib_workspace: Option<PathBuf>,
+
+    /// Output format. `text` is human-readable; `json` is the stable wire schema.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub format: OutputFormat,
 
     /// Rebuild the mathlib index even if a cached entry would have been reused.
     #[arg(long)]
@@ -304,6 +312,10 @@ pub struct ShowArgs {
     #[arg(long = "module")]
     pub module_root: Option<String>,
 
+    /// Output format. `text` is human-readable; `json` is the stable wire schema.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub format: OutputFormat,
+
     /// Group or pair ID. Obtain one from the `lean-dup audit` output table.
     #[arg(long)]
     pub group: String,
@@ -318,6 +330,10 @@ pub struct DiffArgs {
     /// Lean module root inside the workspace (e.g. `Mathlib`).
     #[arg(long = "module")]
     pub module_root: Option<String>,
+
+    /// Output format. `text` is human-readable; `json` is the stable wire schema.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub format: OutputFormat,
 
     /// Name of a previously-saved baseline (see `lean-dup audit --save-baseline`).
     #[arg(long)]

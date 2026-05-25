@@ -49,12 +49,14 @@ pub fn run(cli: Cli) -> Result<Outcome> {
             let format = args.format;
             (Report::CacheCleanup(cache_cleanup(args, &mut reporter)?), format, None)
         }
-        Command::Index(args) => (Report::Index(index(args, &mut reporter)?), OutputFormat::Text, None),
-        Command::IndexMathlib(args) => (
-            Report::IndexMathlib(index_mathlib(args, &mut reporter)?),
-            OutputFormat::Text,
-            None,
-        ),
+        Command::Index(args) => {
+            let format = args.format;
+            (Report::Index(index(args, &mut reporter)?), format, None)
+        }
+        Command::IndexMathlib(args) => {
+            let format = args.format;
+            (Report::IndexMathlib(index_mathlib(args, &mut reporter)?), format, None)
+        }
         Command::Audit(args) => {
             let format = args.format;
             (Report::Audit(Box::new(audit(args, &mut reporter)?)), format, None)
@@ -72,12 +74,14 @@ pub fn run(cli: Cli) -> Result<Outcome> {
             let _format = args.format;
             (Report::Perf(crate::perf::run(args)?), OutputFormat::Json, None)
         }
-        Command::Show(args) => (
-            Report::Show(Box::new(show(args, &mut reporter)?)),
-            OutputFormat::Text,
-            None,
-        ),
-        Command::Diff(args) => (Report::Diff(diff(args, &mut reporter)?), OutputFormat::Text, None),
+        Command::Show(args) => {
+            let format = args.format;
+            (Report::Show(Box::new(show(args, &mut reporter)?)), format, None)
+        }
+        Command::Diff(args) => {
+            let format = args.format;
+            (Report::Diff(diff(args, &mut reporter)?), format, None)
+        }
         Command::External(_) => {
             return Err(AppError::Cli {
                 message: "external command dispatch must happen before built-in command execution".to_owned(),

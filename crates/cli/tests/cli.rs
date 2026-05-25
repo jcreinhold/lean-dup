@@ -1352,6 +1352,106 @@ fn index_builds_canonical_sqlite_and_reuses_cache() {
         .stdout(predicate::str::contains(format!("index path: {index_path}")));
 }
 
+#[test]
+fn index_json_emits_canonical_payload() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let external = repo_root().join("tests/fixtures/external");
+
+    let assert = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["index", "--workspace"])
+        .arg(&external)
+        .args(["--module", "External", "--label", "fixture", "--format", "json"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["command"], "index");
+    assert_eq!(payload["status"], "ok");
+    assert_eq!(payload["label"], "fixture");
+    assert!(payload["declaration_count"].as_u64().is_some());
+}
+
+#[test]
+fn show_json_emits_canonical_payload() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let tiny = repo_root().join("tests/fixtures/tiny");
+
+    let audit = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&tiny)
+        .args([
+            "--module",
+            "Tiny",
+            "--no-semantic-probes",
+            "--format",
+            "json",
+            "--low-priority",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(audit.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    let group_id = payload["visible_groups"][0]["id"].as_str().unwrap().to_owned();
+
+    let show = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["show", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--group", &group_id, "--format", "json"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(show.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["command"], "show");
+    assert_eq!(payload["status"], "ok");
+    assert_eq!(payload["group"]["id"], group_id);
+}
+
+#[test]
+fn diff_json_emits_canonical_payload() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let tiny = repo_root().join("tests/fixtures/tiny");
+
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["audit", "--workspace"])
+        .arg(&tiny)
+        .args([
+            "--module",
+            "Tiny",
+            "--no-semantic-probes",
+            "--format",
+            "json",
+            "--save-baseline",
+            "before",
+        ])
+        .assert()
+        .success();
+
+    let assert = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["diff", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--baseline", "before", "--format", "json"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["command"], "diff");
+    assert_eq!(payload["status"], "ok");
+    assert!(payload["diff"]["baseline"].is_string());
+}
+
 fn line_value(text: &str, prefix: &str) -> String {
     text.lines()
         .find_map(|line| line.strip_prefix(prefix))
