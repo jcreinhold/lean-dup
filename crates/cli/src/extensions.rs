@@ -37,8 +37,10 @@ where
 
 pub(crate) fn write_command_list<W: Write>(writer: &mut W) -> io::Result<()> {
     writeln!(writer, "lean-dup commands:")?;
+    let width = VISIBLE_BUILT_IN_COMMANDS.iter().map(|cmd| cmd.len()).max().unwrap_or(0);
     for command in VISIBLE_BUILT_IN_COMMANDS {
-        writeln!(writer, "  {command}")?;
+        let about = built_in_about(command).unwrap_or("");
+        writeln!(writer, "  {command:<width$}  {about}")?;
     }
     writeln!(writer)?;
     writeln!(writer, "installed extensions:")?;
@@ -51,6 +53,23 @@ pub(crate) fn write_command_list<W: Write>(writer: &mut W) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// One-line description for each visible built-in subcommand. Mirrors the
+/// doc-comment `about` strings on `Command` variants in `cli.rs`; kept in
+/// sync by hand since clap-derive doesn't expose them at runtime.
+fn built_in_about(name: &str) -> Option<&'static str> {
+    match name {
+        "doctor" => Some("Diagnose workspace, cache, and worker health."),
+        "cache-cleanup" => Some("Remove cache entries no workspace points to anymore."),
+        "index" => Some("Build or refresh a labelled index for a workspace."),
+        "index-mathlib" => Some("Build or refresh the project's mathlib index."),
+        "audit" => Some("Find duplicate declarations across the selected workspace."),
+        "eval" => Some("Run the recall/precision evaluation suites."),
+        "show" => Some("Print the full evidence for one duplicate group."),
+        "diff" => Some("Compare current findings against a saved baseline."),
+        _ => None,
+    }
 }
 
 fn validate_extension_name(name: &OsStr) -> Result<&str, String> {
@@ -84,11 +103,86 @@ fn executable_name(name: &str) -> String {
 }
 
 fn write_missing_extension<W: Write>(writer: &mut W, name: &str, executable: &str) {
+    if !is_known_external(name)
+        && let Some(suggestion) = nearest_built_in(name)
+    {
+        let _ = writeln!(writer, "error: unknown command `{name}`");
+        let _ = writeln!(writer, "help: did you mean `{suggestion}`?");
+        return;
+    }
     let _ = writeln!(writer, "error: external command `{executable}` was not found on PATH");
     if name == "vector" {
         let _ = writeln!(writer, "help: install it with `cargo install lean-dup-vector-search`");
     } else {
         let _ = writeln!(writer, "help: install an executable named `{executable}` on PATH");
+    }
+}
+
+/// Names that should be treated as external extensions even when they happen
+/// to fall within edit distance of a built-in (e.g. `vector` vs `doctor`).
+fn is_known_external(name: &str) -> bool {
+    matches!(name, "vector")
+}
+
+/// Return the closest built-in subcommand to `name` if it is within edit
+/// distance 2, otherwise None. Used to suggest `audit` for `audot` before
+/// falling through to the external-extension lookup.
+fn nearest_built_in(name: &str) -> Option<&'static str> {
+    const MAX_DISTANCE: usize = 2;
+    let mut best: Option<(&'static str, usize)> = None;
+    for &candidate in ALL_BUILT_IN_COMMANDS {
+        let distance = levenshtein(name, candidate);
+        if distance > MAX_DISTANCE {
+            continue;
+        }
+        match best {
+            Some((_, current)) if distance >= current => {}
+            _ => best = Some((candidate, distance)),
+        }
+    }
+    best.map(|(candidate, _)| candidate)
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    if a.is_empty() {
+        return b.len();
+    }
+    if b.is_empty() {
+        return a.len();
+    }
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut curr = vec![0usize; b.len() + 1];
+    for (i, ch_a) in a.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, ch_b) in b.iter().enumerate() {
+            let cost = if ch_a == ch_b { 0 } else { 1 };
+            curr[j + 1] = (prev[j + 1] + 1).min(curr[j] + 1).min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[b.len()]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nearest_built_in_suggests_audit_for_audot() {
+        assert_eq!(nearest_built_in("audot"), Some("audit"));
+    }
+
+    #[test]
+    fn nearest_built_in_suggests_doctor_for_doctr() {
+        assert_eq!(nearest_built_in("doctr"), Some("doctor"));
+    }
+
+    #[test]
+    fn nearest_built_in_returns_none_for_distant_strings() {
+        assert_eq!(nearest_built_in("xyzzy"), None);
+        assert_eq!(nearest_built_in("zorp"), None);
     }
 }
 

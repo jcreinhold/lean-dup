@@ -49,16 +49,21 @@ fn help_lists_foundation_commands() {
     let assert = Command::cargo_bin("lean-dup").unwrap().arg("--help").assert().success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
 
-    for command in ["doctor", "index", "index-mathlib", "audit", "eval", "show", "diff"] {
+    for command in [
+        "doctor",
+        "cache-cleanup",
+        "index",
+        "index-mathlib",
+        "audit",
+        "eval",
+        "show",
+        "diff",
+    ] {
         assert!(stdout.contains(command), "missing {command} in help:\n{stdout}");
     }
     assert!(
         !stdout.contains("perf"),
         "hidden perf command leaked into help:\n{stdout}"
-    );
-    assert!(
-        !stdout.contains("cache-cleanup"),
-        "hidden cache cleanup command leaked into help:\n{stdout}"
     );
     assert!(
         !stdout.contains("embedding"),
@@ -128,6 +133,20 @@ fn external_extension_help_dispatches_to_installed_tool() {
         .assert()
         .success()
         .stdout(predicate::str::contains("VECTOR HELP:--help"));
+}
+
+#[cfg(unix)]
+#[test]
+fn unknown_command_suggests_nearest_built_in() {
+    let temp = tempfile::TempDir::new().unwrap();
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("PATH", temp.path())
+        .arg("audot")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unknown command `audot`"))
+        .stderr(predicate::str::contains("did you mean `audit`"));
 }
 
 #[cfg(unix)]

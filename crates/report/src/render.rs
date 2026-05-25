@@ -401,6 +401,19 @@ fn render_cache_cleanup(report: &CacheCleanupReportDto) -> String {
             entry.reason
         ));
     }
+    if report.executed {
+        lines.push(format!(
+            "removed {} bytes across {} entries.",
+            report.bytes_removed, report.removable_count,
+        ));
+    } else {
+        lines.push(format!(
+            "dry run: no files removed. Pass --execute to delete the {} removable {} ({} bytes).",
+            report.removable_count,
+            if report.removable_count == 1 { "entry" } else { "entries" },
+            report.bytes_to_remove,
+        ));
+    }
     lines.join("\n")
 }
 
