@@ -186,27 +186,6 @@ fn levenshtein(a: &str, b: &str) -> usize {
     prev[b.len()]
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn nearest_built_in_suggests_audit_for_audot() {
-        assert_eq!(nearest_built_in("audot"), Some("audit"));
-    }
-
-    #[test]
-    fn nearest_built_in_suggests_doctor_for_doctr() {
-        assert_eq!(nearest_built_in("doctr"), Some("doctor"));
-    }
-
-    #[test]
-    fn nearest_built_in_returns_none_for_distant_strings() {
-        assert_eq!(nearest_built_in("xyzzy"), None);
-        assert_eq!(nearest_built_in("zorp"), None);
-    }
-}
-
 fn run_extension_process<O, E>(
     path: &Path,
     progress: bool,
@@ -301,4 +280,25 @@ fn find_on_path(executable: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nearest_built_in_suggests_audit_for_audot() {
+        assert_eq!(nearest_built_in("audot"), Some("audit"));
+    }
+
+    #[test]
+    fn nearest_built_in_suggests_doctor_for_doctr() {
+        assert_eq!(nearest_built_in("doctr"), Some("doctor"));
+    }
+
+    #[test]
+    fn nearest_built_in_returns_none_for_distant_strings() {
+        assert_eq!(nearest_built_in("xyzzy"), None);
+        assert_eq!(nearest_built_in("zorp"), None);
+    }
 }

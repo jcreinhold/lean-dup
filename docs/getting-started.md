@@ -16,7 +16,7 @@ run broad proof search, or use embeddings.
 
 | Component | Required |
 | --- | --- |
-| Lean toolchain | `leanprover/lean4:v4.30.0-rc2` (the pinned version; other 4.x versions are untested) |
+| Lean toolchain | `leanprover/lean4:v4.30.0` (the pinned version; other 4.x versions are untested) |
 | Rust toolchain | 1.85+ (the workspace uses `edition = "2024"`) |
 | Target project | a Lake workspace whose `lake build` succeeds |
 | `.olean` files | the modules you want audited must be compiled |

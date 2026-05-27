@@ -28,16 +28,16 @@ reports, and reproducible releases. Concretely, all of:
 
 ## Gates
 
-| Gate                                | Evidence artifact                                                                                                                            |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `G1 regression_quality`             | [search-quality.md](search-quality.md), [evaluation/production-gates.md](evaluation/production-gates.md), `target/eval/production-gate.json` |
-| `G2 precision_control`              | search-quality.md, production-gates.md hard-negative section, fixture and manual eval JSON                                                   |
-| `G3 semantic_probe_yield`           | real-workload probe evidence under `target/audit-runs/`                                                                                      |
-| `G4 external_comparison_provenance` | [external-comparison-provenance.md](external-comparison-provenance.md) + JSON/profile fixtures                                         |
-| `G5 cache_validity_lifecycle`       | [cache-validity-lifecycle.md](cache-validity-lifecycle.md) + `target/cache/doctor-production.json`                                           |
-| `G6 full_audit_performance`         | `target/perf/` outputs                                                                                                                       |
-| `G7 report_contract`                | [report-contract.md](report-contract.md) + `target/report-contract/` golden outputs                                                          |
-| `G8 release_hardening`              | release-hardening.md, CI config, `target/release-diagnostics/`                                                                               |
+| Gate | Evidence artifact |
+| --- | --- |
+| `G1 regression_quality` | [search-quality.md](search-quality.md), [evaluation/production-gates.md](evaluation/production-gates.md), `target/eval/production-gate.json` |
+| `G2 precision_control` | search-quality.md, production-gates.md hard-negative section, fixture and manual eval JSON |
+| `G3 semantic_probe_yield` | real-workload probe evidence under `target/audit-runs/` |
+| `G4 external_comparison_provenance` | [external-comparison-provenance.md](external-comparison-provenance.md) + JSON/profile fixtures |
+| `G5 cache_validity_lifecycle` | [cache-validity-lifecycle.md](cache-validity-lifecycle.md) + `target/cache/doctor-production.json` |
+| `G6 full_audit_performance` | `target/perf/` outputs |
+| `G7 report_contract` | [report-contract.md](report-contract.md) + `target/report-contract/` golden outputs |
+| `G8 release_hardening` | release-hardening.md, CI config, `target/release-diagnostics/` |
 
 Production claim per gate:
 

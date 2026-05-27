@@ -44,14 +44,14 @@ Outputs are written under `target/search-quality/vector-validation/` and
 actual pipeline stages after vector and symbolic candidates merge. Hard negatives reported
 are the count that became visible.
 
-| Workload                              | Policy                          | Status     | Sym gen | Vec stage | Merged | Ranked | Visible R | Visible P | HN visible |
-| ------------------------------------- | ------------------------------- | ---------- | ------: | --------: | -----: | -----: | --------: | --------: | ---------: |
-| default                               | `name-and-formal-statement` cold | ok        |   16/16 |      5/16 |  16/16 |  16/16 |     14/16 |     14/34 |        0/3 |
-| default                               | `name-and-formal-statement` warm | ok        |   16/16 |      5/16 |  16/16 |  16/16 |     14/16 |     14/34 |        0/3 |
-| default                               | `formal-statement`               | ok        |   16/16 |      5/16 |  16/16 |  16/16 |     14/16 |     14/34 |        0/3 |
-| default                               | `informal-or-formal`             | ok        |   16/16 |      5/16 |  16/16 |  16/16 |     14/16 |     14/34 |        0/3 |
-| hard-negatives                        | `name-and-formal-statement`      | ok        |     1/1 |       1/1 |    1/1 |    1/1 |       1/1 |      1/34 |        0/5 |
-| production-gate, fast children only   | `name-and-formal-statement`      | incomplete |   17/17 |      6/17 |  17/17 |  17/17 |     15/17 |     15/68 |        0/8 |
+| Workload | Policy | Status | Sym gen | Vec stage | Merged | Ranked | Visible R | Visible P | HN visible |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| default | `name-and-formal-statement` cold | ok | 16/16 | 5/16 | 16/16 | 16/16 | 14/16 | 14/34 | 0/3 |
+| default | `name-and-formal-statement` warm | ok | 16/16 | 5/16 | 16/16 | 16/16 | 14/16 | 14/34 | 0/3 |
+| default | `formal-statement` | ok | 16/16 | 5/16 | 16/16 | 16/16 | 14/16 | 14/34 | 0/3 |
+| default | `informal-or-formal` | ok | 16/16 | 5/16 | 16/16 | 16/16 | 14/16 | 14/34 | 0/3 |
+| hard-negatives | `name-and-formal-statement` | ok | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 | 1/34 | 0/5 |
+| production-gate, fast children only | `name-and-formal-statement` | incomplete | 17/17 | 6/17 | 17/17 | 17/17 | 15/17 | 15/68 | 0/8 |
 
 All three input policies share the BGE-small/FastEmbed model and the LanceDB-backed
 corpus. On this fixture, policy choice changes nothing downstream of vector generation;
@@ -67,12 +67,12 @@ Times below come from JSON runtime counters and from warm `/usr/bin/time` after 
 build completion; the first release-mode run includes a one-time stack rebuild that is not
 a search-runtime measurement.
 
-| Workload              | Corpus  | Embedding | Corpus build | Query  | Eval total | Wall    | Peak RSS |
-| --------------------- | ------- | --------: | -----------: | -----: | ---------: | ------: | -------: |
-| default/name cold     | built   |    314 ms |        13 ms | 132 ms |    1480 ms |  5.46 s |   522 MB |
-| default/name warm     | reused  |      0 ms |         0 ms |  92 ms |    1137 ms |  4.72 s |   449 MB |
-| hard-negatives/name   | built   |    247 ms |         8 ms |  74 ms |    1448 ms |  4.96 s |   558 MB |
-| production-gate       | mixed   |         — |            — |      — |    2412 ms |  7.08 s |   558 MB |
+| Workload | Corpus | Embedding | Corpus build | Query | Eval total | Wall | Peak RSS |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| default/name cold | built | 314 ms | 13 ms | 132 ms | 1480 ms | 5.46 s | 522 MB |
+| default/name warm | reused | 0 ms | 0 ms | 92 ms | 1137 ms | 4.72 s | 449 MB |
+| hard-negatives/name | built | 247 ms | 8 ms | 74 ms | 1448 ms | 4.96 s | 558 MB |
+| production-gate | mixed | — | — | — | 2412 ms | 7.08 s | 558 MB |
 
 The warm run reported `corpus_status = "reused"`, `corpus_build_ms = 0`, and
 `embedding_ms = 0`. Comparing normalized pair rows for `default-name-run1` and

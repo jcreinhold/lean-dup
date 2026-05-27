@@ -4,10 +4,10 @@ use lean_dup_diagnostics::perf::{PerfEvent, PerfSummary};
 use lean_dup_eval::EvalOutput;
 use lean_dup_index::{CacheCleanupReport, CacheDiagnostics, CacheStatus, ComparisonEvidenceMode};
 use lean_dup_search::{
-    AuditDetailSnapshot, AuditEvidence, AuditGroup, AuditMember, AuditOutput, AuditProbeSummary,
-    AuditReplacementHint, AuditReview, AuditVisibilityOptions, DiffOutput, SearchBaselineDiff, SearchBaselineGroup,
-    SearchScoringSummary, SearchSemanticObligationFact, SearchSemanticObligationYield, SearchSemanticRerankingSummary,
-    ShowOutput, WorkspaceFileCleanupEntry, WorkspaceFileCleanupReport,
+    AuditDetailSnapshot, AuditEvidence, AuditGroup, AuditMember, AuditOutput, AuditProbeSummary, AuditReplacementHint,
+    AuditReview, AuditVisibilityOptions, DiffOutput, SearchBaselineDiff, SearchBaselineGroup, SearchScoringSummary,
+    SearchSemanticObligationFact, SearchSemanticObligationYield, SearchSemanticRerankingSummary, ShowOutput,
+    WorkspaceFileCleanupEntry, WorkspaceFileCleanupReport,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1178,7 +1178,10 @@ pub fn audit_report(output: AuditOutput) -> AuditReport {
         visible_groups_emitted,
         visible_group_limit: output.visible_group_limit,
         visible_groups_truncated: output.visible_groups_truncated,
-        saved_baseline_group_count: output.saved_baseline.as_ref().map(|_| output.saved_baseline_group_count),
+        saved_baseline_group_count: output
+            .saved_baseline
+            .as_ref()
+            .map(|_| output.saved_baseline_group_count),
         saved_baseline_replaced: output.saved_baseline.as_ref().map(|_| output.saved_baseline_replaced),
         saved_baseline: output.saved_baseline,
         saved_baseline_name: output.saved_baseline_name,

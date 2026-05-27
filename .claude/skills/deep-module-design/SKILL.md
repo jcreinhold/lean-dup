@@ -59,14 +59,14 @@ principles, and check yourself against it before submitting code.
 
 Before editing, name the design pressure you face:
 
-| Pressure                | What to look for                                                                        |
-| ----------------------- | --------------------------------------------------------------------------------------- |
-| **Shallow module**      | Interface nearly as complex as implementation; thin wrappers that just delegate         |
-| **Leaky abstraction**   | Callers must know internal details to use the API correctly                             |
-| **Complected concerns** | Two independent things braided into one type, trait/class, or module                    |
-| **Growing surface**     | Public items accumulating faster than the capabilities they provide                     |
-| **Temporal coupling**   | API requires callers to call methods in a specific order without structural enforcement |
-| **Information loss**    | Abstraction discards information callers need, forcing them to reconstruct it           |
+| Pressure | What to look for |
+| --- | --- |
+| **Shallow module** | Interface nearly as complex as implementation; thin wrappers that just delegate |
+| **Leaky abstraction** | Callers must know internal details to use the API correctly |
+| **Complected concerns** | Two independent things braided into one type, trait/class, or module |
+| **Growing surface** | Public items accumulating faster than the capabilities they provide |
+| **Temporal coupling** | API requires callers to call methods in a specific order without structural enforcement |
+| **Information loss** | Abstraction discards information callers need, forcing them to reconstruct it |
 
 If the pressure is unclear, run the audit script first:
 `bash .claude/skills/deep-module-design/scripts/audit-module.sh <path>`. The dispatcher selects the Rust or Lean backend
@@ -323,31 +323,31 @@ Use the **three symptoms** as diagnostic tools:
 
 Each smell indicates a specific design problem. Don't fix the smell — fix the underlying problem it points to.
 
-| Smell                                                                               | What it means                                        | Fix direction                                                                                |
-| ----------------------------------------------------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Public type with many public fields                                                 | Module is inside-out; no information hiding          | Make fields private, add methods that hide layout                                            |
-| Type that only delegates to an inner type                                           | Shallow wrapper; no depth                            | Merge into caller, or push real complexity inside                                            |
-| Facade re-exporting items with zero external callers                                | Dead surface area                                    | Delete the re-export                                                                         |
-| API requiring calls in a specific order                                             | Temporal coupling without structural enforcement     | Use typestate (Rust phantom param, Lean indexed type), builder, or scoped API                |
-| Module mixing storage, policy, and presentation                                     | Three concerns complected                            | Separate into three modules along volatility lines                                           |
-| Generic wrapper when the caller knows the bundled type                              | Information loss; forces reconstruction              | Use the specific bundled type through the pipeline                                           |
-| Parameter that every caller passes the same value for                               | Complexity leaked upward                             | Pull the default inside; define the parameter out of existence                               |
-| Method named after what a specific caller does with it                              | Caller knowledge leaked into module                  | Rename to describe the general operation                                                     |
-| Trait or `class` with only one implementor and no planned variance                  | Premature abstraction; indirection without value     | Remove abstraction, use concrete type                                                        |
-| Module you can't describe in one sentence                                           | Complected concerns                                  | Split along the concern boundary                                                             |
-| Item exposed (`pub` in Rust, non-`private` in Lean) "because it might be useful"    | Speculative surface area                             | Keep private until a real caller needs it                                                    |
-| Error variant for a case the caller can never trigger                               | Unnecessary error surface                            | Redefine the operation so the case doesn't arise                                             |
-| Pass-through method (forwards 1:1 with same signature, no added behaviour)          | Layer adds no abstraction                            | Delete the wrapper or push real complexity into it                                           |
-| Many small types/classes/namespaces, each shallow ("classitis")                     | Over-decomposition; cost is paid at every boundary   | Merge until each boundary hides something worth hiding                                       |
-| Getter/setter that exposes a private field 1:1                                      | Field is conceptually public; the layer is theatre   | Either expose the field, or replace with a method that hides the layout                      |
-| Decorator class with mostly pass-through methods                                    | Shallow wrapper paying boilerplate for little gain   | Apply Ousterhout's four-question test; usually merge into the underlying class               |
-| Internal representation has the same shape as the public interface                  | Class isn't deep; no asymmetry to hide complexity in | Reshape the interface to a different abstraction (e.g., character API over line-stored text) |
-| Same design decision shows up in multiple modules ("Information Leakage")           | Coupling without an explicit boundary                | Move the decision behind one module's interface; callers stop knowing it                     |
-| Module structure follows execution order (parse → validate → transform → save)      | Temporal Decomposition; no information hiding        | Reorganise around volatile decisions, not steps                                              |
-| API forces callers to know rarely-used features to use common ones ("Overexposure") | Cost paid at every call site                         | Make the common case simple; gate uncommon options separately                                |
-| Two methods/types that can't be understood independently ("Conjoined")              | Hidden mutual dependency                             | Merge them, or extract the shared concept into a third object                                |
-| Hard to pick a precise name; documentation must be long to be complete              | Concept is unclear or complected                     | Simplify or split the concept until naming becomes obvious                                   |
-| Code whose behaviour can't be understood by quick reading ("Nonobvious Code")       | Hidden assumptions, surprising control flow          | Rename, comment a non-obvious _why_, or restructure                                          |
+| Smell | What it means | Fix direction |
+| --- | --- | --- |
+| Public type with many public fields | Module is inside-out; no information hiding | Make fields private, add methods that hide layout |
+| Type that only delegates to an inner type | Shallow wrapper; no depth | Merge into caller, or push real complexity inside |
+| Facade re-exporting items with zero external callers | Dead surface area | Delete the re-export |
+| API requiring calls in a specific order | Temporal coupling without structural enforcement | Use typestate (Rust phantom param, Lean indexed type), builder, or scoped API |
+| Module mixing storage, policy, and presentation | Three concerns complected | Separate into three modules along volatility lines |
+| Generic wrapper when the caller knows the bundled type | Information loss; forces reconstruction | Use the specific bundled type through the pipeline |
+| Parameter that every caller passes the same value for | Complexity leaked upward | Pull the default inside; define the parameter out of existence |
+| Method named after what a specific caller does with it | Caller knowledge leaked into module | Rename to describe the general operation |
+| Trait or `class` with only one implementor and no planned variance | Premature abstraction; indirection without value | Remove abstraction, use concrete type |
+| Module you can't describe in one sentence | Complected concerns | Split along the concern boundary |
+| Item exposed (`pub` in Rust, non-`private` in Lean) "because it might be useful" | Speculative surface area | Keep private until a real caller needs it |
+| Error variant for a case the caller can never trigger | Unnecessary error surface | Redefine the operation so the case doesn't arise |
+| Pass-through method (forwards 1:1 with same signature, no added behaviour) | Layer adds no abstraction | Delete the wrapper or push real complexity into it |
+| Many small types/classes/namespaces, each shallow ("classitis") | Over-decomposition; cost is paid at every boundary | Merge until each boundary hides something worth hiding |
+| Getter/setter that exposes a private field 1:1 | Field is conceptually public; the layer is theatre | Either expose the field, or replace with a method that hides the layout |
+| Decorator class with mostly pass-through methods | Shallow wrapper paying boilerplate for little gain | Apply Ousterhout's four-question test; usually merge into the underlying class |
+| Internal representation has the same shape as the public interface | Class isn't deep; no asymmetry to hide complexity in | Reshape the interface to a different abstraction (e.g., character API over line-stored text) |
+| Same design decision shows up in multiple modules ("Information Leakage") | Coupling without an explicit boundary | Move the decision behind one module's interface; callers stop knowing it |
+| Module structure follows execution order (parse → validate → transform → save) | Temporal Decomposition; no information hiding | Reorganise around volatile decisions, not steps |
+| API forces callers to know rarely-used features to use common ones ("Overexposure") | Cost paid at every call site | Make the common case simple; gate uncommon options separately |
+| Two methods/types that can't be understood independently ("Conjoined") | Hidden mutual dependency | Merge them, or extract the shared concept into a third object |
+| Hard to pick a precise name; documentation must be long to be complete | Concept is unclear or complected | Simplify or split the concept until naming becomes obvious |
+| Code whose behaviour can't be understood by quick reading ("Nonobvious Code") | Hidden assumptions, surprising control flow | Rename, comment a non-obvious _why_, or restructure |
 
 ## Proofs as Modules
 

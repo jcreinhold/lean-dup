@@ -46,9 +46,7 @@ pub use semantic_reranking::{
     SearchSemanticObligationFact, SearchSemanticObligationKind, SearchSemanticObligationStatus,
     SearchSemanticObligationYield, SearchSemanticRerankingSummary, SearchSemanticUnavailableReason,
 };
-pub use workspace_cleanup::{
-    WorkspaceFileCleanupEntry, WorkspaceFileCleanupReport, cleanup_stale_workspace_files,
-};
+pub use workspace_cleanup::{WorkspaceFileCleanupEntry, WorkspaceFileCleanupReport, cleanup_stale_workspace_files};
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]

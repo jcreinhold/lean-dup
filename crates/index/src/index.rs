@@ -1878,7 +1878,7 @@ name = "B"
 "#,
         )
         .unwrap();
-        fs::write(temp.path().join("lean-toolchain"), "leanprover/lean4:v4.30.0-rc2\n").unwrap();
+        fs::write(temp.path().join("lean-toolchain"), "leanprover/lean4:v4.30.0\n").unwrap();
         fs::write(temp.path().join("A.lean"), "#check Nat\n").unwrap();
         fs::write(temp.path().join("B.lean"), "#check Bool\n").unwrap();
 
@@ -1928,7 +1928,7 @@ name = "B"
     fn cache_key_ignores_unrelated_files_and_tracks_lake_inputs() {
         let temp = TempDir::new().unwrap();
         fs::write(temp.path().join("lakefile.toml"), "[[lean_lib]]\nname = \"A\"\n").unwrap();
-        fs::write(temp.path().join("lean-toolchain"), "leanprover/lean4:v4.30.0-rc2\n").unwrap();
+        fs::write(temp.path().join("lean-toolchain"), "leanprover/lean4:v4.30.0\n").unwrap();
         fs::write(temp.path().join("lake-manifest.json"), "{\"packages\":[]}\n").unwrap();
         fs::write(temp.path().join("A.lean"), "#check Nat\n").unwrap();
 
@@ -1954,7 +1954,7 @@ name = "B"
             serde_json::to_string(&index_cache_key(&request_for(workspace.clone(), "A"), &version).unwrap()).unwrap();
         assert_ne!(first, changed_toolchain);
 
-        fs::write(temp.path().join("lean-toolchain"), "leanprover/lean4:v4.30.0-rc2\n").unwrap();
+        fs::write(temp.path().join("lean-toolchain"), "leanprover/lean4:v4.30.0\n").unwrap();
         fs::write(temp.path().join("lake-manifest.json"), "{\"packages\":[\"mathlib\"]}\n").unwrap();
         let changed_manifest =
             serde_json::to_string(&index_cache_key(&request_for(workspace.clone(), "A"), &version).unwrap()).unwrap();
@@ -1979,7 +1979,7 @@ name = "B"
         let right_mathlib = right.path().join(".lake/packages/mathlib");
         for root in [left.path(), right.path()] {
             fs::write(root.join("lakefile.toml"), "[[lean_lib]]\nname = \"Project\"\n").unwrap();
-            fs::write(root.join("lean-toolchain"), "leanprover/lean4:v4.30.0-rc2\n").unwrap();
+            fs::write(root.join("lean-toolchain"), "leanprover/lean4:v4.30.0\n").unwrap();
             fs::write(root.join("Project.lean"), "#check Nat\n").unwrap();
             let mathlib = root.join(".lake/packages/mathlib");
             fs::create_dir_all(mathlib.join("Mathlib")).unwrap();

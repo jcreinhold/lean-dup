@@ -7,7 +7,7 @@ analysis. Hidden developer commands may explicitly prepare local experiment asse
 
 ## Requirements
 
-Lean toolchain `leanprover/lean4:v4.30.0-rc2` (other 4.x versions are untested); Rust 1.85+
+Lean toolchain `leanprover/lean4:v4.30.0` (other 4.x versions are untested); Rust 1.85+
 (`edition = "2024"`); a Lake workspace whose `lake build` already succeeds, with `.olean` files
 present for the modules to be audited.
 
@@ -43,16 +43,16 @@ target/release/lean-dup audit --workspace /path/to/lake/workspace --compare-math
 by default when Lean exposes them through compiled modules; `--module Root.Module` scopes the
 audit to one root and its descendants.
 
-| Flag                    | Effect                                                                        |
-| ----------------------- | ----------------------------------------------------------------------------- |
-| `--public-only`         | exclude private declarations                                                  |
-| `--private`             | show otherwise-actionable private helper findings                             |
-| `--low-priority`        | include lower-priority structural/API-design findings                         |
-| `--diagnostics`         | show broad diagnostic findings, including noise/debug groups                   |
-| `--compare-mathlib`     | compare against the project's pinned mathlib index                            |
-| `--compare-index LABEL` | compare against a named cached external index                                 |
-| `--profile`             | include extraction and classification timings                                 |
-| `--format json`         | machine-readable output (stdout stays parseable with `--progress`/`--profile`) |
+| Flag | Effect |
+| --- | --- |
+| `--public-only` | exclude private declarations |
+| `--private` | show otherwise-actionable private helper findings |
+| `--low-priority` | include lower-priority structural/API-design findings |
+| `--diagnostics` | show broad diagnostic findings, including noise/debug groups |
+| `--compare-mathlib` | compare against the project's pinned mathlib index |
+| `--compare-index LABEL` | compare against a named cached external index |
+| `--profile` | include extraction and classification timings |
+| `--format json` | machine-readable output (stdout stays parseable with `--progress`/`--profile`) |
 
 For local development, swap `target/release/lean-dup` for `cargo run -p lean-dup-cli --`. Other
 commands: `doctor` (workspace, worker, Lake, cache health), `show --group <id>` (one ranked

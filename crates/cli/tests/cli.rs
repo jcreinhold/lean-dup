@@ -1012,7 +1012,8 @@ fn audit_visibility_public_excludes_private_corpus() {
         .args(["--module", "Tiny", "--no-semantic-probes", "--format", "json"])
         .assert()
         .success();
-    let all_payload: Value = serde_json::from_str(&String::from_utf8(all.get_output().stdout.clone()).unwrap()).unwrap();
+    let all_payload: Value =
+        serde_json::from_str(&String::from_utf8(all.get_output().stdout.clone()).unwrap()).unwrap();
     assert_eq!(all_payload["options"]["include_private"], true);
 
     let public = Command::cargo_bin("lean-dup")
@@ -1097,9 +1098,18 @@ fn audit_text_reports_queue_probe_and_provenance_explanations() {
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     assert!(stdout.contains("lean-dup audit — status:"));
     assert!(stdout.contains("review queue:"));
-    assert!(!stdout.contains("report schema:"), "verbose-only line in default output:\n{stdout}");
-    assert!(!stdout.contains("probe summary:"), "verbose-only line in default output:\n{stdout}");
-    assert!(!stdout.contains("comparison provenance:"), "verbose-only line in default output:\n{stdout}");
+    assert!(
+        !stdout.contains("report schema:"),
+        "verbose-only line in default output:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("probe summary:"),
+        "verbose-only line in default output:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("comparison provenance:"),
+        "verbose-only line in default output:\n{stdout}"
+    );
     assert!(!stdout.contains("feature_row"));
     assert!(!stdout.contains("declaration_row"));
     assert!(!stdout.contains("probe_result"));
@@ -1348,7 +1358,10 @@ fn show_renders_evidence_blockers_probe_hint_and_callers_for_group() {
         stdout.contains(tiny.to_string_lossy().as_ref()),
         "show should print absolute member paths so they can be opened directly: {stdout}"
     );
-    assert!(stdout.contains(".lean:"), "show member lines should end with `.lean:<line>`");
+    assert!(
+        stdout.contains(".lean:"),
+        "show member lines should end with `.lean:<line>`"
+    );
 }
 
 #[test]
@@ -1587,7 +1600,15 @@ fn baseline_subcommand_lists_shows_and_deletes() {
             .env("LEAN_DUP_CACHE_DIR", cache.path())
             .args(["audit", "--workspace"])
             .arg(&tiny)
-            .args(["--module", "Tiny", "--no-semantic-probes", "--format", "json", "--save-baseline", name])
+            .args([
+                "--module",
+                "Tiny",
+                "--no-semantic-probes",
+                "--format",
+                "json",
+                "--save-baseline",
+                name,
+            ])
             .assert()
             .success();
     }
@@ -1688,7 +1709,8 @@ fn baseline_list_filters_by_current_workspace() {
     let planted_path = cache.path().join("baselines").join("from-elsewhere.json");
     let real = std::fs::read_to_string(cache.path().join("baselines").join("tiny-one.json")).unwrap();
     let mut payload: Value = serde_json::from_str(&real).unwrap();
-    payload["workspace_fingerprint"] = Value::String("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_owned());
+    payload["workspace_fingerprint"] =
+        Value::String("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_owned());
     std::fs::write(&planted_path, serde_json::to_string(&payload).unwrap()).unwrap();
 
     // Default `list` (filter by cwd workspace) hides the planted entry;
@@ -1700,16 +1722,21 @@ fn baseline_list_filters_by_current_workspace() {
         .args(["baseline", "list", "--format", "json"])
         .assert()
         .success();
-    let payload: Value =
-        serde_json::from_str(&String::from_utf8(scoped.get_output().stdout.clone()).unwrap()).unwrap();
+    let payload: Value = serde_json::from_str(&String::from_utf8(scoped.get_output().stdout.clone()).unwrap()).unwrap();
     let names: Vec<&str> = payload["baselines"]
         .as_array()
         .unwrap()
         .iter()
         .map(|b| b["name"].as_str().unwrap())
         .collect();
-    assert!(names.contains(&"tiny-one"), "expected tiny-one in scoped list, got {names:?}");
-    assert!(!names.contains(&"from-elsewhere"), "unexpected from-elsewhere in scoped list: {names:?}");
+    assert!(
+        names.contains(&"tiny-one"),
+        "expected tiny-one in scoped list, got {names:?}"
+    );
+    assert!(
+        !names.contains(&"from-elsewhere"),
+        "unexpected from-elsewhere in scoped list: {names:?}"
+    );
 
     let all = Command::cargo_bin("lean-dup")
         .unwrap()
@@ -1725,7 +1752,10 @@ fn baseline_list_filters_by_current_workspace() {
         .iter()
         .map(|b| b["name"].as_str().unwrap())
         .collect();
-    assert!(names.contains(&"tiny-one") && names.contains(&"from-elsewhere"), "expected both with --all, got {names:?}");
+    assert!(
+        names.contains(&"tiny-one") && names.contains(&"from-elsewhere"),
+        "expected both with --all, got {names:?}"
+    );
 
     // Filtered-empty path: from an unrelated workspace, the message names how
     // many baselines do exist on disk, not "no saved baselines".
@@ -1747,7 +1777,10 @@ fn baseline_list_filters_by_current_workspace() {
     // succeeded with a different fingerprint (0-of-N message). The new
     // message must appear in at least one of those branches when scoped.
     if stdout.contains("0 of") {
-        assert!(stdout.contains("match this workspace"), "missing scope hint in: {stdout}");
+        assert!(
+            stdout.contains("match this workspace"),
+            "missing scope hint in: {stdout}"
+        );
     }
 }
 
@@ -1763,7 +1796,15 @@ fn diff_fast_path_skips_audit_pipeline_when_snapshot_is_fresh() {
         .env("LEAN_DUP_CACHE_DIR", cache.path())
         .args(["audit", "--workspace"])
         .arg(&tiny)
-        .args(["--module", "Tiny", "--no-semantic-probes", "--format", "json", "--save-baseline", "fp"])
+        .args([
+            "--module",
+            "Tiny",
+            "--no-semantic-probes",
+            "--format",
+            "json",
+            "--save-baseline",
+            "fp",
+        ])
         .assert()
         .success();
 

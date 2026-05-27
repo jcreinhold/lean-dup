@@ -203,7 +203,7 @@ Classification: correctness and observability.
 Evidence:
 
 - `target/cache/doctor-production.json`: `status = ok`.
-- `lean_version = Lean 4.30.0-rc2`.
+- `lean_version = Lean 4.30.0`.
 - `requested_workspace = /Users/jcreinhold/Code/lean-dup/tests/fixtures/tiny`.
 - `source_count = 3`, `selected_roots = ["Tiny"]`, `missing_oleans = 0`.
 - `cache_root = /Users/jcreinhold/.cache/lean-dup`.

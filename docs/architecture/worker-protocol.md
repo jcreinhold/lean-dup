@@ -9,14 +9,14 @@ For the layering rule behind the boundary, see [overview.md](overview.md).
 
 ## Commands
 
-| Command   | Answers                                                                                            |
-| --------- | -------------------------------------------------------------------------------------------------- |
-| `version` | what worker, protocol, and semantic algorithm versions am I?                                       |
-| `doctor`  | can I serve this schema, and can I import these modules?                                           |
-| `extract` | which declarations exist, where do they come from, what display/source facts can callers show?    |
-| `features` | which opaque semantic keys may Rust index and compare?                                            |
-| `index`   | stream declaration and feature rows for these modules without forcing caller-side chunking policy |
-| `probe`   | which candidate relations are confirmed, refuted, or unavailable?                                  |
+| Command | Answers |
+| --- | --- |
+| `version` | what worker, protocol, and semantic algorithm versions am I? |
+| `doctor` | can I serve this schema, and can I import these modules? |
+| `extract` | which declarations exist, where do they come from, what display/source facts can callers show? |
+| `features` | which opaque semantic keys may Rust index and compare? |
+| `index` | stream declaration and feature rows for these modules without forcing caller-side chunking policy |
+| `probe` | which candidate relations are confirmed, refuted, or unavailable? |
 
 ## What Rust may and may not rely on
 
@@ -69,15 +69,15 @@ not specify a Lean/Rust FFI ABI.
 
 ## Failure behavior
 
-| Failure                                          | Worker response                                                      | Rust behavior                                                  |
-| ------------------------------------------------ | -------------------------------------------------------------------- | -------------------------------------------------------------- |
-| Import failure                                   | fatal `import_failed`, exit nonzero                                  | discard partial rows; do not update indexes                    |
-| Missing compiled artifact                        | `missing_olean`                                                      | `doctor` reports it; index commands treat it as fatal when oleans are required |
-| Malformed request JSON                           | fatal `malformed_json` if envelope can be produced; else exit nonzero | mapped to worker startup/protocol failure                      |
-| Unsupported schema or command                    | fatal `unsupported_schema` / `unsupported_command` before importing  | abort, surface diagnostic                                      |
-| Worker panic or nonzero exit without `complete`  | none guaranteed                                                      | `worker_panic` with bounded stderr; discard partial stdout     |
-| Probe declaration unavailable                    | nonfatal `probe_result` with `status = "unavailable"`                | continue with remaining pairs                                  |
-| Internal worker error after partial output       | fatal `internal_error` when possible, exit nonzero                   | discard command output                                         |
+| Failure | Worker response | Rust behavior |
+| --- | --- | --- |
+| Import failure | fatal `import_failed`, exit nonzero | discard partial rows; do not update indexes |
+| Missing compiled artifact | `missing_olean` | `doctor` reports it; index commands treat it as fatal when oleans are required |
+| Malformed request JSON | fatal `malformed_json` if envelope can be produced; else exit nonzero | mapped to worker startup/protocol failure |
+| Unsupported schema or command | fatal `unsupported_schema` / `unsupported_command` before importing | abort, surface diagnostic |
+| Worker panic or nonzero exit without `complete` | none guaranteed | `worker_panic` with bounded stderr; discard partial stdout |
+| Probe declaration unavailable | nonfatal `probe_result` with `status = "unavailable"` | continue with remaining pairs |
+| Internal worker error after partial output | fatal `internal_error` when possible, exit nonzero | discard command output |
 
 ## Command reference
 

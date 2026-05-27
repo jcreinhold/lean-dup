@@ -14,14 +14,14 @@ every scoring, probe, and worker refactor to become a JSON-contract migration.
 
 Schema version: `lean-dup.semantic-reranking.v1`.
 
-| Stable obligation kinds  | Stable statuses | Stable unavailable reasons   |
-| ------------------------ | --------------- | ---------------------------- |
-| `exact-theorem`          | `planned`       | `missing-declaration`        |
-| `permuted-theorem`       | `verified`      | `unsupported`                |
-| `replacement`            | `rejected`      | `opaque-or-unreducible`      |
-| `reducible-definition`   | `unavailable`   | `timeout`                    |
-| `specialization`         | `cached`        | `internal-error`             |
-| `local-duplicate`        |                 | `unknown`                    |
+| Stable obligation kinds | Stable statuses | Stable unavailable reasons |
+| --- | --- | --- |
+| `exact-theorem` | `planned` | `missing-declaration` |
+| `permuted-theorem` | `verified` | `unsupported` |
+| `replacement` | `rejected` | `opaque-or-unreducible` |
+| `reducible-definition` | `unavailable` | `timeout` |
+| `specialization` | `cached` | `internal-error` |
+| `local-duplicate` |  | `unknown` |
 
 The yield contract records `planned`, `verified`, `rejected`, `unavailable`, `cached`,
 and `worker_pairs` per obligation kind. These are denominators for search-quality work,

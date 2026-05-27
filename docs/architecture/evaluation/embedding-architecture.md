@@ -27,15 +27,15 @@ Public capability:
 
 ### Public surface
 
-| Surface                          | Role                                                                            |
-| -------------------------------- | ------------------------------------------------------------------------------- |
-| `EmbeddingAcquisitionPolicy`     | `cache-only` or `download-if-missing`                                            |
-| `EmbeddingPrepareRequest`        | model spec, acquisition policy, optional cache-root override                     |
-| `prepare_embedding_model`        | validates the local cache; downloads only under `download-if-missing`            |
-| `EmbeddingPrepareResult`         | model/cache status, elapsed time, file-role status, byte counts, stable reasons |
-| `TextEmbeddingBatchRequest`      | model, input role, input-policy facts, document texts, optional cache roots     |
-| `embed_text_batch`               | validates that the model is already prepared; never downloads                   |
-| `TextEmbeddingBatchResult`       | model/cache summaries, vector dimension, runtime counters, normalized vectors   |
+| Surface | Role |
+| --- | --- |
+| `EmbeddingAcquisitionPolicy` | `cache-only` or `download-if-missing` |
+| `EmbeddingPrepareRequest` | model spec, acquisition policy, optional cache-root override |
+| `prepare_embedding_model` | validates the local cache; downloads only under `download-if-missing` |
+| `EmbeddingPrepareResult` | model/cache status, elapsed time, file-role status, byte counts, stable reasons |
+| `TextEmbeddingBatchRequest` | model, input role, input-policy facts, document texts, optional cache roots |
+| `embed_text_batch` | validates that the model is already prepared; never downloads |
+| `TextEmbeddingBatchResult` | model/cache summaries, vector dimension, runtime counters, normalized vectors |
 
 Public facts include model identity (id, resolved revision), profile identity (backend
 family, vector dimension, supported input roles), model/cache status (prepared, missing,
@@ -76,10 +76,10 @@ token ids, raw runtime errors, ONNX details, and model-file paths stay private.
 
 ## Acquisition policy
 
-| Policy                 | Effect                                                                    |
-| ---------------------- | ------------------------------------------------------------------------- |
-| `cache-only`           | validates already-prepared files; never calls a download API              |
-| `download-if-missing`  | may fetch missing required files; only when an operator opts in           |
+| Policy | Effect |
+| --- | --- |
+| `cache-only` | validates already-prepared files; never calls a download API |
+| `download-if-missing` | may fetch missing required files; only when an operator opts in |
 
 The embedding crate resolves the Hugging Face cache root in the order: explicit request
 override, `HF_HUB_CACHE`, `HF_HOME/hub`, `hf-hub` default. Public reports may show the

@@ -51,16 +51,13 @@ pub fn cleanup_stale_workspace_files(
         (baseline::last_snapshot_dir(cache_root), KIND_LAST_SNAPSHOT),
         (audit_detail::last_audit_detail_dir(cache_root), KIND_LAST_AUDIT_DETAIL),
     ] {
-        sweep_directory(
-            dir,
-            kind,
-            &protected,
-            policy.execute,
-            &mut removed,
-            &mut protected_entries,
-            &mut bytes_to_remove,
-            &mut bytes_removed,
-        )?;
+        let mut state = SweepState {
+            removed: &mut removed,
+            protected_entries: &mut protected_entries,
+            bytes_to_remove: &mut bytes_to_remove,
+            bytes_removed: &mut bytes_removed,
+        };
+        sweep_directory(dir, kind, &protected, policy.execute, &mut state)?;
     }
 
     Ok(WorkspaceFileCleanupReport {
@@ -73,15 +70,19 @@ pub fn cleanup_stale_workspace_files(
     })
 }
 
+struct SweepState<'a> {
+    removed: &'a mut Vec<WorkspaceFileCleanupEntry>,
+    protected_entries: &'a mut Vec<WorkspaceFileCleanupEntry>,
+    bytes_to_remove: &'a mut u64,
+    bytes_removed: &'a mut u64,
+}
+
 fn sweep_directory(
     dir: PathBuf,
     kind: &'static str,
     protected: &HashSet<&str>,
     execute: bool,
-    removed: &mut Vec<WorkspaceFileCleanupEntry>,
-    protected_entries: &mut Vec<WorkspaceFileCleanupEntry>,
-    bytes_to_remove: &mut u64,
-    bytes_removed: &mut u64,
+    state: &mut SweepState<'_>,
 ) -> Result<()> {
     let read_dir = match std::fs::read_dir(&dir) {
         Ok(it) => it,
@@ -113,19 +114,19 @@ fn sweep_directory(
             disk_bytes,
         };
         if protected.contains(name) {
-            protected_entries.push(summary);
+            state.protected_entries.push(summary);
             continue;
         }
-        *bytes_to_remove += disk_bytes;
+        *state.bytes_to_remove += disk_bytes;
         if execute {
             std::fs::remove_file(&path).map_err(|source| Error::Io {
                 message: "could not remove stale workspace snapshot",
                 path: path.clone(),
                 source,
             })?;
-            *bytes_removed += disk_bytes;
+            *state.bytes_removed += disk_bytes;
         }
-        removed.push(summary);
+        state.removed.push(summary);
     }
     Ok(())
 }
@@ -149,12 +150,9 @@ mod tests {
             plant(&detail, fp, "{}");
         }
 
-        let report = cleanup_stale_workspace_files(
-            cache.path(),
-            &["alive".to_owned()],
-            CleanupPolicy { execute: true },
-        )
-        .unwrap();
+        let report =
+            cleanup_stale_workspace_files(cache.path(), &["alive".to_owned()], CleanupPolicy { execute: true })
+                .unwrap();
 
         // Two protected files (one snapshot + one detail), four stale.
         assert_eq!(report.protected_count, 2);

@@ -9,13 +9,13 @@ denominators, see [search-stage-metrics.md](search-stage-metrics.md).
 
 ## Suites
 
-| Suite                | Speed | Default CI? | Purpose                                                                                |
-| -------------------- | ----- | ----------- | -------------------------------------------------------------------------------------- |
-| `default`            | fast  | yes         | small fixture quality gate; all positives at recall@10; zero hard-negative leakage     |
-| `hard-negatives`     | fast  | yes         | fixture precision gate (same-conclusion, broad-key, known static-fingerprint collisions) |
-| `manual-internal`    | slow  | no          | targeted manual-corpus internal labels                                                 |
-| `manual-mathlib`     | slow  | no          | targeted manual-corpus/mathlib labels including known bogus collisions                 |
-| `production-gate`    | slow  | no          | aggregates the four above; `status = incomplete` when a manual suite is unavailable    |
+| Suite | Speed | Default CI? | Purpose |
+| --- | --- | --- | --- |
+| `default` | fast | yes | small fixture quality gate; all positives at recall@10; zero hard-negative leakage |
+| `hard-negatives` | fast | yes | fixture precision gate (same-conclusion, broad-key, known static-fingerprint collisions) |
+| `manual-internal` | slow | no | targeted manual-corpus internal labels |
+| `manual-mathlib` | slow | no | targeted manual-corpus/mathlib labels including known bogus collisions |
+| `production-gate` | slow | no | aggregates the four above; `status = incomplete` when a manual suite is unavailable |
 
 The `production-gate` suite may be `incomplete` on machines without a manual-corpus workspace
 (`--workspace <path> --manual-module <Root>`). That status is a recorded fact, not a pass.
@@ -53,16 +53,16 @@ stage metrics, timings, peak RSS status, and the eval report schema/path when th
 
 All percentage-like metrics are raw counts so the denominator stays visible.
 
-| Metric                  | What it counts                                                          |
-| ----------------------- | ----------------------------------------------------------------------- |
-| `recall`                | found positives at each requested `k` / total positives                 |
-| `shown_queue_precision` | shown true positives / all shown pairs                                  |
-| `hard_negative_hits`    | hard negatives reaching the shown queue / all hard negatives            |
-| `visible_groups`        | groups visible under the suite observation policy / total observed groups |
-| `probe_unavailable`     | unavailable semantic probes / planned probes                            |
-| `candidate_count`       | observed candidate pair count                                           |
-| `timings`               | index load, retrieval, probe, total (ms)                                |
-| `peak_memory_bytes`     | peak RSS when the platform exposes it                                   |
+| Metric | What it counts |
+| --- | --- |
+| `recall` | found positives at each requested `k` / total positives |
+| `shown_queue_precision` | shown true positives / all shown pairs |
+| `hard_negative_hits` | hard negatives reaching the shown queue / all hard negatives |
+| `visible_groups` | groups visible under the suite observation policy / total observed groups |
+| `probe_unavailable` | unavailable semantic probes / planned probes |
+| `candidate_count` | observed candidate pair count |
+| `timings` | index load, retrieval, probe, total (ms) |
+| `peak_memory_bytes` | peak RSS when the platform exposes it |
 
 `status = ok` means the suite ran and its command-level gate logic did not abort. It is not a
 release-quality pass; release readiness depends on the raw denominators satisfying

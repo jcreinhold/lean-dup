@@ -12,10 +12,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::audit_detail;
-use crate::baseline;
-use std::path::Path;
 pub use crate::audit_detail::AuditDetailSnapshot;
+use crate::baseline;
 pub use crate::baseline::{BaselineGroup, BaselineSnapshot};
+use std::path::Path;
 
 /// Load the most recent persisted audit snapshot for a workspace fingerprint,
 /// if one is on disk. Used by `show`/`diff` to validate group IDs without
@@ -566,12 +566,14 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
     let detail_filter = review_filter(request.visibility, request.include_generated);
     let detail_groups = audit_families(review.groups.iter(), detail_filter, usize::MAX);
     let detail = audit_detail::build(
-        foundation.cache.fingerprint.clone(),
-        foundation.workspace.requested_root.clone(),
-        foundation.workspace.root.clone(),
-        foundation.workspace.selected_roots.clone(),
-        foundation.workspace.source_files.len(),
-        foundation.cache.root.clone(),
+        audit_detail::BuildInput {
+            workspace_fingerprint: foundation.cache.fingerprint.clone(),
+            requested_workspace: foundation.workspace.requested_root.clone(),
+            lake_root: foundation.workspace.root.clone(),
+            selected_roots: foundation.workspace.selected_roots.clone(),
+            source_count: foundation.workspace.source_files.len(),
+            cache_root: foundation.cache.root.clone(),
+        },
         detail_groups,
         Vec::new(),
     );

@@ -26,6 +26,15 @@ pub struct AuditDetailSnapshot {
     pub suppressed_groups: Vec<AuditGroup>,
 }
 
+pub(crate) struct BuildInput {
+    pub workspace_fingerprint: String,
+    pub requested_workspace: PathBuf,
+    pub lake_root: PathBuf,
+    pub selected_roots: Vec<String>,
+    pub source_count: usize,
+    pub cache_root: PathBuf,
+}
+
 impl AuditDetailSnapshot {
     /// Resolve `requested` against any of the surfaces `run_show` accepts:
     /// group id, family id, pair id, pair ids, or pair-evidence id. Returns
@@ -33,17 +42,13 @@ impl AuditDetailSnapshot {
     /// `run_show`'s mutation), so the fast path's output matches the slow
     /// path's output byte-for-byte.
     pub fn resolve(&self, requested: &str) -> Option<AuditGroup> {
-        let group = self
-            .groups
-            .iter()
-            .chain(self.suppressed_groups.iter())
-            .find(|group| {
-                group.id == requested
-                    || group.family_id == requested
-                    || group.pair_id == requested
-                    || group.pair_ids.iter().any(|pair_id| pair_id == requested)
-                    || group.pair_evidence.iter().any(|pair| pair.id == requested)
-            })?;
+        let group = self.groups.iter().chain(self.suppressed_groups.iter()).find(|group| {
+            group.id == requested
+                || group.family_id == requested
+                || group.pair_id == requested
+                || group.pair_ids.iter().any(|pair_id| pair_id == requested)
+                || group.pair_evidence.iter().any(|pair| pair.id == requested)
+        })?;
         let mut cloned = group.clone();
         if cloned.id != requested
             && (cloned.pair_id == requested
@@ -107,23 +112,18 @@ pub fn load_last(cache_root: &Path, fingerprint: &str) -> Option<AuditDetailSnap
 }
 
 pub(crate) fn build(
-    workspace_fingerprint: String,
-    requested_workspace: PathBuf,
-    lake_root: PathBuf,
-    selected_roots: Vec<String>,
-    source_count: usize,
-    cache_root: PathBuf,
+    input: BuildInput,
     groups: Vec<AuditGroup>,
     suppressed_groups: Vec<AuditGroup>,
 ) -> AuditDetailSnapshot {
     AuditDetailSnapshot {
         schema_version: SCHEMA_VERSION.to_owned(),
-        workspace_fingerprint,
-        requested_workspace,
-        lake_root,
-        selected_roots,
-        source_count,
-        cache_root,
+        workspace_fingerprint: input.workspace_fingerprint,
+        requested_workspace: input.requested_workspace,
+        lake_root: input.lake_root,
+        selected_roots: input.selected_roots,
+        source_count: input.source_count,
+        cache_root: input.cache_root,
         groups,
         suppressed_groups,
     }

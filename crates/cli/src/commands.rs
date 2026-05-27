@@ -38,8 +38,7 @@ struct Foundation {
 }
 
 pub fn run(cli: Cli) -> Result<Outcome> {
-    let progress = !cli.no_progress
-        && (cli.progress || std::io::IsTerminal::is_terminal(&std::io::stderr()));
+    let progress = !cli.no_progress && (cli.progress || std::io::IsTerminal::is_terminal(&std::io::stderr()));
     let mut reporter = Reporter::new_live(progress, cli.profile);
     let command = cli.command.ok_or_else(|| AppError::Cli {
         message: "missing command; run `lean-dup --help`".to_owned(),
@@ -160,8 +159,7 @@ fn doctor(args: DoctorArgs, reporter: &mut Reporter) -> Result<DoctorReport> {
         // only flag genuinely broken pointers or damaged entries.
         matches!(label.latest.status.as_str(), "corrupt-pointer" | "target-missing")
             || label.entries.iter().any(|entry| {
-                (entry.active_latest || entry.expected_current)
-                    && matches!(entry.status.as_str(), "corrupt" | "stale")
+                (entry.active_latest || entry.expected_current) && matches!(entry.status.as_str(), "corrupt" | "stale")
             })
     });
 
@@ -245,10 +243,12 @@ fn cache_cleanup(args: CacheCleanupArgs, reporter: &mut Reporter) -> Result<Cach
         Vec::new()
     };
     let policy = CleanupPolicy { execute: args.execute };
-    let workspace_files =
-        lean_dup_search::cleanup_stale_workspace_files(&cache_root, &protected_fingerprints, policy)?;
+    let workspace_files = lean_dup_search::cleanup_stale_workspace_files(&cache_root, &protected_fingerprints, policy)?;
     let index_report = lean_dup_index::cleanup_cache(cache_root, &expected_entries, policy)?;
-    Ok(lean_dup_report::cache_cleanup_report(index_report, Some(workspace_files)))
+    Ok(lean_dup_report::cache_cleanup_report(
+        index_report,
+        Some(workspace_files),
+    ))
 }
 
 fn index(args: IndexArgs, reporter: &mut Reporter) -> Result<IndexReport> {
@@ -372,11 +372,7 @@ fn show(args: ShowArgs, reporter: &mut Reporter) -> Result<ShowReport> {
             ResolveOutcome::Exact(id) | ResolveOutcome::Unique(id) => id,
             ResolveOutcome::Ambiguous(matches) => {
                 return Err(AppError::Cli {
-                    message: format!(
-                        "ambiguous group `{}` — matches: {}",
-                        args.group,
-                        matches.join(", ")
-                    ),
+                    message: format!("ambiguous group `{}` — matches: {}", args.group, matches.join(", ")),
                 });
             }
             ResolveOutcome::TooShort => {
@@ -448,7 +444,10 @@ fn decorate_unknown_group(
     let Some(snapshot) = snapshot else {
         return AppError::Search(error);
     };
-    if matches!(resolve_group(snapshot, requested), ResolveOutcome::None | ResolveOutcome::TooShort) {
+    if matches!(
+        resolve_group(snapshot, requested),
+        ResolveOutcome::None | ResolveOutcome::TooShort
+    ) {
         return AppError::Search(error);
     }
     AppError::Cli {
@@ -560,7 +559,10 @@ fn diff(args: DiffArgs, reporter: &mut Reporter) -> Result<DiffReport> {
 fn try_diff_from_snapshot(args: &DiffArgs, baseline_name: &str, reporter: &mut Reporter) -> Option<DiffOutput> {
     let resolved = resolve(
         WorkspaceRequest {
-            requested_root: workspace_or_cwd(pick_workspace(args.workspace.clone(), args.workspace_positional.clone())),
+            requested_root: workspace_or_cwd(pick_workspace(
+                args.workspace.clone(),
+                args.workspace_positional.clone(),
+            )),
             module_root: args.module_root.clone(),
         },
         reporter,
@@ -734,7 +736,9 @@ fn current_workspace_fingerprint(workspace: Option<PathBuf>, reporter: &mut Repo
         reporter,
     )
     .ok()?;
-    lean_dup_index::resolve_cache(&resolved).ok().map(|cache| cache.fingerprint)
+    lean_dup_index::resolve_cache(&resolved)
+        .ok()
+        .map(|cache| cache.fingerprint)
 }
 
 fn baseline_list(cache_root: PathBuf, common: BaselineCommonArgs, reporter: &mut Reporter) -> Result<BaselineReport> {

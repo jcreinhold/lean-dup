@@ -158,13 +158,13 @@ search, eval, and report artifacts.
 
 Stage counters in hidden artifacts:
 
-| Counter             | Meaning                                                     |
-| ------------------- | ----------------------------------------------------------- |
-| `vector_generated`  | pair produced by nearest-neighbor vector search             |
-| `symbolic_generated`| pair produced by symbolic retrieval                         |
-| `merged_generated`  | pair exists after the hidden search merge stage             |
-| `ranked`            | pair survived into ranked observation facts                 |
-| `visible`           | pair entered the shown queue                                |
+| Counter | Meaning |
+| --- | --- |
+| `vector_generated` | pair produced by nearest-neighbor vector search |
+| `symbolic_generated` | pair produced by symbolic retrieval |
+| `merged_generated` | pair exists after the hidden search merge stage |
+| `ranked` | pair survived into ranked observation facts |
+| `visible` | pair entered the shown queue |
 
 ### 35N artifact truthfulness
 
@@ -324,12 +324,12 @@ workflow rebuilds it. Search must not inspect backend-specific manifests.
 
 ## Backend choices
 
-| Backend     | Status              | Rationale                                                                                  |
-| ----------- | ------------------- | ------------------------------------------------------------------------------------------ |
-| FastEmbed   | first runtime       | provides BGE-small as default text model and hides ONNX/tokenizer details behind a batch API |
-| LanceDB     | first persistence   | embedded local filesystem path, Rust-native, persistent storage, metadata filtering, vector indexes |
-| sqlite-vec  | fallback persistence | small, SQLite-shaped, fits beside existing cache; pre-v1 makes it a fallback not first choice |
-| Qdrant      | future persistence  | strong for service deployments and extended filtering; first CLI path should not require a service |
+| Backend | Status | Rationale |
+| --- | --- | --- |
+| FastEmbed | first runtime | provides BGE-small as default text model and hides ONNX/tokenizer details behind a batch API |
+| LanceDB | first persistence | embedded local filesystem path, Rust-native, persistent storage, metadata filtering, vector indexes |
+| sqlite-vec | fallback persistence | small, SQLite-shaped, fits beside existing cache; pre-v1 makes it a fallback not first choice |
+| Qdrant | future persistence | strong for service deployments and extended filtering; first CLI path should not require a service |
 | HNSW (in-memory) | rejected as default | a backend may use HNSW internally, but an in-memory-only graph fails the persistent-corpus requirement |
 
 Backend identity is architecture evidence only. References:

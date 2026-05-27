@@ -129,7 +129,7 @@ Prompt 57 generated `target/cache/doctor-production.json` with `LEAN_DUP_CACHE_D
 Observed facts:
 
 - `status = ok`;
-- `lean_version = Lean 4.30.0-rc2`;
+- `lean_version = Lean 4.30.0`;
 - requested workspace, Lake root, Lake file, cache root, cache labels, cache entries, and cache stores are redacted path
   references;
 - the expected audit-workspace entry is `missing` before an index has been built and reports `missing cache store`;

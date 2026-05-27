@@ -16,13 +16,24 @@ pub struct Cli {
     #[arg(long, global = true, help = "Force progress on (default: on when stderr is a TTY)")]
     pub progress: bool,
 
-    #[arg(long = "no-progress", global = true, help = "Suppress phase-by-phase progress events on stderr")]
+    #[arg(
+        long = "no-progress",
+        global = true,
+        help = "Suppress phase-by-phase progress events on stderr"
+    )]
     pub no_progress: bool,
 
-    #[arg(long, global = true, help = "Print per-phase timings to stderr after the command finishes")]
+    #[arg(
+        long,
+        global = true,
+        help = "Print per-phase timings to stderr after the command finishes"
+    )]
     pub profile: bool,
 
-    #[arg(long, help = "List built-in subcommands and installed external `lean-dup-*` extensions")]
+    #[arg(
+        long,
+        help = "List built-in subcommands and installed external `lean-dup-*` extensions"
+    )]
     pub list: bool,
 
     #[arg(long, help = "Print release identity, schema versions, and build info")]
@@ -273,7 +284,10 @@ pub struct AuditArgs {
     /// Surface actionable findings about private helpers (otherwise suppressed
     /// because users typically cannot act on someone else's private decl).
     /// Independent of `--visibility`, which controls the audit *corpus*.
-    #[arg(long = "show-private-actionable", help = "Surface actionable findings about private helpers")]
+    #[arg(
+        long = "show-private-actionable",
+        help = "Surface actionable findings about private helpers"
+    )]
     pub show_private: bool,
 
     #[arg(long = "low-priority", help = "Include lower-priority structural findings")]
@@ -339,7 +353,12 @@ pub struct EvalArgs {
     pub manual_module: Option<String>,
 
     /// Recall-at-k cutoffs to report, comma-separated. Default reports k=1, 5, and 10.
-    #[arg(long = "k-values", visible_alias = "k", value_delimiter = ',', default_value = "1,5,10")]
+    #[arg(
+        long = "k-values",
+        visible_alias = "k",
+        value_delimiter = ',',
+        default_value = "1,5,10"
+    )]
     pub k_values: Vec<usize>,
 
     /// Write the rendered report to this path in addition to stdout.

@@ -50,7 +50,7 @@ Machine:
 Toolchain:
 
 - Rust `1.95.0 (59807616e 2026-04-14)`;
-- KanProofs Lake environment: Lean `4.30.0-rc2`, Lake `5.0.0-src+3dc1a08`;
+- KanProofs Lake environment: Lean `4.30.0`, Lake `5.0.0-src+3dc1a08`;
 - shell `LEAN_NUM_THREADS=2` for KanProofs workloads;
 - binary profile: `target/release/lean-dup`;
 - progress/profile enabled on audit commands;

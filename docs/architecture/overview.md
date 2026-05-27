@@ -20,15 +20,15 @@ pretty-printed types, or let SQLite layout leak into audit, ranking, or reportin
 
 ### What each side computes
 
-| Lean                                                                                        | Rust                                                                |
-| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| declaration identity, kind, visibility, modifiers, source spans                             | workspace discovery, Lake invocation, worker lifecycle              |
-| pretty-printed statement text (display only)                                                | cache keys, cache validation, index labels, index paths             |
-| exact, safe-binder-permutation, connective, and conclusion fingerprints                     | SQLite indexes (local, mathlib, external)                           |
-| role-aware feature keys for constants, heads, binders, conclusions                          | weighted retrieval, broad-key suppression, candidate caps           |
-| binder count, low-signal markers                                                            | source-reference scans, name-token features                         |
+| Lean | Rust |
+| --- | --- |
+| declaration identity, kind, visibility, modifiers, source spans | workspace discovery, Lake invocation, worker lifecycle |
+| pretty-printed statement text (display only) | cache keys, cache validation, index labels, index paths |
+| exact, safe-binder-permutation, connective, and conclusion fingerprints | SQLite indexes (local, mathlib, external) |
+| role-aware feature keys for constants, heads, binders, conclusions | weighted retrieval, broad-key suppression, candidate caps |
+| binder count, low-signal markers | source-reference scans, name-token features |
 | bounded probe results: same-statement, safe reordering, structural specialization, guarded reducible-definition equality | ranking, blockers, priorities, recommended actions, replacement hints |
-| (none)                                                                                      | text, JSON, `show`, profile, and baseline diff reports              |
+| (none) | text, JSON, `show`, profile, and baseline diff reports |
 
 ## Why this shape
 
@@ -43,13 +43,13 @@ measured FFI spike remains optional; it is not the production starting point.
 
 ## The five layers
 
-| Layer                                        | Abstraction                                                                                          |
-| -------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Lean worker package                          | semantic capabilities: `extract`, `features`, `index`, `probe`, `doctor`, `version`                  |
-| Versioned worker protocol                    | schema-versioned requests, responses, progress events, structured errors                             |
-| Rust CLI engine                              | workspace discovery, module roots, Lake invocation, worker validation, command coordination          |
-| SQLite indexes + cache lifecycle             | persisted truth for local/mathlib/external; reuse, validation, doctor, protected cleanup             |
-| Retrieval, verification, ranking, reporting | candidates, proof-grade evidence, ranked groups, stable explanations, text/JSON/`show`/diff          |
+| Layer | Abstraction |
+| --- | --- |
+| Lean worker package | semantic capabilities: `extract`, `features`, `index`, `probe`, `doctor`, `version` |
+| Versioned worker protocol | schema-versioned requests, responses, progress events, structured errors |
+| Rust CLI engine | workspace discovery, module roots, Lake invocation, worker validation, command coordination |
+| SQLite indexes + cache lifecycle | persisted truth for local/mathlib/external; reuse, validation, doctor, protected cleanup |
+| Retrieval, verification, ranking, reporting | candidates, proof-grade evidence, ranked groups, stable explanations, text/JSON/`show`/diff |
 
 Each layer presents a different abstraction; each hides decisions likely to change.
 
@@ -57,17 +57,17 @@ Each layer presents a different abstraction; each hides decisions likely to chan
 
 Each boundary owns one decision that changes.
 
-| Boundary                  | Hides                                                                                              |
-| ------------------------- | -------------------------------------------------------------------------------------------------- |
-| Lean semantics            | expression traversal, binder dependency, universe-sensitive canonicalization, generated-declaration detection, reducibility guards |
-| Worker protocol           | transport encoding, process framing, schema compatibility, stderr policy, progress delivery, error mapping |
-| Index persistence         | SQLite schema, cache-key storage, posting tables, declaration hydration, invalidation              |
-| External provenance       | source-root mapping, execution-root policy, importability, static fallback                         |
-| Retrieval                 | rare-key weighting, broad-key suppression, top-k heap maintenance, origin-aware pairing            |
-| Semantic verification     | probe obligations, budgets, module planning, private/generated filters, cache keys                 |
-| Ranking                   | confidence adjustment, blockers, suppression, audit visibility, recommended actions                 |
-| Reporting                 | terminal layout, JSON shaping, `show` expansion, baseline diff presentation                        |
-| Evaluation and performance | suite/workload definitions, manual private-path policy, artifact names, cost-class extraction      |
+| Boundary | Hides |
+| --- | --- |
+| Lean semantics | expression traversal, binder dependency, universe-sensitive canonicalization, generated-declaration detection, reducibility guards |
+| Worker protocol | transport encoding, process framing, schema compatibility, stderr policy, progress delivery, error mapping |
+| Index persistence | SQLite schema, cache-key storage, posting tables, declaration hydration, invalidation |
+| External provenance | source-root mapping, execution-root policy, importability, static fallback |
+| Retrieval | rare-key weighting, broad-key suppression, top-k heap maintenance, origin-aware pairing |
+| Semantic verification | probe obligations, budgets, module planning, private/generated filters, cache keys |
+| Ranking | confidence adjustment, blockers, suppression, audit visibility, recommended actions |
+| Reporting | terminal layout, JSON shaping, `show` expansion, baseline diff presentation |
+| Evaluation and performance | suite/workload definitions, manual private-path policy, artifact names, cost-class extraction |
 
 A caller asks each boundary for the result it needs. It does not assemble the lower-level steps
 itself.

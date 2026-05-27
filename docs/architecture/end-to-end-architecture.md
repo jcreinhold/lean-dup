@@ -10,18 +10,18 @@ For the layering rule, see [overview.md](overview.md). For release gates, see
 
 ## Commands
 
-| Command                   | Purpose                                                                                          |
-| ------------------------- | ------------------------------------------------------------------------------------------------ |
-| `doctor`                  | inspect workspace, worker, Lake, and cache health                                                |
-| `index`                   | build or reuse a workspace index                                                                 |
-| `index-mathlib`           | build or reuse the audited project's pinned mathlib index                                        |
-| `audit`                   | produce duplicate-review groups from local, imported, mathlib, or external evidence              |
-| `show`                    | explain one group resolvable from the current workspace/index context                            |
-| `diff`                    | compare two saved audit baselines                                                                |
-| `eval`                    | run fixture, hard-negative, manual-corpus, or aggregate quality suites                           |
-| *hidden* `embedding prepare` | explicitly prepare or validate local embedding model files for later experiments              |
-| *hidden* `perf`           | run named performance workloads and write profiling artifacts                                    |
-| *hidden* `cache-cleanup`  | inspect or remove unprotected stale cache entries                                                |
+| Command | Purpose |
+| --- | --- |
+| `doctor` | inspect workspace, worker, Lake, and cache health |
+| `index` | build or reuse a workspace index |
+| `index-mathlib` | build or reuse the audited project's pinned mathlib index |
+| `audit` | produce duplicate-review groups from local, imported, mathlib, or external evidence |
+| `show` | explain one group resolvable from the current workspace/index context |
+| `diff` | compare two saved audit baselines |
+| `eval` | run fixture, hard-negative, manual-corpus, or aggregate quality suites |
+| *hidden* `embedding prepare` | explicitly prepare or validate local embedding model files for later experiments |
+| *hidden* `perf` | run named performance workloads and write profiling artifacts |
+| *hidden* `cache-cleanup` | inspect or remove unprotected stale cache entries |
 
 The CLI is read-only with respect to audited Lean source. It may build Lean artifacts through
 Lake and write indexes, reports, and diagnostics under the cache root or `target/`, but it does

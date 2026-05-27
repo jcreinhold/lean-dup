@@ -139,10 +139,10 @@ impl Reporter {
         }
 
         let live = self.live.as_ref().expect("just set");
-        if let Some(total) = event.total {
-            if live.bar.length() != Some(total) {
-                live.bar.set_length(total);
-            }
+        if let Some(total) = event.total
+            && live.bar.length() != Some(total)
+        {
+            live.bar.set_length(total);
         }
         if let Some(current) = event.current {
             live.bar.set_position(current);
@@ -178,17 +178,19 @@ fn new_phase_bar(key: &'static str, event: &ProgressEvent, tty: bool) -> Progres
     };
     bar.set_draw_target(target);
     bar.set_prefix(key);
-    bar.set_style(if event.total.is_some() { bar_style() } else { spinner_style() });
+    bar.set_style(if event.total.is_some() {
+        bar_style()
+    } else {
+        spinner_style()
+    });
     bar.set_message(event.message.clone());
     bar
 }
 
 fn bar_style() -> ProgressStyle {
-    ProgressStyle::with_template(
-        "{prefix:24} [{bar:28.cyan/blue}] {percent:>3}% {pos}/{len} {msg} ({elapsed})",
-    )
-    .expect("bar template is static and valid")
-    .progress_chars("█▉▊▋▌▍▎▏ ")
+    ProgressStyle::with_template("{prefix:24} [{bar:28.cyan/blue}] {percent:>3}% {pos}/{len} {msg} ({elapsed})")
+        .expect("bar template is static and valid")
+        .progress_chars("█▉▊▋▌▍▎▏ ")
 }
 
 fn spinner_style() -> ProgressStyle {
@@ -261,7 +263,10 @@ mod tests {
     #[test]
     fn progress_key_maps_worker_phases_to_friendly_labels() {
         assert_eq!(super::progress_key("worker.lean.index.chunk.7"), "mathlib declarations");
-        assert_eq!(super::progress_key("worker.lean.semantic.probe.batch"), "Lean semantics");
+        assert_eq!(
+            super::progress_key("worker.lean.semantic.probe.batch"),
+            "Lean semantics"
+        );
         assert_eq!(super::progress_key("workspace.resolve"), "workspace");
         assert_eq!(super::progress_key("unrelated.phase"), "progress");
     }

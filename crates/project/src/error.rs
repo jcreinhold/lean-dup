@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
@@ -41,7 +41,7 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-fn format_no_source_files(root: &PathBuf, selected: &[String], available: &[String]) -> String {
+fn format_no_source_files(root: &Path, selected: &[String], available: &[String]) -> String {
     let selected_label = if selected.is_empty() {
         "(none)".to_owned()
     } else {
