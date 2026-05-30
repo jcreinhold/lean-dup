@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -36,7 +36,7 @@ jobs:
         id: lean
         run: echo "toolchain=$(tr -d '[:space:]' < lean/lean-toolchain)" >> "$GITHUB_OUTPUT"
       - name: Cache elan toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.elan
           key: elan-${{ runner.os }}-${{ steps.lean.outputs.toolchain }}
@@ -51,7 +51,7 @@ jobs:
           "$HOME/.elan/bin/elan" toolchain install "${{ steps.lean.outputs.toolchain }}"
           "$HOME/.elan/bin/elan" default "${{ steps.lean.outputs.toolchain }}"
       - name: Cache Lean fixture and lean/ builds
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             lean/.lake
