@@ -1,41 +1,14 @@
-# mdwright dogfoods itself: this config governs `mdwright check` and
-# `mdwright fmt` on the repo's own Markdown.
+# Config for `mdwright check` / `mdwright fmt` on this repo's Markdown.
 
 [fmt]
 wrap = 120
 
-# Auto-generated pages — owned by `cargo xtask doc-rules` /
-# `cargo xtask doc-cli` / `build.rs`. The drift tests are the source
-# of truth; the formatter must not rewrite them or the two gates
-# disagree.
-exclude = [
-  ".claude/**",
-  "CLAUDE.md",
-  "crates/mdwright-lint/src/stdlib/explain/**",
-  "crates/mdwright/benches/fixtures/**",
-  "crates/mdwright/tests/external/**",
-  "crates/mdwright/tests/fixtures/**",
-  "crates/mdwright/tests/gfm-spec/**",
-  "docs/src/configuration.md",
-  "docs/src/reference/cli.md",
-  "docs/src/reference/diagnostic-schema.md",
-  "docs/src/rules/**",
-]
+# CLAUDE.md (and its AGENTS.md symlink) and everything under .claude/ are
+# owned outside the docs flow — never reflow or lint them.
+exclude = [".claude/**", "AGENTS.md", "CLAUDE.md"]
 
 [render]
 profile = "pulldown"
 
 [lint]
-exclude = [
-  # Per-rule pages necessarily contain rule-violating examples in
-  # their "Example (bad)" sections — linting them is incoherent.
-  ".claude/**",
-  "CLAUDE.md",
-  "crates/mdwright-lint/src/stdlib/explain/**",
-  "crates/mdwright/benches/fixtures/**",
-  "crates/mdwright/tests/external/**",
-  "crates/mdwright/tests/fixtures/**",
-  "crates/mdwright/tests/gfm-spec/**",
-  "docs/src/rules/**",
-  "examples/downstream/docs/bad.md",
-]
+exclude = [".claude/**", "AGENTS.md", "CLAUDE.md"]
