@@ -36,17 +36,17 @@ or a retired rerank-only experiment as enough evidence for threshold calibration
 
 Three validation designs were considered.
 
-First, treat successful model/vector-index execution as enough to keep semantic vector search. This is rejected because a
-database can build, reopen, and return nearest neighbors without improving duplicate-search quality.
+First, treat successful model/vector-index execution as enough to keep semantic vector search. This is rejected because
+a database can build, reopen, and return nearest neighbors without improving duplicate-search quality.
 
 Second, decide from command-level fixture evidence only. This is better than the earlier unit-only evidence, but still
 too narrow: a deterministic fixture can prove artifact and scorer plumbing while saying little about mathlib-scale cost
 or real model behavior.
 
 Third, decide from repaired command-level fixtures, bounded manual/scale workloads when available, scorer variants,
-hard-negative survival, top-k saturation, reproducibility, and cost. This is the chosen design. It is deeper because eval
-owns the decision and artifacts; search owns candidate generation, vector evidence, and scorer variants; embedding owns
-profile/runtime/wrapping details; vector-index owns persistence and nearest-neighbor mechanics. No layer has to
+hard-negative survival, top-k saturation, reproducibility, and cost. This is the chosen design. It is deeper because
+eval owns the decision and artifacts; search owns candidate generation, vector evidence, and scorer variants; embedding
+owns profile/runtime/wrapping details; vector-index owns persistence and nearest-neighbor mechanics. No layer has to
 reverse-engineer another layer's private state to interpret the result.
 
 ## Commands and Artifacts
@@ -70,9 +70,9 @@ Artifacts were written under `target/search-quality/semantic-validation-decision
 The ordinary command `eval --suite default --format json` remained parseable and contained no `vector_search` or
 `vector_candidates` fields.
 
-The cache-only missing-model run produced a deterministic skipped artifact with reason `vector-model-not-prepared`.
-It reported 13/42 query declarations eligible, 6/8 corpus declarations eligible, `top_k = 32`,
-`eligible_corpus_size = 6`, and `top_k_saturated = true`.
+The cache-only missing-model run produced a deterministic skipped artifact with reason `vector-model-not-prepared`. It
+reported 13/42 query declarations eligible, 6/8 corpus declarations eligible, `top_k = 32`, `eligible_corpus_size = 6`,
+and `top_k_saturated = true`.
 
 ## Completed Workload Metrics
 
@@ -158,9 +158,9 @@ The allow-calibration criteria were not met:
 
 - Non-saturated command-level fixture evidence exists and shows vector-only recall gain, but it uses the deterministic
   fixture profile rather than a real local embedding model.
-- Visible hard-negative leakage regresses in completed vector scorer variants: `1/1` on the non-saturated vector
-  fixture for `vector-evidence-only` and `symbolic-plus-vector`, `2/3` on saturated default for `symbolic-plus-vector`,
-  and `1/5` on saturated hard-negatives for `symbolic-plus-vector`.
+- Visible hard-negative leakage regresses in completed vector scorer variants: `1/1` on the non-saturated vector fixture
+  for `vector-evidence-only` and `symbolic-plus-vector`, `2/3` on saturated default for `symbolic-plus-vector`, and
+  `1/5` on saturated hard-negatives for `symbolic-plus-vector`.
 - Default and hard-negative command-level suites are still saturated (`top_k = 32`, eligible corpus size `6`) and cannot
   support retrieval-quality claims.
 - Warm-cache reproducibility passed on the non-saturated fixture, but that is insufficient while visible hard-negative

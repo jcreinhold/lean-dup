@@ -121,8 +121,8 @@ A follow-up prompt was added for that work: `65-manual-production-label-corpus-r
 
 ## Red Flag Review
 
-- Shallow module: the new behavior is not a pass-through report field; eval now owns label identity truth before
-  scoring denominators.
+- Shallow module: the new behavior is not a pass-through report field; eval now owns label identity truth before scoring
+  denominators.
 - Pass-through wrapper: report only projects eval's stable label-resolution DTOs.
 - Temporal decomposition: label resolution happens before candidate generation, so stale labels are defined out of the
   release denominator instead of being discovered after a failed score.

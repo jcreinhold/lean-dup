@@ -22,17 +22,16 @@ discarded here is asking users to infer duplicate families manually from a flat 
 
 Three designs were considered.
 
-1. Keep ordinary reports pair-shaped and rely on users to infer families.
-   This preserves implementation simplicity, but it exposes the wrong task. When several aliases point at the same
-   target, the cleanup is one action, not several unrelated rows.
+1. Keep ordinary reports pair-shaped and rely on users to infer families. This preserves implementation simplicity, but
+   it exposes the wrong task. When several aliases point at the same target, the cleanup is one action, not several
+   unrelated rows.
 
-2. Cluster every connected component.
-   This is too broad. It can turn diagnostics, hard negatives, or mixed-action evidence into a misleading cleanup
-   family merely because pair evidence overlaps.
+2. Cluster every connected component. This is too broad. It can turn diagnostics, hard negatives, or mixed-action
+   evidence into a misleading cleanup family merely because pair evidence overlaps.
 
-3. Build action-oriented review families only when one cleanup action can be stated clearly.
-   This is the selected design. Search clusters only coherent target/action families and keeps one-pair findings as
-   one-pair families. The report crate receives stable family facts and does not learn the clustering algorithm.
+3. Build action-oriented review families only when one cleanup action can be stated clearly. This is the selected
+   design. Search clusters only coherent target/action families and keeps one-pair findings as one-pair families. The
+   report crate receives stable family facts and does not learn the clustering algorithm.
 
 ## Family Contract
 
@@ -63,8 +62,8 @@ Prompt 74 only clusters pairs when the action and target give a single coherent 
 - `local-alias`: pairs can form one family when they share the same canonical local target.
 - `inline-private-helper`: pairs can form one family when they share the same wrapper or target.
 - `already-in-mathlib`: pairs can form one family when they share the same mathlib target.
-- `merge-generalization`, `specialization-of`, `probable-source-clone`, and `manual-review` stay one-pair families
-  until a later prompt defines a safe family action for them.
+- `merge-generalization`, `specialization-of`, `probable-source-clone`, and `manual-review` stay one-pair families until
+  a later prompt defines a safe family action for them.
 
 This avoids connected-component clustering of noisy or mixed-action evidence. It also keeps `local-alias` and
 `replace-local-uses` distinguishable even when they occur in the same module or naming pattern.
@@ -112,12 +111,12 @@ separate. The largest emitted family had `pair_count = 2`, so ordinary output wa
 - Temporal decomposition: avoided. The new surface is organized around the review task, not ranking pipeline phases.
 - Information leakage: no retrieval keys, scorer weights, worker rows, private paths, source-scan mechanics, or vector
   facts were added to report output.
-- Special-general mixture: avoided for now by clustering only target/action families and leaving mixed-action
-  components unclustered.
+- Special-general mixture: avoided for now by clustering only target/action families and leaving mixed-action components
+  unclustered.
 - Conjoined methods: avoided. Visibility, action selection, and pair evidence remain separate facts.
 - Hard-to-describe public API: avoided. The report surface is "family, action, target, pair summaries".
-- Implementation details contaminating interface comments: avoided. Interface comments describe stable family facts,
-  not the grouping algorithm.
+- Implementation details contaminating interface comments: avoided. Interface comments describe stable family facts, not
+  the grouping algorithm.
 
 ## Follow-Up
 

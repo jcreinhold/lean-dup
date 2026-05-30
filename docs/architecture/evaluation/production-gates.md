@@ -1,11 +1,11 @@
 # Production Gate Evaluation
 
-Quality is measured before release work continues. This boundary defines the suites, their gate
-status, and the raw counts they emit.
+Quality is measured before release work continues. This boundary defines the suites, their gate status, and the raw
+counts they emit.
 
-For the pipeline that produces the observations, see [../end-to-end-architecture.md](../end-to-end-architecture.md).
-For the typed adjudication schema, see [search-labels.md](search-labels.md). For stage-level
-denominators, see [search-stage-metrics.md](search-stage-metrics.md).
+For the pipeline that produces the observations, see [../end-to-end-architecture.md](../end-to-end-architecture.md). For
+the typed adjudication schema, see [search-labels.md](search-labels.md). For stage-level denominators, see
+[search-stage-metrics.md](search-stage-metrics.md).
 
 ## Suites
 
@@ -46,8 +46,8 @@ Design it twice:
 Manual child runs emit `manual_prerequisites` when they are skipped or completed. The object records the required
 workspace argument, selected module root, typed-label parse status, compiled-olean status, mathlib source/olean status
 for `manual-mathlib`, blockers, and the next command to run. A completed run additionally emits the ordinary raw
-metrics: recall denominators, shown queue precision, hard-negative hits, visible groups, probe unavailable counts,
-stage metrics, timings, peak RSS status, and the eval report schema/path when the CLI wrote an output artifact.
+metrics: recall denominators, shown queue precision, hard-negative hits, visible groups, probe unavailable counts, stage
+metrics, timings, peak RSS status, and the eval report schema/path when the CLI wrote an output artifact.
 
 ## Metrics
 
@@ -64,9 +64,8 @@ All percentage-like metrics are raw counts so the denominator stays visible.
 | `timings` | index load, retrieval, probe, total (ms) |
 | `peak_memory_bytes` | peak RSS when the platform exposes it |
 
-`status = ok` means the suite ran and its command-level gate logic did not abort. It is not a
-release-quality pass; release readiness depends on the raw denominators satisfying
-`G1 regression_quality` and `G2 precision_control`.
+`status = ok` means the suite ran and its command-level gate logic did not abort. It is not a release-quality pass;
+release readiness depends on the raw denominators satisfying `G1 regression_quality` and `G2 precision_control`.
 
 ## Commands
 
@@ -84,11 +83,10 @@ cargo run -p lean-dup-cli -- eval --suite production-gate --format json \
 
 ## Why a general scorer plus suite orchestration
 
-Adding manual-corpus checks directly to the scorer would mix a special corpus with general
-metric policy. The scorer would learn private paths, slow-suite rules, and audit execution
-details; every future corpus would become a scorer change.
+Adding manual-corpus checks directly to the scorer would mix a special corpus with general metric policy. The scorer
+would learn private paths, slow-suite rules, and audit execution details; every future corpus would become a scorer
+change.
 
-The general scorer knows only unordered pairs, ranks, shown membership, and raw denominators.
-Suite definitions own corpus loading, fixture and manual-suite execution, manual skip policy,
-and gate enforcement. Callers ask for a suite result instead of coordinating label files,
-cache roots, retrieval output, and skip rules themselves.
+The general scorer knows only unordered pairs, ranks, shown membership, and raw denominators. Suite definitions own
+corpus loading, fixture and manual-suite execution, manual skip policy, and gate enforcement. Callers ask for a suite
+result instead of coordinating label files, cache roots, retrieval output, and skip rules themselves.

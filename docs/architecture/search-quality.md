@@ -30,9 +30,8 @@ Each stage has one objective and one failure mode. A bug at any stage looks diff
 Place plausible pairs into the candidate set from indexed facts without requiring proof-grade evidence. Measured by
 candidate-generation recall, candidate volume, origin breakdown, and hard-negative entry by feature family.
 
-Generation may be noisy; measure the noise by feature family, origin, and hard-negative
-entry. Do not hydrate broad mathlib matches unboundedly, and do not encode final
-visibility decisions as retrieval shortcuts.
+Generation may be noisy; measure the noise by feature family, origin, and hard-negative entry. Do not hydrate broad
+mathlib matches unboundedly, and do not encode final visibility decisions as retrieval shortcuts.
 
 ### First-stage ranking: cheap precision
 
@@ -60,24 +59,24 @@ profiles or noise controls; empty queues must explain what was hidden and why.
 
 ## Why typed stages, not one duplicate score
 
-A single duplicate score is easy to describe and too shallow to be useful. It hides the difference between exact
-theorem equality, reducible definitions, replacement candidates, weak structural similarity, and hard negatives. It
-also encourages ranking, semantic probes, and report visibility to optimize one mixed bucket, which is exactly how
-weak mathlib matches end up looking actionable.
+A single duplicate score is easy to describe and too shallow to be useful. It hides the difference between exact theorem
+equality, reducible definitions, replacement candidates, weak structural similarity, and hard negatives. It also
+encourages ranking, semantic probes, and report visibility to optimize one mixed bucket, which is exactly how weak
+mathlib matches end up looking actionable.
 
 Splitting candidate generation, ranking, semantic verification, and visibility into stages with separate objectives
 hides implementation details while making failures diagnosable.
 
 ## Guardrails
 
-- Lean owns semantic facts that require the elaborated environment; Rust owns retrieval, scoring, evaluation,
-  reporting, persistence, workflow.
+- Lean owns semantic facts that require the elaborated environment; Rust owns retrieval, scoring, evaluation, reporting,
+  persistence, workflow.
 - Source-backed and static evidence stay explicit. A label such as `mathlib` never implies proof-grade by itself.
-- Semantic probes stay bounded and recoverable. Raising heartbeats, broadening budgets, or parallelizing weak probes
-  is not a substitute for better planning and evidence yield.
+- Semantic probes stay bounded and recoverable. Raising heartbeats, broadening budgets, or parallelizing weak probes is
+  not a substitute for better planning and evidence yield.
 - Retrieval/ranking changes report stage-level recall, visible precision, hard-negative leakage, candidate volume, and
   runtime before changing default behavior.
 - Embeddings are not accepted default architecture. Any embedding experiment must be hidden, off-by-default, run local
   inference, acquire models only through explicit preparation, and be measured against the symbolic baseline.
-- Default report visibility must not collapse all match classes into one duplicate bucket. A visible finding names
-  what kind of match it is and what evidence makes it actionable.
+- Default report visibility must not collapse all match classes into one duplicate bucket. A visible finding names what
+  kind of match it is and what evidence makes it actionable.

@@ -4,11 +4,10 @@ Date: 2026-05-21
 
 ## Design Note
 
-Search owns the calibrated symbolic review policy: which retrieved pairs are actionable, which
-remain diagnostics, and which blockers prevent default visibility. Eval owns label truth,
-threshold-sweep denominators, manual-suite status, and before/after measurement. Report owns the
-bounded projection of search decisions; it records the scorer and review-policy versions but does
-not recompute visibility. CLI owns review-profile selection and artifact paths.
+Search owns the calibrated symbolic review policy: which retrieved pairs are actionable, which remain diagnostics, and
+which blockers prevent default visibility. Eval owns label truth, threshold-sweep denominators, manual-suite status, and
+before/after measurement. Report owns the bounded projection of search decisions; it records the scorer and
+review-policy versions but does not recompute visibility. CLI owns review-profile selection and artifact paths.
 
 The smallest public interface is:
 
@@ -17,15 +16,13 @@ The smallest public interface is:
 - raw eval denominators for generated, ranked, and visible stages;
 - bounded audit queue counts and hidden-reason summaries.
 
-Scorer weights, feature keys, exact blocker predicates, fixture shortcuts, private manual-corpus
-paths, report rendering choices, and retrieval storage details must not leak upward or sideways.
-The preserved user-facing capability is the ordinary symbolic audit/eval workflow with bounded,
-explainable output. The discarded Python-era behavior is treating every static structural hit as
-default actionable evidence and relying on large unfiltered reports as a review queue.
+Scorer weights, feature keys, exact blocker predicates, fixture shortcuts, private manual-corpus paths, report rendering
+choices, and retrieval storage details must not leak upward or sideways. The preserved user-facing capability is the
+ordinary symbolic audit/eval workflow with bounded, explainable output. The discarded Python-era behavior is treating
+every static structural hit as default actionable evidence and relying on large unfiltered reports as a review queue.
 
-Prompt 45 has not produced
-`docs/architecture/evaluation/semantic-theorem-profile-validation-decision.md` in this checkout.
-Semantic/vector facts are ignored for this calibration.
+Prompt 45 has not produced `docs/architecture/evaluation/semantic-theorem-profile-validation-decision.md` in this
+checkout. Semantic/vector facts are ignored for this calibration.
 
 Prompt 72 later gave the ordinary symbolic scorer the `lean-dup.symbolic-scorer.v2` id and named the default variant
 `all-features`. The review-policy evidence in this document remains the Prompt 54 visibility-policy decision.
@@ -34,34 +31,29 @@ Prompt 72 later gave the ordinary symbolic scorer the `lean-dup.symbolic-scorer.
 
 Three designs were considered.
 
-1. **Raise global thresholds.** Rejected. A single score threshold would hide symptoms without
-   expressing why private helpers, low-signal broad-shape matches, static definition pairs, and
-   theorem statement duplicates deserve different treatment.
-2. **Remove noisy feature families from reports.** Rejected. Those features are still useful for
-   candidate generation and diagnostics; deleting them would weaken recall evidence and obscure
-   generated-stage denominators.
-3. **Make search own a versioned review policy.** Chosen. The policy keeps public theorem
-   statement/permutation evidence visible by default, blocks private/generated/low-signal/static
-   non-theorem pairs from default actionability, and leaves broad diagnostics available through
-   explicit non-default profiles.
+1. **Raise global thresholds.** Rejected. A single score threshold would hide symptoms without expressing why private
+   helpers, low-signal broad-shape matches, static definition pairs, and theorem statement duplicates deserve different
+   treatment.
+2. **Remove noisy feature families from reports.** Rejected. Those features are still useful for candidate generation
+   and diagnostics; deleting them would weaken recall evidence and obscure generated-stage denominators.
+3. **Make search own a versioned review policy.** Chosen. The policy keeps public theorem statement/permutation evidence
+   visible by default, blocks private/generated/low-signal/static non-theorem pairs from default actionability, and
+   leaves broad diagnostics available through explicit non-default profiles.
 
-The chosen boundary is deeper because eval measures truth rather than implementing visibility,
-report projects search-owned decisions rather than reconstructing them, and callers only learn a
-stable policy id plus denominators.
+The chosen boundary is deeper because eval measures truth rather than implementing visibility, report projects
+search-owned decisions rather than reconstructing them, and callers only learn a stable policy id plus denominators.
 
 ## Calibrated Policy
 
 `lean-dup.symbolic-review-policy.v2` keeps default symbolic visibility narrow:
 
 - visible by default: public theorem-like pairs with statement or safe-permutation evidence;
-- hidden by default: generated declarations, non-public declarations, low-signal declarations,
-  broad-head-only matches, typeclass-instance noise, and static non-theorem pairs without
-  proof-grade/source-clone evidence;
-- diagnostic: connective/conclusion/role-shape and static definition similarities remain generated
-  and ranked evidence but do not enter the default cleanup queue by themselves.
+- hidden by default: generated declarations, non-public declarations, low-signal declarations, broad-head-only matches,
+  typeclass-instance noise, and static non-theorem pairs without proof-grade/source-clone evidence;
+- diagnostic: connective/conclusion/role-shape and static definition similarities remain generated and ranked evidence
+  but do not enter the default cleanup queue by themselves.
 
-Search records the policy id in eval/search-dataset/audit facts. Report records it without
-recomputing the policy.
+Search records the policy id in eval/search-dataset/audit facts. Report records it without recomputing the policy.
 
 ## Threshold Sweep Evidence
 
@@ -115,8 +107,8 @@ Stage-level hard-negative survival after calibration:
 | `hard-negatives` | 2/5 | 2/5 | 0/5 |
 | `production-gate` | 5/8 | 5/8 | 0/8 |
 
-The production-gate artifact remains `status = incomplete` because manual suites without operator
-paths are skipped; skipped manual suites are not counted as passes.
+The production-gate artifact remains `status = incomplete` because manual suites without operator paths are skipped;
+skipped manual suites are not counted as passes.
 
 Manual KanProofs internal evidence:
 
@@ -124,30 +116,28 @@ Manual KanProofs internal evidence:
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `manual-internal` | ok | 0/6 | 0/4 | 0/6 | 8/7819 | 0/3 | 28.363 s | 6,599,884,800 bytes |
 
-This is not release-quality evidence. It shows the calibrated policy greatly narrows the queue, but
-the labeled manual positives are still missed. Prompt 55 and later production-readiness prompts must
-treat this as a blocker, not as a pass.
+This is not release-quality evidence. It shows the calibrated policy greatly narrows the queue, but the labeled manual
+positives are still missed. Prompt 55 and later production-readiness prompts must treat this as a blocker, not as a
+pass.
 
 ## Red Flag Review
 
-- Shallow module: avoided. The new review-policy module hides blocker and visibility decisions
-  behind one stable policy id.
-- Pass-through wrapper: avoided. Eval/report do not forward a new wrapper; they record policy facts
-  alongside existing denominators.
-- Temporal decomposition: avoided. Visibility policy is organized around actionability facts, not
-  execution order.
-- Information leakage: avoided. No retrieval keys, feature weights, private paths, or report
-  rendering internals are part of the policy interface.
-- Special-general mixture: acceptable. Fixture evidence uses the same search policy as ordinary
-  eval; fixture-specific labels stay in eval.
+- Shallow module: avoided. The new review-policy module hides blocker and visibility decisions behind one stable policy
+  id.
+- Pass-through wrapper: avoided. Eval/report do not forward a new wrapper; they record policy facts alongside existing
+  denominators.
+- Temporal decomposition: avoided. Visibility policy is organized around actionability facts, not execution order.
+- Information leakage: avoided. No retrieval keys, feature weights, private paths, or report rendering internals are
+  part of the policy interface.
+- Special-general mixture: acceptable. Fixture evidence uses the same search policy as ordinary eval; fixture-specific
+  labels stay in eval.
 - Conjoined methods: avoided. Eval scoring remains understandable without reading report projection.
 - Hard-to-describe public API: avoided. The public fact is a policy version plus raw denominators.
-- Implementation details contaminating interface comments: avoided. Public comments describe stable
-  review-policy facts, not blocker implementation.
+- Implementation details contaminating interface comments: avoided. Public comments describe stable review-policy facts,
+  not blocker implementation.
 
 ## Decision
 
-Use `lean-dup.symbolic-review-policy.v2` as the default symbolic visibility policy for continued
-0.1.0 readiness work. It improves fast-suite default precision and preserves recall@10 and
-zero hard-negative leakage. It does not close production readiness because manual internal evidence
-still misses labeled positives.
+Use `lean-dup.symbolic-review-policy.v2` as the default symbolic visibility policy for continued 0.1.0 readiness work.
+It improves fast-suite default precision and preserves recall@10 and zero hard-negative leakage. It does not close
+production readiness because manual internal evidence still misses labeled positives.

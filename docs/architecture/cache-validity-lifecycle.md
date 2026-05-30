@@ -2,18 +2,16 @@
 
 ## Design note
 
-This document owns the release-facing cache lifecycle contract. Project resolution owns workspace,
-Lake, toolchain, and source identity; the index crate owns cache keys, latest-pointer interpretation,
-schema/protocol compatibility, and cleanup eligibility; worker owns protocol and semantic-version
-facts; report/doctor owns concise diagnostics. The smallest public interface is cache status,
-schema/provenance kind, declaration counts, disk-cost facts, path-role fingerprints, and actionable
-reasons.
+This document owns the release-facing cache lifecycle contract. Project resolution owns workspace, Lake, toolchain, and
+source identity; the index crate owns cache keys, latest-pointer interpretation, schema/protocol compatibility, and
+cleanup eligibility; worker owns protocol and semantic-version facts; report/doctor owns concise diagnostics. The
+smallest public interface is cache status, schema/provenance kind, declaration counts, disk-cost facts, path-role
+fingerprints, and actionable reasons.
 
-Absolute filesystem paths, cache directory layout, latest-pointer storage, SQLite table names,
-worker rows, and retrieval keys must not leak upward or sideways. The preserved user-facing
-capability is deterministic cache reuse and a `doctor` report that explains stale, missing,
-corrupt, unchecked, or reusable entries. The Python-era behavior intentionally discarded is using
-project-wide dirtiness or operator path inspection as the cache validity rule.
+Absolute filesystem paths, cache directory layout, latest-pointer storage, SQLite table names, worker rows, and
+retrieval keys must not leak upward or sideways. The preserved user-facing capability is deterministic cache reuse and a
+`doctor` report that explains stale, missing, corrupt, unchecked, or reusable entries. The Python-era behavior
+intentionally discarded is using project-wide dirtiness or operator path inspection as the cache validity rule.
 
 ## Design it twice
 
@@ -23,11 +21,11 @@ Three designs were considered:
 - invalidate every cache on any workspace dirtiness;
 - make project/index own precise lifecycle facts while doctor/report project redacted diagnostics.
 
-The third design is deeper. It keeps cache mechanics below the report boundary, avoids false rebuilds
-from unrelated files, and still gives operators stable status and next-action reasons.
+The third design is deeper. It keeps cache mechanics below the report boundary, avoids false rebuilds from unrelated
+files, and still gives operators stable status and next-action reasons.
 
-`lean-dup` reuses indexes across audits. This document defines when an index is still good, when it must be rebuilt,
-and how `doctor` and the hidden `cache-cleanup` keep the cache directory honest.
+`lean-dup` reuses indexes across audits. This document defines when an index is still good, when it must be rebuilt, and
+how `doctor` and the hidden `cache-cleanup` keep the cache directory honest.
 
 For the pipeline that uses the cache, see [end-to-end-architecture.md](end-to-end-architecture.md).
 
@@ -56,8 +54,8 @@ Freshness is determined by the inputs that can change Lean semantic rows. Nothin
 | external workspace package, manifest, Git state when available | external corpus identity |
 | compiled-artifact stamps when `require_oleans` is in the workflow | oleans are part of the contract |
 
-Freshness is **not** determined by unrelated non-Lean files or workspace git dirtiness. A README change, a note, or
-an unrelated generated artifact does not invalidate the cache.
+Freshness is **not** determined by unrelated non-Lean files or workspace git dirtiness. A README change, a note, or an
+unrelated generated artifact does not invalidate the cache.
 
 Project-pinned mathlib indexes are content-addressed and shared under the normal cache root. Their key excludes the
 audited project's absolute root and includes the pinned mathlib source content and the project execution toolchain.
@@ -100,12 +98,12 @@ become cleanup candidates.
 
 ## Why this shape
 
-The tempting design—`git status --porcelain` plus an ad hoc cleanup script—leaks project-wide state into every
-index cache, invalidates on unrelated files, and turns cleanup into an operator responsibility. The chosen design
-keeps the index store as the authoritative cache-key constructor; a separate lifecycle module receives only expected
-index entries and reports `current | stale | corrupt | missing | unchecked`. Cleanup protects every active
-`latest.json` target and every current expected entry before considering deletion. Callers ask for cache health, not
-for table rows, digests, or deletion steps.
+The tempting design—`git status --porcelain` plus an ad hoc cleanup script—leaks project-wide state into every index
+cache, invalidates on unrelated files, and turns cleanup into an operator responsibility. The chosen design keeps the
+index store as the authoritative cache-key constructor; a separate lifecycle module receives only expected index entries
+and reports `current | stale | corrupt | missing | unchecked`. Cleanup protects every active `latest.json` target and
+every current expected entry before considering deletion. Callers ask for cache health, not for table rows, digests, or
+deletion steps.
 
 ## Evidence commands
 
@@ -125,8 +123,8 @@ cargo run -p lean-dup-cli -- doctor \
   > target/cache/doctor-production.json
 ```
 
-Prompt 57 generated `target/cache/doctor-production.json` with `LEAN_DUP_CACHE_DIR=target/cache/doctor-cache`.
-Observed facts:
+Prompt 57 generated `target/cache/doctor-production.json` with `LEAN_DUP_CACHE_DIR=target/cache/doctor-cache`. Observed
+facts:
 
 - `status = ok`;
 - `lean_version = Lean 4.30.0`;

@@ -19,10 +19,10 @@ valid release evidence.
 
 Three rebuild designs were considered:
 
-1. Keep the current labels and mark the manual suites permanently blocked.
-   This is honest but shallow: it preserves blockers without separating stale identity from real search misses.
-2. Search current output for high-scoring pairs and relabel those as positives.
-   This was rejected because it makes labels a reflection of the current search algorithm instead of independent truth.
+1. Keep the current labels and mark the manual suites permanently blocked. This is honest but shallow: it preserves
+   blockers without separating stale identity from real search misses.
+2. Search current output for high-scoring pairs and relabel those as positives. This was rejected because it makes
+   labels a reflection of the current search algorithm instead of independent truth.
 3. Rebuild from current declaration identities and documented mathematical intent, then rerun unchanged denominators.
    This was chosen. It keeps eval responsible for truth, search responsible for retrieval, and report responsible for
    projection. It also makes unresolved labels explicit blockers rather than silent denominator changes.

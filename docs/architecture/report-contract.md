@@ -1,17 +1,14 @@
 # Report Contract
 
-This document defines `G7 report_contract` in
-[production-readiness.md](production-readiness.md). It covers ordinary audit
-JSON/text, ordinary eval JSON/text, and targeted `show` detail for the 0.1.0
-symbolic auditor.
+This document defines `G7 report_contract` in [production-readiness.md](production-readiness.md). It covers ordinary
+audit JSON/text, ordinary eval JSON/text, and targeted `show` detail for the 0.1.0 symbolic auditor.
 
 ## Design Note
 
-Report projection owns schema stability, truncation, path redaction, bounded
-group summaries, compact diagnostics, and renderer-specific formatting. Search
-owns review policy, visible queue membership, group ids, evidence facts, and
-queue counts. Eval owns labels, denominators, and quality metrics. CLI owns
-stdout/stderr routing and command-line configuration.
+Report projection owns schema stability, truncation, path redaction, bounded group summaries, compact diagnostics, and
+renderer-specific formatting. Search owns review policy, visible queue membership, group ids, evidence facts, and queue
+counts. Eval owns labels, denominators, and quality metrics. CLI owns stdout/stderr routing and command-line
+configuration.
 
 The smallest public report interface is:
 
@@ -23,41 +20,33 @@ The smallest public report interface is:
 - stable eval denominators and timing facts;
 - targeted `show` detail for one selected family or pair.
 
-Rendering structure, truncation mechanics, raw worker/probe records, private
-paths, cache layout, storage tables, and forensic group assembly do not leak
-upward into CLI callers or sideways into eval/search. The preserved user-facing
-capability is parseable, bounded symbolic audit/eval output with enough
-evidence to review the queue. The Python-era behavior intentionally discarded
-is dumping every candidate/group row into ordinary JSON and expecting downstream
-tools to filter it.
+Rendering structure, truncation mechanics, raw worker/probe records, private paths, cache layout, storage tables, and
+forensic group assembly do not leak upward into CLI callers or sideways into eval/search. The preserved user-facing
+capability is parseable, bounded symbolic audit/eval output with enough evidence to review the queue. The Python-era
+behavior intentionally discarded is dumping every candidate/group row into ordinary JSON and expecting downstream tools
+to filter it.
 
 ## Design It Twice
 
 Three designs were considered:
 
-- Keep full ordinary JSON and rely on `jq` or custom tools to filter it.
-  Rejected because report consumers would still pay the cost of forensic
-  material and would need hidden search-policy knowledge.
-- Split each report into specialized schemas for summary, queue, diagnostics,
-  provenance, and detail. Rejected because it multiplies public contracts while
-  preserving most caller coordination costs.
-- Keep one bounded ordinary schema plus explicit targeted detail. Chosen because
-  report owns projection policy once, ordinary output stays small and stable,
-  and full evidence is still available when a user asks for one group.
+- Keep full ordinary JSON and rely on `jq` or custom tools to filter it. Rejected because report consumers would still
+  pay the cost of forensic material and would need hidden search-policy knowledge.
+- Split each report into specialized schemas for summary, queue, diagnostics, provenance, and detail. Rejected because
+  it multiplies public contracts while preserving most caller coordination costs.
+- Keep one bounded ordinary schema plus explicit targeted detail. Chosen because report owns projection policy once,
+  ordinary output stays small and stable, and full evidence is still available when a user asks for one group.
 
-The chosen boundary is deeper: search and eval continue to own their facts,
-report owns only projection, and callers do not learn scorer weights,
-visibility reconstruction, cache layout, or worker transport details.
+The chosen boundary is deeper: search and eval continue to own their facts, report owns only projection, and callers do
+not learn scorer weights, visibility reconstruction, cache layout, or worker transport details.
 
 ## Ordinary Audit JSON
 
-Audit JSON is summary-first. The stable surface is
-`report_schema_version = "lean-dup.report.v3"`, grouped command metadata,
-compact review diagnostics, bounded family-level `visible_groups`, and the
-`explanations` object. A one-pair finding is represented as a one-pair family.
-When several pairs share one coherent cleanup action and target, search may
-surface them as one family with bounded pair summaries. Full forensic pair
-detail belongs in targeted `show` output, not in ordinary audit JSON.
+Audit JSON is summary-first. The stable surface is `report_schema_version = "lean-dup.report.v3"`, grouped command
+metadata, compact review diagnostics, bounded family-level `visible_groups`, and the `explanations` object. A one-pair
+finding is represented as a one-pair family. When several pairs share one coherent cleanup action and target, search may
+surface them as one family with bounded pair summaries. Full forensic pair detail belongs in targeted `show` output, not
+in ordinary audit JSON.
 
 Representative shape:
 
@@ -121,10 +110,9 @@ Representative shape:
 }
 ```
 
-`review.groups` is intentionally absent. Ordinary JSON must not expose raw
-worker rows, Lean proof obligations, private paths, cache layout, storage
-vocabulary, backend names, or unbounded group arrays. Source spans and caller
-locations use redacted path references:
+`review.groups` is intentionally absent. Ordinary JSON must not expose raw worker rows, Lean proof obligations, private
+paths, cache layout, storage vocabulary, backend names, or unbounded group arrays. Source spans and caller locations use
+redacted path references:
 
 ```json
 { "kind": "workspace-root", "fingerprint": "sha256:3b3ee301c874bc75e6203513" }
@@ -132,8 +120,7 @@ locations use redacted path references:
 
 ## Ordinary Eval JSON
 
-Ordinary eval JSON uses the same report schema id and keeps raw denominators
-rather than rendered conclusions:
+Ordinary eval JSON uses the same report schema id and keeps raw denominators rather than rendered conclusions:
 
 - `suite`;
 - `scorer_version`;
@@ -145,9 +132,8 @@ rather than rendered conclusions:
 - stage metrics;
 - timings and peak memory when available.
 
-Eval output does not duplicate audit group detail. It may report artifact paths
-chosen by the operator, but release examples and golden artifacts use relative
-paths so private local paths are not written into checked evidence.
+Eval output does not duplicate audit group detail. It may report artifact paths chosen by the operator, but release
+examples and golden artifacts use relative paths so private local paths are not written into checked evidence.
 
 ## Text Contract
 
@@ -164,13 +150,11 @@ Default text audit output includes, in order:
 9. queue counts and suppressed groups;
 10. the first visible groups, if any.
 
-When `visible_group_count = 0`, the text report explains why without requiring
-`jq`.
+When `visible_group_count = 0`, the text report explains why without requiring `jq`.
 
 ## `show` Contract
 
-`show` explains one review family. It accepts a family id, ranked pair-group id,
-or pair id. It includes:
+`show` explains one review family. It accepts a family id, ranked pair-group id, or pair id. It includes:
 
 - redacted workspace/cache identity;
 - family id, pair count, action, relation, and target;
@@ -180,19 +164,16 @@ or pair id. It includes:
 - evidence mode: `static`, `source-backed-not-importable`, or `proof-grade`;
 - typed semantic evidence status or the reason no semantic evidence is attached;
 - blockers, or `none`;
-- replacement target, import status, caller-impact state, caller count,
-  truncation status, and replacement notes;
+- replacement target, import status, caller-impact state, caller count, truncation status, and replacement notes;
 - whether the group is visible or hidden under the active filter, and why.
 
-`show` may include full evidence for that selected family. It still does not
-expose worker records, raw proof obligations, SQLite rows, retrieval keys,
-absolute private paths, cache layout, or source-scan implementation details.
+`show` may include full evidence for that selected family. It still does not expose worker records, raw proof
+obligations, SQLite rows, retrieval keys, absolute private paths, cache layout, or source-scan implementation details.
 
 ## Golden Artifacts
 
-Prompt 58 generated representative artifacts under `target/report-contract/`.
-They are not committed as release artifacts, but the commands and summaries
-define the contract to regenerate.
+Prompt 58 generated representative artifacts under `target/report-contract/`. They are not committed as release
+artifacts, but the commands and summaries define the contract to regenerate.
 
 | Artifact | Purpose | Key facts |
 | --- | --- | --- |

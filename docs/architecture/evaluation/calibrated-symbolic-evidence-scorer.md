@@ -1,9 +1,9 @@
 # Calibrated Symbolic Evidence Scorer
 
-This artifact records the Prompt 72 scorer calibration pass. The selected scorer is
-`lean-dup.symbolic-scorer.v2` with the ordinary `all-features` variant. The change is deliberately narrow: it gives the
-ordinary symbolic scorer a calibrated, versioned identity and makes the ablation artifact name the true baseline. It
-does not tune thresholds from unresolved manual labels, expose weights, or use vector evidence.
+This artifact records the Prompt 72 scorer calibration pass. The selected scorer is `lean-dup.symbolic-scorer.v2` with
+the ordinary `all-features` variant. The change is deliberately narrow: it gives the ordinary symbolic scorer a
+calibrated, versioned identity and makes the ablation artifact name the true baseline. It does not tune thresholds from
+unresolved manual labels, expose weights, or use vector evidence.
 
 ## Design Note
 
@@ -20,8 +20,8 @@ The smallest public scorer interface is:
 The following remain private to search: raw feature keys, weight values, calibration search internals, retrieval keys,
 worker rows, private paths, vector facts, and threshold mechanics. The preserved user-facing capability is the
 conservative cleanup queue with zero visible hard-negative leakage in default and hard-negative suites. The discarded
-Python-era behavior is ad hoc, unversioned ranking whose baseline was described by implementation vocabulary rather
-than a release artifact.
+Python-era behavior is ad hoc, unversioned ranking whose baseline was described by implementation vocabulary rather than
+a release artifact.
 
 ## Design It Twice
 
@@ -115,8 +115,8 @@ manual-internal visibility case is:
 | `FirstOrder.SetTheory.ZFC.ZFCModel.models_delta0Theory` / `FirstOrder.SetTheory.ZFC.instZFSetModelsDelta0Theory` | generated, ranked at 4 | hidden by review policy |
 
 That case is recorded as a real visibility case for Prompt 73, but it is not enough to tune the default scorer. Most
-manual positives are unresolved or violate the manual-mathlib one-workspace/one-mathlib endpoint rule, so they cannot
-be counted as production positives.
+manual positives are unresolved or violate the manual-mathlib one-workspace/one-mathlib endpoint rule, so they cannot be
+counted as production positives.
 
 ## Ablation Findings
 
@@ -175,5 +175,5 @@ backed by the ablation evidence above.
 - Conjoined methods: no new conjoined API was introduced.
 - Hard-to-describe public API: acceptable. The public surface is `version`, `variant`, and stable feature-family
   summaries.
-- Implementation details contaminating interface comments: avoided. Comments describe scorer facts and artifact use,
-  not weight values or calibration internals.
+- Implementation details contaminating interface comments: avoided. Comments describe scorer facts and artifact use, not
+  weight values or calibration internals.

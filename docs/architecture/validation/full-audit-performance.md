@@ -6,37 +6,34 @@ Measured revision: `a41ada9`
 
 ## Design Note
 
-Workspace discovery owns Lake/project shape, selected roots, and source enumeration. Index owns
-cache validity, persisted symbolic facts, local/mathlib reuse, and invalidation. Worker owns Lean
-subprocess/protocol, import, extraction, semantic feature generation, and probe transport. Search
-owns retrieval, probe planning, probe cache use, and review policy. Report owns bounded projection
-and JSON/text size. CLI/progress owns operator-visible execution, stderr progress/profile events,
-and output routing.
+Workspace discovery owns Lake/project shape, selected roots, and source enumeration. Index owns cache validity,
+persisted symbolic facts, local/mathlib reuse, and invalidation. Worker owns Lean subprocess/protocol, import,
+extraction, semantic feature generation, and probe transport. Search owns retrieval, probe planning, probe cache use,
+and review policy. Report owns bounded projection and JSON/text size. CLI/progress owns operator-visible execution,
+stderr progress/profile events, and output routing.
 
-The smallest public performance interface is a named command plus stable cost facts: cache state,
-phase timings, RSS status, JSON size, `jq '.status'` parse time, candidate count, visible group
-count, emitted group count, probe cache hits, worker probe attempts, and exact blockers. Cache
-layout, SQLite tables, worker transport, retrieval keys, report materialization internals, and
-platform-specific RSS mechanics must not leak upward or sideways.
+The smallest public performance interface is a named command plus stable cost facts: cache state, phase timings, RSS
+status, JSON size, `jq '.status'` parse time, candidate count, visible group count, emitted group count, probe cache
+hits, worker probe attempts, and exact blockers. Cache layout, SQLite tables, worker transport, retrieval keys, report
+materialization internals, and platform-specific RSS mechanics must not leak upward or sideways.
 
-The preserved user-facing capability is read-only symbolic auditing with semantic probes enabled.
-The intentionally discarded Python-era behavior is using unbounded dumps, skipped workloads, or
-anecdotal timing as release performance evidence.
+The preserved user-facing capability is read-only symbolic auditing with semantic probes enabled. The intentionally
+discarded Python-era behavior is using unbounded dumps, skipped workloads, or anecdotal timing as release performance
+evidence.
 
 ## Design It Twice
 
 Three performance boundaries were considered.
 
-1. **Set release targets from intuition.** Rejected. It would repeat the earlier oversized-report
-   mistake by deciding from expectations rather than workload artifacts.
-2. **Optimize every slow-looking component first.** Rejected. Without before/after evidence, this
-   risks complexity in worker, index, search, or report internals without proving release value.
-3. **Measure named cold/warm audits, then optimize only measured bottlenecks.** Chosen. Each crate
-   keeps its hidden mechanism while the release artifact exposes stable cost facts.
+1. **Set release targets from intuition.** Rejected. It would repeat the earlier oversized-report mistake by deciding
+   from expectations rather than workload artifacts.
+2. **Optimize every slow-looking component first.** Rejected. Without before/after evidence, this risks complexity in
+   worker, index, search, or report internals without proving release value.
+3. **Measure named cold/warm audits, then optimize only measured bottlenecks.** Chosen. Each crate keeps its hidden
+   mechanism while the release artifact exposes stable cost facts.
 
-No optimization was applied in this session. The measurements show bounded report output and strong
-warm-cache reuse. The remaining pressure point is RSS, which is high but measurable and below the
-release target proposed here.
+No optimization was applied in this session. The measurements show bounded report output and strong warm-cache reuse.
+The remaining pressure point is RSS, which is high but measurable and below the release target proposed here.
 
 ## Environment
 
@@ -113,8 +110,7 @@ Artifacts:
 
 ## Results
 
-All measured audits completed with `status = ok` and `report_schema_version =
-lean-dup.report.v3`.
+All measured audits completed with `status = ok` and `report_schema_version = lean-dup.report.v3`.
 
 | Workload | Cache | Runtime | Peak RSS | JSON size | `jq '.status'` | Candidates | External hydrated | Visible/emitted | Probe worker/cache |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -167,15 +163,13 @@ Warm-cache reuse is effective for both indexes and semantic probes:
 - fixture warm run used 18 cached probe hits and 0 worker probe pairs;
 - KanProofs internal warm run used 500 cached probe hits and 0 worker probe pairs;
 - KanProofs mathlib warm run used 212 cached probe hits and 0 worker probe pairs;
-- warm KanProofs + mathlib omitted `profile.worker.index`, which indicates the 312,711-declaration
-  mathlib index was reused rather than rebuilt;
-- warm JSON metrics matched cold metrics for candidate counts, visible/emitted counts, and probe
-  outcome counts.
+- warm KanProofs + mathlib omitted `profile.worker.index`, which indicates the 312,711-declaration mathlib index was
+  reused rather than rebuilt;
+- warm JSON metrics matched cold metrics for candidate counts, visible/emitted counts, and probe outcome counts.
 
 ## Release Targets
 
-These targets are release-candidate targets for the measured machine class and must be rechecked in
-Prompt 60:
+These targets are release-candidate targets for the measured machine class and must be rechecked in Prompt 60:
 
 | Target | Bound | Evidence |
 | --- | ---: | --- |
@@ -188,10 +182,9 @@ Prompt 60:
 | `jq '.status'` parse time | <= 2 s | measured 0.00 s for all outputs |
 | Mathlib cache size | <= 4 GiB | measured 3.2 GiB |
 
-The RSS target is the tightest bound. Warm runs still hold about 5.6 GiB RSS, so Prompt 60 should
-treat any regression above the 6.5 GiB bound as a release blocker. This session did not identify a
-single safe, focused optimization with before/after evidence; memory reduction remains future
-performance work, not a patch made from intuition.
+The RSS target is the tightest bound. Warm runs still hold about 5.6 GiB RSS, so Prompt 60 should treat any regression
+above the 6.5 GiB bound as a release blocker. This session did not identify a single safe, focused optimization with
+before/after evidence; memory reduction remains future performance work, not a patch made from intuition.
 
 ## G6 Assessment
 
@@ -211,24 +204,21 @@ Still open for release:
 - targets are based on one local machine and one repository revision;
 - RSS remains high enough that release-candidate validation must enforce the bound;
 - no interruption/resume behavior was measured in this prompt;
-- the source-backed fixture used here is a small second workload, not an independent large
-  production corpus.
+- the source-backed fixture used here is a small second workload, not an independent large production corpus.
 
 ## Red Flag Review
 
 - Shallow module: avoided. The artifact records stable cost facts instead of exposing internals.
-- Pass-through wrapper: avoided. The measurement interface is command-level evidence, not a thin
-  wrapper around worker/index calls.
-- Temporal decomposition: avoided. Results are organized by workload/cache state and stable cost
-  facts rather than by implementation order.
-- Information leakage: acceptable. Local artifact paths appear in commands because this is a local
-  validation artifact, but report JSON remains bounded and does not expose worker rows, SQLite
-  tables, retrieval keys, or proof obligations.
-- Special-general mixture: avoided. Fixture, KanProofs, and mathlib workloads use the same audit
-  command surface; fixture facts are not counted as mathlib-scale evidence.
-- Conjoined methods: avoided. Search/report behavior can be evaluated from emitted denominators
-  without reading worker/index internals.
-- Hard-to-describe public API: avoided. The release-facing facts are runtime, RSS, report size,
-  parse time, cache state, and counters.
-- Implementation details contaminating interface comments: avoided. No public API comments were
-  changed in this prompt.
+- Pass-through wrapper: avoided. The measurement interface is command-level evidence, not a thin wrapper around
+  worker/index calls.
+- Temporal decomposition: avoided. Results are organized by workload/cache state and stable cost facts rather than by
+  implementation order.
+- Information leakage: acceptable. Local artifact paths appear in commands because this is a local validation artifact,
+  but report JSON remains bounded and does not expose worker rows, SQLite tables, retrieval keys, or proof obligations.
+- Special-general mixture: avoided. Fixture, KanProofs, and mathlib workloads use the same audit command surface;
+  fixture facts are not counted as mathlib-scale evidence.
+- Conjoined methods: avoided. Search/report behavior can be evaluated from emitted denominators without reading
+  worker/index internals.
+- Hard-to-describe public API: avoided. The release-facing facts are runtime, RSS, report size, parse time, cache state,
+  and counters.
+- Implementation details contaminating interface comments: avoided. No public API comments were changed in this prompt.

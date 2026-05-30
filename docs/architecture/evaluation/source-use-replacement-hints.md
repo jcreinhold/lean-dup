@@ -28,15 +28,13 @@ matches as enough to imply replacement safety.
 
 Three designs were considered:
 
-1. Keep token-scanned caller hints and patch individual bad actions.
-   This is shallow: each new bad hint would require another renderer or token-scan exception, while users would still
-   see overconfident guidance.
-2. Suppress replacement hints for all private or same-module cases.
-   This avoids mistakes by hiding useful information. It loses the private-helper workflow that `--private` now makes
-   explicit.
-3. Make search own action-specific hint facts with bounded source-use evidence and explicit uncertainty.
-   This is the selected design. Source scanning stays private and bounded, search classifies caller impact and
-   importability, and report shows concise guidance without claiming proof of rewrite safety.
+1. Keep token-scanned caller hints and patch individual bad actions. This is shallow: each new bad hint would require
+   another renderer or token-scan exception, while users would still see overconfident guidance.
+2. Suppress replacement hints for all private or same-module cases. This avoids mistakes by hiding useful information.
+   It loses the private-helper workflow that `--private` now makes explicit.
+3. Make search own action-specific hint facts with bounded source-use evidence and explicit uncertainty. This is the
+   selected design. Source scanning stays private and bounded, search classifies caller impact and importability, and
+   report shows concise guidance without claiming proof of rewrite safety.
 
 ## Stable hint facts
 
@@ -54,8 +52,8 @@ Importability is one of:
 - `direct`: the target module is already available or the replacement is same-module;
 - `missing`: an import is needed before replacing local uses;
 - `unknown`: importability could not be established from loaded source;
-- `source-backed-not-importable`: the evidence came from source-backed external comparison that is not importable in
-  the current workspace.
+- `source-backed-not-importable`: the evidence came from source-backed external comparison that is not importable in the
+  current workspace.
 
 The report also carries `callers_truncated` so tools can distinguish a bounded displayed list from a complete caller
 list. Notes give action-specific guidance. Blockers mark missing imports, non-importable external evidence, missing

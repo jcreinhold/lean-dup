@@ -1,13 +1,13 @@
 # Search Labels And Adjudication Corpus
 
 Production-gate labels carry typed adjudications: match class, expected stage visibility, source, confidence, and
-evidence requirements. The current scorer still sees normalized unordered pairs; stage-level metrics consume the
-typed metadata.
+evidence requirements. The current scorer still sees normalized unordered pairs; stage-level metrics consume the typed
+metadata.
 
 ## Label schema
 
-Labels are typed at the file boundary. The eval parser rejects unknown fields so
-old untyped label keys cannot silently change scoring denominators.
+Labels are typed at the file boundary. The eval parser rejects unknown fields so old untyped label keys cannot silently
+change scoring denominators.
 
 Direct labels use `typed_pairs`:
 
@@ -25,8 +25,7 @@ Direct labels use `typed_pairs`:
 }
 ```
 
-Same-class groups use `typed_clusters`; eval owns expanding the members into
-unordered typed pair facts:
+Same-class groups use `typed_clusters`; eval owns expanding the members into unordered typed pair facts:
 
 ```json
 {
@@ -76,15 +75,13 @@ Every current core match class is represented; `skipped_classes` is `[]`.
 
 ## Manual labels
 
-The manual suites stay slow and private-path aware. Their typed labels are adjudication targets,
-not a claim that the current search stack finds them. Files: `manual-internal.json`,
-`manual-mathlib.json`.
+The manual suites stay slow and private-path aware. Their typed labels are adjudication targets, not a claim that the
+current search stack finds them. Files: `manual-internal.json`, `manual-mathlib.json`.
 
 ## Why typed clusters stay inside eval
 
-Fixture authors may group declarations when every expanded pair has the same
-adjudication. Eval expands those groups into normalized unordered pairs before
-scoring. Search, report, and vector artifacts consume pair facts and do not need
+Fixture authors may group declarations when every expanded pair has the same adjudication. Eval expands those groups
+into normalized unordered pairs before scoring. Search, report, and vector artifacts consume pair facts and do not need
 to know label-file layout.
 
 ## Commands

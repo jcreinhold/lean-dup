@@ -27,9 +27,9 @@ worker rows, retrieval keys, and absolute private paths.
 The preserved user-facing capability is the default symbolic duplicate audit and ordinary eval path: read-only,
 embedding-free, vector-index-free, and unchanged by this validation.
 
-The discarded behavior is accepting command success, saturated top-k runs, or a working vector database as search-quality
-evidence. The validation decision uses labeled stage metrics, hard-negative leakage, non-saturation, warm-cache
-reproducibility, runtime/RSS/cache cost, and artifact privacy.
+The discarded behavior is accepting command success, saturated top-k runs, or a working vector database as
+search-quality evidence. The validation decision uses labeled stage metrics, hard-negative leakage, non-saturation,
+warm-cache reproducibility, runtime/RSS/cache cost, and artifact privacy.
 
 ## Design It Twice
 
@@ -56,8 +56,8 @@ target/release/lean-dup embedding prepare \
   --cache-root target/search-quality/vector-validation-redo/hf-cache
 ```
 
-Prepared model facts: `BAAI/bge-small-en-v1.5`, profile `bge-small-en-v1.5`, dimension 384, `prepared`, 133806060
-bytes, 4692 ms, 405520384-byte maximum resident set size from `/usr/bin/time -l`.
+Prepared model facts: `BAAI/bge-small-en-v1.5`, profile `bge-small-en-v1.5`, dimension 384, `prepared`, 133806060 bytes,
+4692 ms, 405520384-byte maximum resident set size from `/usr/bin/time -l`.
 
 Completed artifacts:
 
@@ -211,8 +211,8 @@ progress reporting for long validation, and rerun only then.
   vector-index internals.
 - *Hard-to-describe public API:* the decision surface is policy ids, raw denominators, saturation, scorer variants,
   runtime/RSS/cache cost, and a single go/no-go decision.
-- *Implementation details in interface comments:* this pass adds a validation document only; no public interface comments
-  were changed.
+- *Implementation details in interface comments:* this pass adds a validation document only; no public interface
+  comments were changed.
 
 ## 35X Addendum: Bounded Manual Validation Contract
 

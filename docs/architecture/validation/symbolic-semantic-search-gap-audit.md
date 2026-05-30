@@ -19,10 +19,10 @@ denominators, scorer/review policy ids, visible-family counts, and bounded repla
 learn retrieval keys, posting limits, scorer weights, Lean worker rows, raw expressions, proof scripts, cache layout,
 private filesystem paths, or vector facts.
 
-The preserved user-facing capability is a conservative symbolic cleanup audit that reports a small high-confidence
-queue with zero visible hard-negative leakage on the checked fixture suites. The Python-era behavior intentionally
-discarded is treating a large syntactic similarity list as a semantic duplicate search result and expecting users to
-separate real cleanup from related-theorem noise by hand.
+The preserved user-facing capability is a conservative symbolic cleanup audit that reports a small high-confidence queue
+with zero visible hard-negative leakage on the checked fixture suites. The Python-era behavior intentionally discarded
+is treating a large syntactic similarity list as a semantic duplicate search result and expecting users to separate real
+cleanup from related-theorem noise by hand.
 
 ## Design It Twice
 
@@ -199,9 +199,9 @@ Files and APIs:
 
 Current behavior:
 
-Retrieval prunes broad postings and selects the top 80 candidates per workspace declaration. It records aggregate
-pruned fanout and heap-truncation counts, but eval does not yet tie those losses back to labeled positives, hard
-negatives, match class, source, or candidate-source saturation.
+Retrieval prunes broad postings and selects the top 80 candidates per workspace declaration. It records aggregate pruned
+fanout and heap-truncation counts, but eval does not yet tie those losses back to labeled positives, hard negatives,
+match class, source, or candidate-source saturation.
 
 Evidence:
 
@@ -231,9 +231,9 @@ Files and APIs:
 Current behavior:
 
 Audit first narrows retrieval to strong static evidence, performs cheap ranking, then plans probes from the shaped
-candidate sets and cheap review groups. Default actionability probes are bounded by a total budget and a
-per-declaration cap of 2. Diagnostics can keep broader candidates, but ordinary probes are still downstream of
-syntactic generation and early ranking.
+candidate sets and cheap review groups. Default actionability probes are bounded by a total budget and a per-declaration
+cap of 2. Diagnostics can keep broader candidates, but ordinary probes are still downstream of syntactic generation and
+early ranking.
 
 Evidence:
 
@@ -261,9 +261,9 @@ Files and APIs:
 
 Current behavior:
 
-Scoring uses hand-set weights and thresholds in `DEFAULT_SCORER_CONFIG`. Visibility uses review-policy blocker rules
-and theorem-like statement/permutation checks. The current defaults produce high fixture precision, but they encode
-policy through constants and blocker predicates rather than a label-backed calibrated scorer.
+Scoring uses hand-set weights and thresholds in `DEFAULT_SCORER_CONFIG`. Visibility uses review-policy blocker rules and
+theorem-like statement/permutation checks. The current defaults produce high fixture precision, but they encode policy
+through constants and blocker predicates rather than a label-backed calibrated scorer.
 
 Evidence:
 
@@ -291,10 +291,9 @@ Files and APIs:
 
 Current behavior:
 
-Visibility blockers are blunt: generated declarations, non-public declarations, low-signal declarations,
-broad-head-only matches, typeclass-instance noise, and static non-theorem pairs are hidden by default. Recent UI work
-lets `--private` show actionable private helper findings, but kind and low-signal classification still has coarse
-rules.
+Visibility blockers are blunt: generated declarations, non-public declarations, low-signal declarations, broad-head-only
+matches, typeclass-instance noise, and static non-theorem pairs are hidden by default. Recent UI work lets `--private`
+show actionable private helper findings, but kind and low-signal classification still has coarse rules.
 
 Evidence:
 
@@ -330,10 +329,10 @@ declarations form one duplicate family.
 
 Evidence:
 
-- KanProofs visible findings include alias-style pairs such as `toIsRepresentedSemiring` /
-  `to_is_represented_semiring` and `toIsRepresentedAddCommGroup` / `to_isRepresentedAddCommGroup`.
-- The report emits 5 visible pair groups even though two findings are part of the same ZFC representation naming
-  pattern and likely need family-level review.
+- KanProofs visible findings include alias-style pairs such as `toIsRepresentedSemiring` / `to_is_represented_semiring`
+  and `toIsRepresentedAddCommGroup` / `to_isRepresentedAddCommGroup`.
+- The report emits 5 visible pair groups even though two findings are part of the same ZFC representation naming pattern
+  and likely need family-level review.
 - `review.groups` full detail is not duplicated in ordinary JSON, so family work should preserve the bounded report
   contract rather than re-expanding pairs.
 
@@ -391,14 +390,14 @@ Prompt 76 remains the validation decision after those repairs. Prompt 60/61 stil
 
 ## Red Flag Review
 
-- Shallow module: current search is not a pure pass-through, but candidate generation, fanout policy, and probe
-  planning still expose too little stable stage information for eval to locate real production misses. Prompts 68-71
-  address this.
+- Shallow module: current search is not a pure pass-through, but candidate generation, fanout policy, and probe planning
+  still expose too little stable stage information for eval to locate real production misses. Prompts 68-71 address
+  this.
 - Pass-through wrapper: no new wrapper was added. Existing report/eval surfaces project stable facts rather than raw
   retrieval structs.
 - Temporal decomposition: current audit order is retrieval, candidate shaping, cheap ranking, probing, final ranking,
-  source hints. The risk is that probe planning follows execution order rather than semantic evidence ownership.
-  Prompt 71 addresses this.
+  source hints. The risk is that probe planning follows execution order rather than semantic evidence ownership. Prompt
+  71 addresses this.
 - Information leakage: release artifacts avoid private paths, worker rows, raw expressions, and retrieval keys. Some
   search DTOs still carry feature-family diagnostics, which are stable vocabulary rather than raw keys.
 - Special-general mixture: vector/semantic-profile experiment facts remain outside release calibration. Core symbolic

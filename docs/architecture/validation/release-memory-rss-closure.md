@@ -12,9 +12,9 @@ Report owns bounded projection and parseable JSON. Diagnostics owns platform mem
 facts.
 
 The smallest public memory interface is a named workload plus stable facts: status, cache state, runtime, peak RSS or
-RSS-unavailable status, output size, parse time, candidate count, visible groups, and quality denominators. Cache layout,
-worker rows, index storage, retrieval keys, report assembly, and platform-specific `getrusage` mechanics do not leak
-into the release gate.
+RSS-unavailable status, output size, parse time, candidate count, visible groups, and quality denominators. Cache
+layout, worker rows, index storage, retrieval keys, report assembly, and platform-specific `getrusage` mechanics do not
+leak into the release gate.
 
 The preserved user-facing capability is a symbolic read-only audit and eval path with bounded ordinary JSON. The
 Python-era behavior intentionally discarded is treating missing RSS, large unbounded report payloads, or fixture-only
@@ -26,8 +26,8 @@ Three memory-closure designs were considered:
 
 1. **Accept missing RSS as a local timing-wrapper limitation.** Rejected. Prompt 60 already showed that this leaves the
    gate unable to distinguish "not measured" from "safe."
-2. **Lower workload scope until the target passes.** Rejected. A smaller suite would not prove KanProofs/mathlib
-   release behavior.
+2. **Lower workload scope until the target passes.** Rejected. A smaller suite would not prove KanProofs/mathlib release
+   behavior.
 3. **Use stable in-process RSS facts, measure named workloads, and only optimize a measured dominant source.** Chosen.
    This is deeper because release memory interpretation lives in this artifact while eval, search, index, worker, and
    report keep their hidden implementation details.
@@ -43,8 +43,8 @@ boundary between retrieval/ranking and eval. Report projection owns bounded JSON
 The smallest public eval-memory interface is unchanged: eval consumes stable pair identity, stage survival, feature
 family labels, rank, visibility, retrieval counters, label traces, timings, and peak RSS. Search now exposes a compact
 stage-observation path for ordinary eval; detailed feature vectors and scorer component maps remain available only for
-explicit search-dataset and scorer-ablation artifacts. Retrieval keys, scorer weights, cache layout, worker rows,
-source snippets, and platform RSS mechanics remain private to their owning layers.
+explicit search-dataset and scorer-ablation artifacts. Retrieval keys, scorer weights, cache layout, worker rows, source
+snippets, and platform RSS mechanics remain private to their owning layers.
 
 The preserved user-facing capability is the same symbolic eval and audit output with the same raw denominators and
 bounded report contract. The discarded Python-era behavior is retaining forensic per-pair detail in the ordinary eval
@@ -138,8 +138,8 @@ invalid positives; memory closure does not count those suites as release passes.
 ## Eval Memory Reduction Results
 
 Prompt 66 changed ordinary eval to use compact search-stage observations. Detailed per-pair feature vectors and scorer
-component maps are still produced for `--write-search-dataset` and `--write-scorer-ablations`, but ordinary release
-eval no longer retains that forensic detail while constructing metrics.
+component maps are still produced for `--write-search-dataset` and `--write-scorer-ablations`, but ordinary release eval
+no longer retains that forensic detail while constructing metrics.
 
 | Suite | Status | Runtime before | Runtime after | RSS before | RSS after | Candidate count | Visible groups | Precision | Hard-negative hits | Candidate-generation recall | Output after | Parse time |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -151,10 +151,10 @@ The aggregate `production-gate` high-water RSS is now below the 6.5 GiB release 
 (`6,979,321,856` bytes). The suite still reports `blocked`; the remaining release blockers are label/quality blockers,
 not memory blockers.
 
-Quality denominators are unchanged for the fields relevant to this prompt: candidate counts, visible groups, shown
-queue precision, hard-negative visible hits, and candidate-generation recall match the before measurements. Runtime
-improved for the two manual child suites because ordinary eval avoids building detailed feature/scorer artifacts. The
-aggregate runtime is effectively unchanged because it still runs all child suites in one process and reuses warm caches.
+Quality denominators are unchanged for the fields relevant to this prompt: candidate counts, visible groups, shown queue
+precision, hard-negative visible hits, and candidate-generation recall match the before measurements. Runtime improved
+for the two manual child suites because ordinary eval avoids building detailed feature/scorer artifacts. The aggregate
+runtime is effectively unchanged because it still runs all child suites in one process and reuses warm caches.
 
 ## Full-Audit RSS Results
 
@@ -177,8 +177,8 @@ Evidence:
 
 - full audits and manual evals have similar candidate counts, but full audits stay below 5.70 GiB while
   `manual-internal` eval reaches 6.77 GiB;
-- report JSON sizes are tiny: the largest measured eval artifact is 67,723 bytes, and all `jq` status parses complete
-  in 0.00 s;
+- report JSON sizes are tiny: the largest measured eval artifact is 67,723 bytes, and all `jq` status parses complete in
+  0.00 s;
 - ordinary audit JSON remains bounded and parseable;
 - aggregate `production-gate` combines the two manual eval paths in one process and reaches 7.09 GiB high-water RSS.
 
@@ -192,9 +192,8 @@ ordinary eval, and detailed observations remain confined to explicit forensic ar
 `G6 full_audit_performance` is closed for memory/RSS evidence and still blocked by unrelated manual-label quality
 evidence:
 
-- **Closed:** full-audit RSS is measurable without `/usr/bin/time -l`; full internal and mathlib audits meet the
-  current 6.5 GiB target; release eval workloads now meet the same target; report size and parseability remain within
-  target.
+- **Closed:** full-audit RSS is measurable without `/usr/bin/time -l`; full internal and mathlib audits meet the current
+  6.5 GiB target; release eval workloads now meet the same target; report size and parseability remain within target.
 - **Still no-go for release overall:** manual suites remain blocked by unresolved/stale labels and current-label recall
   evidence. Prompt 61 must not approve 0.1.0 until Prompt 60 is rerun after the manual-label and memory repairs.
 
@@ -204,8 +203,8 @@ evidence:
   internals; it is not a pass-through over detailed observations.
 - Pass-through wrapper: avoided; no wrapper or forwarding API was introduced.
 - Temporal decomposition: avoided; the evidence is organized by workload and cache state, not command execution order.
-- Information leakage: acceptable for checked release facts. This document redacts private operator paths and records
-  no worker rows, cache layout, retrieval keys, storage tables, backend details, or source snippets.
+- Information leakage: acceptable for checked release facts. This document redacts private operator paths and records no
+  worker rows, cache layout, retrieval keys, storage tables, backend details, or source snippets.
 - Special-general mixture: avoided; fixture evals, manual evals, aggregate eval, and full audits are separated.
 - Conjoined methods: avoided; compact ordinary eval and detailed forensic artifact generation remain separate modes.
 - Hard-to-describe public API: the memory surface is workload, RSS status, runtime, output size, parseability, and

@@ -1,12 +1,11 @@
 # Symbolic Scorer And Ablations
 
 Ranking policy is explicit but not user-configurable. The default scorer records current symbolic behavior as a
-versioned Rust policy; ablation variants measure feature-family dependence before any default weight change is
-accepted.
+versioned Rust policy; ablation variants measure feature-family dependence before any default weight change is accepted.
 
-The scorer is crate-private Rust. Search exports only versioned facts; eval requests fixed variants through the
-search observation API and writes artifacts. A user-facing TOML/JSON config was rejected: it would expose an unstable
-model before the feature set and match classes are calibrated, and it would push search policy onto users.
+The scorer is crate-private Rust. Search exports only versioned facts; eval requests fixed variants through the search
+observation API and writes artifacts. A user-facing TOML/JSON config was rejected: it would expose an unstable model
+before the feature set and match classes are calibrated, and it would push search policy onto users.
 
 ## Contract
 
@@ -26,8 +25,8 @@ Inputs are stable pair-feature facts: feature-family names, declaration kinds, e
 family matches, role-overlap counts, module relation, semantic-evidence state, cheap blockers. **Not** SQLite rows,
 posting records, raw Lean expressions, source text, worker rows, or CLI flags.
 
-Default weights are crate-private Rust constants. Changes require before/after evidence over fixture and
-production-gate suites.
+Default weights are crate-private Rust constants. Changes require before/after evidence over fixture and production-gate
+suites.
 
 ## Ablations
 
@@ -50,9 +49,8 @@ cargo run -p lean-dup-cli -- eval --suite production-gate --format json \
   --write-scorer-ablations --output target/eval/production-gate.json
 ```
 
-The `all-features` row of each artifact matches the normal eval metrics; other rows are
-diagnostic, naming which feature families currently carry positives, hard negatives, and
-visible findings. The ablations are not release gates.
+The `all-features` row of each artifact matches the normal eval metrics; other rows are diagnostic, naming which feature
+families currently carry positives, hard negatives, and visible findings. The ablations are not release gates.
 
 `symbolic-only` remains a hidden vector-validation comparison label. It is not the ordinary symbolic eval baseline and
 is intentionally omitted from the symbolic ablation artifact set.

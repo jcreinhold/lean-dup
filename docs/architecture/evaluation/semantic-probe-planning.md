@@ -35,12 +35,12 @@ Three designs were considered.
 
 ## Active Planning Policy
 
-The policy id remains `semantic-probe-policy.v2`. The planner now records a `ProbePlanningFacts` row internally for
-each considered pair. The stable public projection is:
+The policy id remains `semantic-probe-policy.v2`. The planner now records a `ProbePlanningFacts` row internally for each
+considered pair. The stable public projection is:
 
 - `status_by_source`: keyed by candidate-source id such as `symbolic-retrieval` or a future Lean semantic lane id;
-- `status_by_match_class`: keyed by stable obligation or review class such as `exact-theorem`,
-  `reducible-definition`, `local-duplicate`, or `unranked`;
+- `status_by_match_class`: keyed by stable obligation or review class such as `exact-theorem`, `reducible-definition`,
+  `local-duplicate`, or `unranked`;
 - each entry records `planned`, `cached`, `worker`, `verified`, `rejected`, `unavailable`, `skipped_by_policy`,
   `skipped_by_budget`, and `timeout`.
 
@@ -111,8 +111,8 @@ env LEAN_DUP_CACHE_DIR=target/probe-planning/kanproofs-cache /usr/bin/time -l \
   2> target/probe-planning/kanproofs-private.stderr
 ```
 
-Result: `status = ok`; probes were enabled. The run reused 180 cached worker results from the first Prompt 71
-KanProofs run and completed in 29.56 seconds with maximum RSS 6,112,149,504 bytes.
+Result: `status = ok`; probes were enabled. The run reused 180 cached worker results from the first Prompt 71 KanProofs
+run and completed in 29.56 seconds with maximum RSS 6,112,149,504 bytes.
 
 | Match class | Planned | Cached | Worker | Verified | Rejected | Unavailable | Skipped by policy | Skipped by budget |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -121,9 +121,9 @@ KanProofs run and completed in 29.56 seconds with maximum RSS 6,112,149,504 byte
 | local-duplicate | 50 | 0 | 0 | 0 | 0 | 50 | 0 | 1,097 |
 | unranked | 0 | 0 | 0 | 0 | 0 | 0 | 6,217 | 0 |
 
-Source status shows 230 planned facts from `lean-semantic.statement-meaning.v1`, with 5,824 skipped by budget, and
-1,816 policy skips plus 1,310 budget skips from `symbolic-retrieval`. This verifies that the report now distinguishes
-source spending and match-class spending; it does not by itself close release quality or memory gates.
+Source status shows 230 planned facts from `lean-semantic.statement-meaning.v1`, with 5,824 skipped by budget, and 1,816
+policy skips plus 1,310 budget skips from `symbolic-retrieval`. This verifies that the report now distinguishes source
+spending and match-class spending; it does not by itself close release quality or memory gates.
 
 ## Report Surface
 

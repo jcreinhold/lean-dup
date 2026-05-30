@@ -6,11 +6,11 @@ in their own Lake workspace.
 ## What it does, what it does not
 
 `lean-dup` indexes declarations from your elaborated Lean environment and reports likely duplicates or subsumed
-statements: exact theorem matches, safe binder reorderings, equivalent connective shapes, reducible-definition
-equality, and replacement candidates against a comparison corpus (mathlib or another cached index).
+statements: exact theorem matches, safe binder reorderings, equivalent connective shapes, reducible-definition equality,
+and replacement candidates against a comparison corpus (mathlib or another cached index).
 
-The normal audit path is read-only. It does not edit your Lean source, call network services,
-run broad proof search, or use embeddings.
+The normal audit path is read-only. It does not edit your Lean source, call network services, run broad proof search, or
+use embeddings.
 
 ## Requirements
 
@@ -172,8 +172,8 @@ target/release/lean-dup audit --workspace /path/to/your/lake/project --progress
 - `--diagnostics` shows broad diagnostic findings, including noise/debug groups.
 - `--progress` writes phase events to stderr; stdout stays parseable as JSON when `--format json` is set.
 
-First run on your project is cold: `lean-dup` builds an index of your workspace declarations. Subsequent runs reuse
-that index from the cache (default `~/.cache/lean-dup`).
+First run on your project is cold: `lean-dup` builds an index of your workspace declarations. Subsequent runs reuse that
+index from the cache (default `~/.cache/lean-dup`).
 
 ## Reading the output
 
@@ -193,8 +193,8 @@ Each group describes one kind of relationship between declarations. The full tax
 Each group declares how strong the evidence behind it is. See
 [external comparison provenance](architecture/external-comparison-provenance.md) for the policy.
 
-- `proof-grade`: Lean verified the relationship, or the comparison index is source-backed and importable in the
-  current Lean environment.
+- `proof-grade`: Lean verified the relationship, or the comparison index is source-backed and importable in the current
+  Lean environment.
 - `source-backed-not-importable`: the index has source provenance, but its execution root differs from your audit; no
   Lean probe was possible.
 - `static`: the group rests on indexed/static fingerprint evidence. Useful as a suggestion; not a proof.
@@ -223,11 +223,10 @@ You can act on a hint by hand, or save the JSON for later tooling. `lean-dup` it
 The release-readiness gates `G1 regression_quality` and `G2 precision_control` documented in
 [architecture/production-readiness.md](architecture/production-readiness.md) are both open. Today:
 
-- *Intra-workspace audits* (no `--compare-mathlib`) are the most useful invocation. The fixture suite passes its
-  quality bar and the same path scales to real Lake projects.
-- *`--compare-mathlib` is implemented but unvalidated.* The aggregate quality and the
-  manual-corpus mathlib gate suites do not currently pass; recall against real mathlib corpora
-  has not been demonstrated. Do not expect strong recall yet.
+- *Intra-workspace audits* (no `--compare-mathlib`) are the most useful invocation. The fixture suite passes its quality
+  bar and the same path scales to real Lake projects.
+- *`--compare-mathlib` is implemented but unvalidated.* The aggregate quality and the manual-corpus mathlib gate suites
+  do not currently pass; recall against real mathlib corpora has not been demonstrated. Do not expect strong recall yet.
 - *Semantic probes* are bounded and recoverable, but their proof-grade yield on full mathlib runs is still partial.
   `--no-semantic-probes` is supported and is the fastest way to start.
 - *No `--version` flag yet*; release diagnostics are still being shaped.
@@ -239,12 +238,12 @@ The CLI is read-only with respect to your source either way, so trying it costs 
 Two practical paths today.
 
 **Find duplicates inside a branch before you push.** Point `--workspace` at your local mathlib checkout and use
-`--module Mathlib.Some.Subnamespace` to keep the run scoped. You get intra-workspace candidates and a queue you can
-work through with `show`. This is the workflow the tool serves best right now.
+`--module Mathlib.Some.Subnamespace` to keep the run scoped. You get intra-workspace candidates and a queue you can work
+through with `show`. This is the workflow the tool serves best right now.
 
-**Compare your branch against mathlib's pinned dependency in another project.** `--compare-mathlib` builds (or reuses)
-a project-pinned mathlib index from `.lake/packages/mathlib`. Recall is currently low (see
-*Current limitations* above), so treat results as a starting point, not a guarantee.
+**Compare your branch against mathlib's pinned dependency in another project.** `--compare-mathlib` builds (or reuses) a
+project-pinned mathlib index from `.lake/packages/mathlib`. Recall is currently low (see *Current limitations* above),
+so treat results as a starting point, not a guarantee.
 
 The first run that touches mathlib is multi-minute: the worker imports a large environment and the index is several
 hundred MB. The shared cache under `~/.cache/lean-dup` makes subsequent runs fast.
@@ -262,8 +261,8 @@ hundred MB. The shared cache under `~/.cache/lean-dup` makes subsequent runs fas
 - **`doctor` shows many `status=unchecked` cache entries with large `bytes`**: these are indexes for other workspaces
   sharing the cache root. The hidden `cache-cleanup` command is dry-run by default; pass `--execute` to remove
   unprotected stale entries.
-- **An audit reports `visible groups: 0`**: the `visible_queue.reason` field always names why. Common causes: no
-  ranked groups (no candidates passed the filters), all groups hidden by the audit visibility options, or all proof-grade
+- **An audit reports `visible groups: 0`**: the `visible_queue.reason` field always names why. Common causes: no ranked
+  groups (no candidates passed the filters), all groups hidden by the audit visibility options, or all proof-grade
   candidates remained unverified.
 
 For deeper diagnosis run `doctor --format json` and inspect the cache + provenance state directly.

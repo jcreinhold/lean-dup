@@ -1,12 +1,10 @@
 # Symbolic Semantic Search Validation Decision
 
-Date: 2026-05-21
-Revision: `99d1027`
-Decision: release-blocked for symbolic semantic search readiness.
+Date: 2026-05-21 Revision: `99d1027` Decision: release-blocked for symbolic semantic search readiness.
 
 This artifact validates the repaired symbolic semantic-search path after Prompts 67-75. It is a decision record, not a
-release record. Vector and semantic-profile evidence remain experimental and are not used for release calibration
-unless Prompt 45 explicitly approves them.
+release record. Vector and semantic-profile evidence remain experimental and are not used for release calibration unless
+Prompt 45 explicitly approves them.
 
 ## Design Note
 
@@ -97,8 +95,7 @@ env LEAN_DUP_CACHE_DIR=target/symbolic-semantic-validation/cache-default \
 
 Facts:
 
-- schema `lean-dup.report.v3`, scorer `lean-dup.symbolic-scorer.v2`, review policy
-  `lean-dup.symbolic-review-policy.v2`;
+- schema `lean-dup.report.v3`, scorer `lean-dup.symbolic-scorer.v2`, review policy `lean-dup.symbolic-review-policy.v2`;
 - recall@1 `7/16`, recall@5 `16/16`, recall@10 `16/16`;
 - candidate generation recall `16/16`, ranked recall `16/16`, visible recall `8/16`;
 - source recall: symbolic-only `0/16`, semantic-lane-only `0/16`, merged `16/16`;
@@ -152,8 +149,8 @@ Facts:
 - fanout/top-k positive loss `0/6`; one hard negative is fanout-pruned;
 - runtime `54.47s`; max RSS `7,542,210,560` bytes; report size `20,115` bytes.
 
-This suite cannot count as release evidence until current manual positives resolve or are replaced by documented
-current declarations.
+This suite cannot count as release evidence until current manual positives resolve or are replaced by documented current
+declarations.
 
 ### Manual Mathlib
 
@@ -172,8 +169,8 @@ Facts:
 - status `blocked`, not skipped;
 - prerequisites present: workspace, labels, compiled oleans, source-backed mathlib, and project-pinned mathlib index;
 - label resolution `0/11` positives and `3/4` hard negatives;
-- most positive blockers are labels that resolve to mathlib/mathlib pairs rather than one workspace declaration plus
-  one source-backed mathlib declaration;
+- most positive blockers are labels that resolve to mathlib/mathlib pairs rather than one workspace declaration plus one
+  source-backed mathlib declaration;
 - recall@5 `0/11`;
 - visible precision `0/4`, visible hard negatives `0/4`;
 - source recall: symbolic-only `0/11`, semantic-lane-only `0/11`, merged `0/11`;
@@ -266,8 +263,8 @@ Facts:
 - queue counts match the private audit: cleanup `10`, with private `19`, with low priority `31`, diagnostics `7,379`;
 - actions: `local-alias` `8`, `replace-local-uses` `2`;
 - replacement hint caller-impact states: bounded callers `8`, no callers `2`;
-- probes used cached evidence: planned `230`, cached `180`, worker pairs `0`, verified `42`, rejected `104`,
-  unavailable `84`;
+- probes used cached evidence: planned `230`, cached `180`, worker pairs `0`, verified `42`, rejected `104`, unavailable
+  `84`;
 - runtime `11.50s`; max RSS `6,111,920,128` bytes; JSON size `136,596` bytes;
 - `jq '.status'` parse time was below the timer resolution (`0.00s` reported).
 

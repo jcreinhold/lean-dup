@@ -24,9 +24,9 @@ Three validation designs were considered:
    state from scattered artifacts and old command output.
 2. Rerun only fast CI and fixture gates. This was rejected because the production question is about real KanProofs and
    mathlib behavior, not only unit coverage.
-3. Run one release matrix that rechecks quality, performance, diagnostics, report contract, real workloads, and
-   boundary tests from clean artifacts. This was chosen. It is deeper because each owning layer exposes stable facts,
-   while the release decision consumes one coherent evidence artifact.
+3. Run one release matrix that rechecks quality, performance, diagnostics, report contract, real workloads, and boundary
+   tests from clean artifacts. This was chosen. It is deeper because each owning layer exposes stable facts, while the
+   release decision consumes one coherent evidence artifact.
 
 ## Matrix setup
 
@@ -94,9 +94,9 @@ The internal warm-cache audit demonstrates cache reuse: worker pairs dropped fro
 external declarations and 13,630 hydrated external candidates.
 
 The report-size and parseability target passed. The RSS gate remains incomplete for full audits because peak RSS was not
-available from the timing wrapper in this environment. The eval production-gate artifact recorded
-7,326,777,344 bytes, above the 6.5 GiB target recorded in the performance work, so memory remains a release blocker even
-without full-audit RSS.
+available from the timing wrapper in this environment. The eval production-gate artifact recorded 7,326,777,344 bytes,
+above the 6.5 GiB target recorded in the performance work, so memory remains a release blocker even without full-audit
+RSS.
 
 ## Diagnostics and report contract
 
@@ -113,9 +113,9 @@ cache key: rust-cli-cache.v1
 worker: run `lean-dup doctor --workspace <workspace> --format json` for Lean worker facts
 ```
 
-`doctor --format json` on the fixture workspace reported `status: ok`, `report_schema_version:
-lean-dup.report.v3`, `index_schema_version: lean-dup.index.v2`, cache key `rust-cli-cache.v1`, worker protocol
-`lean-dup.worker.v1`, worker version `0.1.0`, and Lean `4.30.0`.
+`doctor --format json` on the fixture workspace reported `status: ok`, `report_schema_version: lean-dup.report.v3`,
+`index_schema_version: lean-dup.index.v2`, cache key `rust-cli-cache.v1`, worker protocol `lean-dup.worker.v1`, worker
+version `0.1.0`, and Lean `4.30.0`.
 
 The ordinary report-contract fixture satisfied:
 

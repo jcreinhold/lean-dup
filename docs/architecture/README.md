@@ -20,7 +20,8 @@ Reference material for contributors. For a Lean-developer-facing walkthrough, se
 **Indexing and comparison**
 
 - [cache-validity-lifecycle.md](cache-validity-lifecycle.md): when an index is stale, doctor and cleanup.
-- [external-comparison-provenance.md](external-comparison-provenance.md): `proof-grade` vs `source-backed-not-importable` vs `static` evidence modes.
+- [external-comparison-provenance.md](external-comparison-provenance.md): `proof-grade` vs
+  `source-backed-not-importable` vs `static` evidence modes.
 
 **Search quality**
 
