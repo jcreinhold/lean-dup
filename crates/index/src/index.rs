@@ -16,14 +16,34 @@ use lean_dup_worker::{
     ModuleDescriptor, ProbePair, ProbeResult, RoleFeature, SourceSpan, WorkerClient, WorkerDiagnostic, WorkerError,
     WorkerEvent, WorkerVersion,
 };
+use lean_semantic_search_contract::OpaqueFeatureKey;
+use lean_semantic_search_retrieval::Corpus;
+use lean_semantic_search_store::{Ingest, Store, StoreBuilder, StoreError};
 
+use crate::feature_dto::{feature_to_contract, worker_fingerprints, worker_role_features};
 use crate::{Error, Result};
 
-pub const INDEX_SCHEMA_VERSION: &str = "lean-dup.index.sqlite.v2";
-pub const INDEX_DIAGNOSTIC_SCHEMA_VERSION: &str = "lean-dup.index.v2";
+pub const INDEX_SCHEMA_VERSION: &str = "lean-dup.index.sqlite.v3";
+pub const INDEX_DIAGNOSTIC_SCHEMA_VERSION: &str = "lean-dup.index.v3";
 const INDEX_PROVENANCE_VERSION: &str = "lean-dup.index.provenance.v1";
 const MATHLIB_DECLARATION_CHUNK_SIZE: usize = 32;
 const MAX_MATHLIB_INDEX_THREADS: usize = 2;
+
+/// Upper bound on postings fetched per key from the shared corpus. The index
+/// returns every match for a key; retrieval applies its own selectivity
+/// pruning. The bound only guards against a pathologically broad key and is set
+/// far above any real per-key posting count.
+const STORE_POSTING_LIMIT: usize = 1_000_000_000;
+
+/// The opaque equality token a semantic key carries into the corpus. Fingerprint
+/// kind and role are already folded into the key's version-prefixed hash, so the
+/// corpus needs only the key itself.
+fn key_token(key: &SemanticFeatureKey) -> OpaqueFeatureKey {
+    match key {
+        SemanticFeatureKey::Fingerprint(query) => OpaqueFeatureKey::new(query.key.clone()),
+        SemanticFeatureKey::RoleFeature(query) => OpaqueFeatureKey::new(query.key.clone()),
+    }
+}
 
 /// Builds, resolves, and opens persisted declaration indexes.
 ///
@@ -599,6 +619,11 @@ impl OpenedIndex {
         })
     }
 
+    /// Open the shared semantic corpus that sits beside this index.
+    fn open_store(&self) -> Result<Store> {
+        Store::open(corpus_path(&self.path)).map_err(store_error)
+    }
+
     /// Count matches for each requested semantic key without hydrating rows.
     pub fn feature_fanout(&self, keys: &[SemanticFeatureKey]) -> Result<SemanticFeatureFanout> {
         if keys.is_empty() {
@@ -606,13 +631,13 @@ impl OpenedIndex {
         }
         perf::record_count(CostClass::SqliteIndex, "sqlite.posting_count.keys", keys.len() as u64);
         perf::measure_result(CostClass::SqliteIndex, "sqlite.feature_match_counts", || {
-            let connection = open_readonly(&self.path)?;
+            let store = self.open_store()?;
+            let active = keys.iter().filter(|key| !key.is_empty()).collect::<Vec<_>>();
+            let tokens = active.iter().map(|key| key_token(key)).collect::<Vec<_>>();
+            let fanouts = store.fanout(&tokens);
             let mut counts = BTreeMap::new();
-            for key in keys {
-                if key.is_empty() {
-                    continue;
-                }
-                counts.insert(key.clone(), feature_match_count(&connection, key)?);
+            for (key, count) in active.into_iter().zip(fanouts) {
+                counts.insert(key.clone(), count);
             }
             Ok(SemanticFeatureFanout { counts })
         })
@@ -628,13 +653,18 @@ impl OpenedIndex {
         }
         perf::record_count(CostClass::SqliteIndex, "sqlite.matched_posting.keys", keys.len() as u64);
         perf::measure_result(CostClass::SqliteIndex, "sqlite.matched_feature_handles", || {
-            let connection = open_readonly(&self.path)?;
+            let store = self.open_store()?;
             let mut matches = BTreeMap::new();
             for key in keys {
                 if key.is_empty() {
                     continue;
                 }
-                matches.insert(key.clone(), feature_match_handles(&connection, key)?);
+                let handles = store
+                    .postings(&key_token(key), STORE_POSTING_LIMIT)
+                    .into_iter()
+                    .map(DeclarationHandle)
+                    .collect();
+                matches.insert(key.clone(), handles);
             }
             perf::record_count(
                 CostClass::SqliteIndex,
@@ -649,7 +679,7 @@ impl OpenedIndex {
     pub fn all_handles(&self) -> Result<Vec<DeclarationHandle>> {
         let connection = open_readonly(&self.path)?;
         let mut statement =
-            connection.prepare("SELECT handle FROM declarations ORDER BY qualified_name, declaration_id")?;
+            connection.prepare("SELECT declaration_id FROM declarations ORDER BY qualified_name, declaration_id")?;
         let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
         let mut handles = Vec::new();
         for row in rows {
@@ -659,32 +689,22 @@ impl OpenedIndex {
     }
 
     fn matching_handles(&self, query: SemanticFeatureQuery) -> Result<Vec<DeclarationHandle>> {
-        let connection = open_readonly(&self.path)?;
+        let store = self.open_store()?;
         let mut handles = BTreeSet::new();
         for fingerprint in query.fingerprints {
             if fingerprint.key.is_empty() {
                 continue;
             }
-            let mut statement = connection
-                .prepare("SELECT declaration_handle FROM fingerprint_postings WHERE kind = ?1 AND key = ?2")?;
-            let rows = statement.query_map(params![fingerprint.kind.as_str(), fingerprint.key], |row| {
-                row.get::<_, String>(0)
-            })?;
-            for row in rows {
-                handles.insert(DeclarationHandle(row?));
+            for id in store.postings(&OpaqueFeatureKey::new(fingerprint.key), STORE_POSTING_LIMIT) {
+                handles.insert(DeclarationHandle(id));
             }
         }
         for role_feature in query.role_features {
             if role_feature.key.is_empty() {
                 continue;
             }
-            let mut statement = connection
-                .prepare("SELECT declaration_handle FROM role_feature_postings WHERE role = ?1 AND key = ?2")?;
-            let rows = statement.query_map(params![role_feature.role, role_feature.key], |row| {
-                row.get::<_, String>(0)
-            })?;
-            for row in rows {
-                handles.insert(DeclarationHandle(row?));
+            for id in store.postings(&OpaqueFeatureKey::new(role_feature.key), STORE_POSTING_LIMIT) {
+                handles.insert(DeclarationHandle(id));
             }
         }
         Ok(handles.into_iter().collect())
@@ -701,9 +721,10 @@ impl OpenedIndex {
         );
         perf::measure_result(CostClass::SqliteIndex, "sqlite.hydrate", || {
             let connection = open_readonly(&self.path)?;
+            let store = self.open_store()?;
             let mut hydrated = Vec::with_capacity(handles.len());
             for handle in handles {
-                let declaration = load_declaration(&connection, handle)?;
+                let declaration = load_declaration(&connection, &store, handle)?;
                 hydrated.push(declaration);
             }
             Ok(hydrated)
@@ -731,7 +752,7 @@ impl OpenedIndex {
             names.dedup();
             let mut handles = Vec::new();
             let mut statement = connection
-                .prepare("SELECT handle FROM declarations WHERE qualified_name = ?1 ORDER BY declaration_id")?;
+                .prepare("SELECT declaration_id FROM declarations WHERE qualified_name = ?1 ORDER BY declaration_id")?;
             for name in names {
                 let rows = statement.query_map(params![name], |row| row.get::<_, String>(0))?;
                 for row in rows {
@@ -764,7 +785,7 @@ impl OpenedIndex {
             names.dedup();
             let mut handles = Vec::new();
             let mut statement = connection
-                .prepare("SELECT handle FROM declarations WHERE display_name = ?1 ORDER BY declaration_id")?;
+                .prepare("SELECT declaration_id FROM declarations WHERE display_name = ?1 ORDER BY declaration_id")?;
             for name in names {
                 let rows = statement.query_map(params![name], |row| row.get::<_, String>(0))?;
                 for row in rows {
@@ -814,17 +835,6 @@ impl SemanticFeatureKey {
         match self {
             Self::Fingerprint(query) => query.key.is_empty(),
             Self::RoleFeature(query) => query.key.is_empty(),
-        }
-    }
-}
-
-impl FingerprintKind {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Statement => "statement",
-            Self::SafeBinderPermutation => "safe_binder_permutation",
-            Self::ConnectiveShape => "connective_shape",
-            Self::ConclusionShape => "conclusion_shape",
         }
     }
 }
@@ -962,6 +972,8 @@ fn write_sqlite_index(
             .into_iter()
             .map(|feature| (feature.declaration_id.clone(), feature))
             .collect::<HashMap<_, _>>();
+        let mut store_builder =
+            StoreBuilder::create(corpus_path(index_path), corpus_token(cache_key_json)).map_err(store_error)?;
         let mut connection = Connection::open(&temp_path)?;
         initialize_schema(&connection)?;
         let transaction = connection.transaction()?;
@@ -975,8 +987,10 @@ fn write_sqlite_index(
                     ),
                 });
             };
-            insert_declaration(&transaction, &declaration, feature)?;
+            insert_display(&transaction, &declaration)?;
+            feed_store(&mut store_builder, &declaration, feature)?;
         }
+        store_builder.publish().map_err(store_error)?;
         transaction.commit()?;
         replace_file(&temp_path, index_path)?;
         Ok(())
@@ -991,6 +1005,7 @@ struct BatchedIndexBuild {
 struct StreamingIndexWriter {
     pending_declarations: HashMap<String, DeclarationRow>,
     pending_features: HashMap<String, FeatureRow>,
+    store_builder: StoreBuilder,
     written: usize,
 }
 
@@ -1019,9 +1034,12 @@ fn write_batched_sqlite_index(
     let modules = modules_for(request);
     let total_modules = modules.len();
     let index_threads = mathlib_index_threads();
+    let store_builder =
+        StoreBuilder::create(corpus_path(index_path), corpus_token(cache_key_json)).map_err(store_error)?;
     let mut writer = StreamingIndexWriter {
         pending_declarations: HashMap::default(),
         pending_features: HashMap::default(),
+        store_builder,
         written: 0,
     };
     reporter.event(
@@ -1137,7 +1155,8 @@ impl StreamingIndexWriter {
         declaration: &DeclarationRow,
         feature: &FeatureRow,
     ) -> Result<()> {
-        insert_declaration(connection, declaration, feature)?;
+        insert_display(connection, declaration)?;
+        feed_store(&mut self.store_builder, declaration, feature)?;
         self.written += 1;
         if self.written.is_multiple_of(1000) {
             perf::record_count(CostClass::SqliteIndex, "sqlite.index.declarations", self.written as u64);
@@ -1155,6 +1174,7 @@ impl StreamingIndexWriter {
                 ),
             });
         }
+        self.store_builder.publish().map_err(store_error)?;
         perf::record_count(CostClass::SqliteIndex, "sqlite.index.declarations", self.written as u64);
         perf::record_count(CostClass::SqliteIndex, "sqlite.index.features", self.written as u64);
         Ok(())
@@ -1173,8 +1193,7 @@ fn initialize_schema(connection: &Connection) -> Result<()> {
         );
 
         CREATE TABLE declarations (
-            handle TEXT PRIMARY KEY,
-            declaration_id TEXT NOT NULL UNIQUE,
+            declaration_id TEXT PRIMARY KEY,
             origin TEXT NOT NULL,
             module TEXT NOT NULL,
             qualified_name TEXT NOT NULL,
@@ -1189,36 +1208,13 @@ fn initialize_schema(connection: &Connection) -> Result<()> {
             status_flags_json TEXT NOT NULL
         );
 
-        CREATE TABLE declaration_features (
-            declaration_handle TEXT PRIMARY KEY,
-            feature_version TEXT NOT NULL,
-            fingerprints_json TEXT NOT NULL,
-            role_features_json TEXT NOT NULL,
-            binder_count INTEGER NOT NULL,
-            low_signal_markers_json TEXT NOT NULL
-        );
-
-        CREATE TABLE fingerprint_postings (
-            kind TEXT NOT NULL,
-            key TEXT NOT NULL,
-            declaration_handle TEXT NOT NULL
-        );
-
-        CREATE TABLE role_feature_postings (
-            role TEXT NOT NULL,
-            key TEXT NOT NULL,
-            display TEXT,
-            declaration_handle TEXT NOT NULL
-        );
-
         CREATE TABLE probe_cache (
             pair_key TEXT PRIMARY KEY,
             payload_json TEXT NOT NULL
         );
 
-        CREATE INDEX fingerprint_postings_key ON fingerprint_postings(kind, key);
-        CREATE INDEX role_feature_postings_key ON role_feature_postings(role, key);
         CREATE INDEX declarations_name ON declarations(qualified_name);
+        CREATE INDEX declarations_display ON declarations(display_name);
         ",
     )?;
     Ok(())
@@ -1267,12 +1263,14 @@ fn index_provenance(request: &IndexBuildRequest, version: &WorkerVersion) -> Res
     })
 }
 
-fn insert_declaration(connection: &Connection, declaration: &DeclarationRow, feature: &FeatureRow) -> Result<()> {
-    let handle = DeclarationHandle(handle_for(&declaration.declaration_id));
+/// Write one declaration's display/hydration row. The semantic feature row and
+/// its postings go to the shared store (see [`feed_store`]), keyed by the same
+/// `declaration_id`; this table carries only the facts hydration and reporting
+/// need.
+fn insert_display(connection: &Connection, declaration: &DeclarationRow) -> Result<()> {
     connection.execute(
-        "INSERT INTO declarations VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        "INSERT OR IGNORE INTO declarations VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
-            handle.0,
             declaration.declaration_id,
             declaration.origin,
             declaration.module,
@@ -1288,66 +1286,38 @@ fn insert_declaration(connection: &Connection, declaration: &DeclarationRow, fea
             serde_json::to_string(&declaration.status_flags)?,
         ],
     )?;
-    connection.execute(
-        "INSERT INTO declaration_features VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![
-            handle.0,
-            feature.feature_version,
-            serde_json::to_string(&feature.fingerprints)?,
-            serde_json::to_string(&feature.role_features)?,
-            i64::try_from(feature.binder_count).map_err(|_| Error::Index {
-                message: format!("binder count exceeds sqlite integer range: {}", feature.binder_count),
-            })?,
-            serde_json::to_string(&feature.low_signal_markers)?,
-        ],
-    )?;
-    insert_fingerprint(
-        connection,
-        FingerprintKind::Statement,
-        &feature.fingerprints.statement,
-        &handle,
-    )?;
-    insert_fingerprint(
-        connection,
-        FingerprintKind::SafeBinderPermutation,
-        &feature.fingerprints.safe_binder_permutation,
-        &handle,
-    )?;
-    insert_fingerprint(
-        connection,
-        FingerprintKind::ConnectiveShape,
-        &feature.fingerprints.connective_shape,
-        &handle,
-    )?;
-    insert_fingerprint(
-        connection,
-        FingerprintKind::ConclusionShape,
-        &feature.fingerprints.conclusion_shape,
-        &handle,
-    )?;
-    for role_feature in &feature.role_features {
-        connection.execute(
-            "INSERT INTO role_feature_postings VALUES (?1, ?2, ?3, ?4)",
-            params![role_feature.role, role_feature.key, role_feature.display, handle.0,],
-        )?;
-    }
     Ok(())
 }
 
-fn insert_fingerprint(
-    connection: &Connection,
-    kind: FingerprintKind,
-    key: &str,
-    handle: &DeclarationHandle,
-) -> Result<()> {
-    if key.is_empty() {
-        return Ok(());
-    }
-    connection.execute(
-        "INSERT INTO fingerprint_postings VALUES (?1, ?2, ?3)",
-        params![kind.as_str(), key, handle.0],
-    )?;
+/// Feed one declaration and its feature row to the shared corpus builder. The
+/// builder pairs the two by `declaration_id` and owns posting and feature-row
+/// storage; an unpaired half is simply not indexed.
+fn feed_store(builder: &mut StoreBuilder, declaration: &DeclarationRow, feature: &FeatureRow) -> Result<()> {
+    builder
+        .accept(Ingest::Declaration(declaration.declaration_id.clone()))
+        .map_err(store_error)?;
+    builder
+        .accept(Ingest::Feature(feature_to_contract(feature)))
+        .map_err(store_error)?;
     Ok(())
+}
+
+/// Path of the shared semantic corpus that sits beside a `lean-dup` index.
+fn corpus_path(index_path: &Path) -> PathBuf {
+    index_path.with_file_name("corpus.sqlite")
+}
+
+/// The opaque corpus identity handed to the store: the same content hash that
+/// names the cache entry, so the store rejects a corpus built for a different
+/// set of semantic inputs.
+fn corpus_token(cache_key_json: &str) -> String {
+    hex_digest(cache_key_json.as_bytes())
+}
+
+fn store_error(error: StoreError) -> Error {
+    Error::Index {
+        message: format!("semantic corpus store: {error}"),
+    }
 }
 
 fn optional_json<T: Serialize>(value: &Option<T>) -> Result<Option<String>> {
@@ -1395,45 +1365,6 @@ fn metadata_value(connection: &Connection, key: &str) -> Result<Option<String>> 
         .optional()?)
 }
 
-fn feature_match_count(connection: &Connection, key: &SemanticFeatureKey) -> Result<usize> {
-    let count = match key {
-        SemanticFeatureKey::Fingerprint(query) => connection.query_row(
-            "SELECT COUNT(*) FROM fingerprint_postings WHERE kind = ?1 AND key = ?2",
-            params![query.kind.as_str(), query.key],
-            |row| row.get::<_, i64>(0),
-        )?,
-        SemanticFeatureKey::RoleFeature(query) => connection.query_row(
-            "SELECT COUNT(*) FROM role_feature_postings WHERE role = ?1 AND key = ?2",
-            params![query.role, query.key],
-            |row| row.get::<_, i64>(0),
-        )?,
-    };
-    Ok(count as usize)
-}
-
-fn feature_match_handles(connection: &Connection, key: &SemanticFeatureKey) -> Result<Vec<DeclarationHandle>> {
-    let mut handles = Vec::new();
-    match key {
-        SemanticFeatureKey::Fingerprint(query) => {
-            let mut statement = connection
-                .prepare("SELECT declaration_handle FROM fingerprint_postings WHERE kind = ?1 AND key = ?2")?;
-            let rows = statement.query_map(params![query.kind.as_str(), query.key], |row| row.get::<_, String>(0))?;
-            for row in rows {
-                handles.push(DeclarationHandle(row?));
-            }
-        }
-        SemanticFeatureKey::RoleFeature(query) => {
-            let mut statement = connection
-                .prepare("SELECT declaration_handle FROM role_feature_postings WHERE role = ?1 AND key = ?2")?;
-            let rows = statement.query_map(params![query.role, query.key], |row| row.get::<_, String>(0))?;
-            for row in rows {
-                handles.push(DeclarationHandle(row?));
-            }
-        }
-    }
-    Ok(handles)
-}
-
 fn declaration_count(index_path: &Path) -> Result<usize> {
     perf::measure_result(CostClass::SqliteIndex, "sqlite.declaration_count", || {
         let connection = open_readonly(index_path)?;
@@ -1442,35 +1373,31 @@ fn declaration_count(index_path: &Path) -> Result<usize> {
     })
 }
 
-#[allow(dead_code)]
-fn load_declaration(connection: &Connection, handle: &DeclarationHandle) -> Result<HydratedDeclaration> {
+/// Hydrate one declaration by joining its display row (from this index's
+/// `declarations` table) with its semantic feature row (from the shared corpus).
+/// The handle is the opaque, stable `declaration_id` that keys both stores.
+fn load_declaration(connection: &Connection, store: &Store, handle: &DeclarationHandle) -> Result<HydratedDeclaration> {
+    let declaration_id = handle.as_str();
     let row = connection
         .query_row(
             "
             SELECT
-              d.declaration_id,
-              d.origin,
-              d.module,
-              d.qualified_name,
-              d.display_name,
-              d.kind,
-              d.visibility,
-              d.modifiers_json,
-              d.source_span_json,
-              d.statement_text,
-              d.docstring_text,
-              d.definition_body_summary,
-              d.status_flags_json,
-              f.feature_version,
-              f.fingerprints_json,
-              f.role_features_json,
-              f.binder_count,
-              f.low_signal_markers_json
-            FROM declarations d
-            JOIN declaration_features f ON f.declaration_handle = d.handle
-            WHERE d.handle = ?1
+              origin,
+              module,
+              qualified_name,
+              display_name,
+              kind,
+              visibility,
+              modifiers_json,
+              source_span_json,
+              statement_text,
+              docstring_text,
+              definition_body_summary,
+              status_flags_json
+            FROM declarations
+            WHERE declaration_id = ?1
             ",
-            params![handle.0],
+            params![declaration_id],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -1480,17 +1407,11 @@ fn load_declaration(connection: &Connection, handle: &DeclarationHandle) -> Resu
                     row.get::<_, String>(4)?,
                     row.get::<_, String>(5)?,
                     row.get::<_, String>(6)?,
-                    row.get::<_, String>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, String>(9)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, Option<String>>(9)?,
                     row.get::<_, Option<String>>(10)?,
-                    row.get::<_, Option<String>>(11)?,
-                    row.get::<_, String>(12)?,
-                    row.get::<_, String>(13)?,
-                    row.get::<_, String>(14)?,
-                    row.get::<_, String>(15)?,
-                    row.get::<_, i64>(16)?,
-                    row.get::<_, String>(17)?,
+                    row.get::<_, String>(11)?,
                 ))
             },
         )
@@ -1499,34 +1420,34 @@ fn load_declaration(connection: &Connection, handle: &DeclarationHandle) -> Resu
             message: "declaration handle was not found in index".to_owned(),
         })?;
 
+    let feature = store.declaration_row(declaration_id).ok_or_else(|| Error::Index {
+        message: format!("declaration {declaration_id} is missing from the semantic corpus"),
+    })?;
+
     Ok(HydratedDeclaration {
         handle: handle.clone(),
-        declaration_id: row.0,
-        origin: row.1,
-        module: row.2,
-        qualified_name: row.3,
-        display_name: row.4,
-        kind: row.5,
-        visibility: row.6,
-        modifiers: serde_json::from_str(&row.7)?,
-        source_span: match row.8 {
+        declaration_id: declaration_id.to_owned(),
+        origin: row.0,
+        module: row.1,
+        qualified_name: row.2,
+        display_name: row.3,
+        kind: row.4,
+        visibility: row.5,
+        modifiers: serde_json::from_str(&row.6)?,
+        source_span: match row.7 {
             Some(json) => Some(serde_json::from_str(&json)?),
             None => None,
         },
-        statement_text: row.9,
-        docstring_text: row.10,
-        definition_body_summary: row.11,
-        status_flags: serde_json::from_str(&row.12)?,
-        feature_version: row.13,
-        fingerprints: serde_json::from_str(&row.14)?,
-        role_features: serde_json::from_str(&row.15)?,
-        binder_count: row.16 as u64,
-        low_signal_markers: serde_json::from_str(&row.17)?,
+        statement_text: row.8,
+        docstring_text: row.9,
+        definition_body_summary: row.10,
+        status_flags: serde_json::from_str(&row.11)?,
+        feature_version: feature.feature_version,
+        fingerprints: worker_fingerprints(&feature.fingerprints),
+        role_features: worker_role_features(&feature.role_features),
+        binder_count: u64::from(feature.binder_count),
+        low_signal_markers: feature.low_signal_markers,
     })
-}
-
-fn handle_for(declaration_id: &str) -> String {
-    format!("decl-{}", hex_digest(declaration_id.as_bytes()))
 }
 
 fn safe_label(label: &str) -> String {

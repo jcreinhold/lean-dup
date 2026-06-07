@@ -9,6 +9,7 @@ lean-dup-diagnostics = { workspace = true }
 lean-dup-project = { workspace = true }
 lean-dup-worker = { workspace = true }
 lean-semantic-search-contract = { workspace = true }
+lean-semantic-search-retrieval = { workspace = true }
 lean-semantic-search-store = { workspace = true }
 rusqlite = { workspace = true }
 rustc-hash = { workspace = true }

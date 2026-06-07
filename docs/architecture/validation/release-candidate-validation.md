@@ -108,13 +108,13 @@ package: lean-dup-cli
 git revision: 7e43ccbbb0a4
 build profile: release
 report schema: lean-dup.report.v3
-index schema: lean-dup.index.v2
+index schema: lean-dup.index.v3
 cache key: rust-cli-cache.v1
 worker: run `lean-dup doctor --workspace <workspace> --format json` for Lean worker facts
 ```
 
 `doctor --format json` on the fixture workspace reported `status: ok`, `report_schema_version: lean-dup.report.v3`,
-`index_schema_version: lean-dup.index.v2`, cache key `rust-cli-cache.v1`, worker protocol `lean-dup.worker.v1`, worker
+`index_schema_version: lean-dup.index.v3`, cache key `rust-cli-cache.v1`, worker protocol `lean-dup.worker.v1`, worker
 version `0.1.0`, and Lean `4.30.0`.
 
 The ordinary report-contract fixture satisfied:

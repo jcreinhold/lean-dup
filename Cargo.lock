@@ -3564,6 +3564,7 @@ dependencies = [
  "lean-dup-project",
  "lean-dup-worker",
  "lean-semantic-search-contract",
+ "lean-semantic-search-retrieval",
  "lean-semantic-search-store",
  "rusqlite",
  "rustc-hash",

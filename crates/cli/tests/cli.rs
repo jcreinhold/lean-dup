@@ -333,7 +333,7 @@ fn version_reports_release_identity_without_workspace() {
         .stdout(predicate::str::contains("git revision:"))
         .stdout(predicate::str::contains("build profile:"))
         .stdout(predicate::str::contains("report schema: lean-dup.report.v3"))
-        .stdout(predicate::str::contains("index schema: lean-dup.index.v2"))
+        .stdout(predicate::str::contains("index schema: lean-dup.index.v3"))
         .stdout(predicate::str::contains("cache key: rust-cli-cache.v1"))
         .stdout(predicate::str::contains("doctor --workspace <workspace>"));
 }
@@ -360,7 +360,7 @@ fn doctor_json_reports_cache_lifecycle_diagnostics() {
     assert_eq!(payload["status"], "ok");
     assert_eq!(payload["release"]["version"], "0.1.0");
     assert_eq!(payload["release"]["report_schema_version"], "lean-dup.report.v3");
-    assert_eq!(payload["release"]["index_schema_version"], "lean-dup.index.v2");
+    assert_eq!(payload["release"]["index_schema_version"], "lean-dup.index.v3");
     assert_eq!(payload["release"]["cache_key_version"], "rust-cli-cache.v1");
     assert_eq!(payload["worker"]["protocol_version"], "lean-dup.worker.v1");
     assert_eq!(payload["worker"]["worker_version"], "0.1.0");

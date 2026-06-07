@@ -59,7 +59,7 @@ package: lean-dup-cli
 git revision: 647094d17ac9
 build profile: debug
 report schema: lean-dup.report.v3
-index schema: lean-dup.index.v2
+index schema: lean-dup.index.v3
 cache key: rust-cli-cache.v1
 worker: run `lean-dup doctor --workspace <workspace> --format json` for Lean worker facts
 ```
@@ -87,7 +87,7 @@ Doctor output uses redacted path references such as:
 
 It must not expose absolute private paths, cache-entry file names, storage vocabulary, worker rows, or subprocess
 transport details. The index crate continues to own the internal persisted schema string; release diagnostics use the
-storage-neutral label `lean-dup.index.v2`.
+storage-neutral label `lean-dup.index.v3`.
 
 ## CI Contract
 

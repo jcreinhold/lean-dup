@@ -8,6 +8,7 @@ mod cache;
 mod cache_lifecycle;
 mod error;
 mod external_provenance;
+mod feature_dto;
 mod index;
 
 pub use cache::{CACHE_KEY_VERSION, CacheFacts, cache_root, resolve_cache, workspace_fingerprint};
@@ -50,7 +51,7 @@ mod tests {
     #[test]
     fn diagnostic_index_schema_labels_do_not_expose_storage_backend() {
         assert_eq!(
-            diagnostic_index_schema_version("lean-dup.index.sqlite.v2"),
+            diagnostic_index_schema_version("lean-dup.index.sqlite.v3"),
             INDEX_DIAGNOSTIC_SCHEMA_VERSION
         );
         assert_eq!(
