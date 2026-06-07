@@ -1,9 +1,16 @@
 import Lean
-import LeanDup.Canonical
 import LeanDup.Extract
+import LeanSemanticSearch.Canonical
+import LeanSemanticSearch.RoleFeatures
+import LeanSemanticSearch.LeanCompat
 
 /-!
 `LeanDup.Features` owns worker feature rows computed by Lean.
+
+The neutral semantic computation — canonical fingerprints and role features — is
+shared: it comes from the `lean-semantic-search` package (`canonical.expr.v3`,
+`features.roles.v3`). This module owns only the `lean-dup.worker.v1` row payload
+and the subprocess command integration; it does not reimplement canonicalization.
 
 Callers may store and compare feature keys as opaque semantic facts. They must
 not reconstruct features from pretty text, source snippets, declaration names,
@@ -13,8 +20,11 @@ namespace LeanDup.Features
 
 open Lean
 open Lean.Meta
+open LeanSemanticSearch
 
-/-- Semantic algorithm marker for Lean-owned feature rows. -/
+/-- Semantic algorithm marker for Lean-owned feature rows. Matches the shared
+    package's `features.roles.v3`; carried explicitly because it is part of the
+    `lean-dup.worker.v1` wire contract. -/
 def version : String := "features.roles.v3"
 
 /-- Feature errors are mapped by the worker into protocol error envelopes. -/
@@ -51,158 +61,18 @@ private def optionalJsonField (json : Json) (key : String) : Option Json :=
 private def stringArrayJson (values : Array String) : Json :=
   Json.arr (values.map Json.str)
 
-private def hashSeed : UInt64 := 14695981039346656037
-
-private def hashPrime : UInt64 := 1099511628211
-
-private def roleKeyVersion : String := "features.role_key.v1"
-
-private def stableHash (text : String) : String :=
-  toString <|
-    text.foldl
-      (fun acc char => (acc ^^^ char.toNat.toUInt64) * hashPrime)
-      hashSeed
-
-private inductive Role where
-  | conclusionConst
-  | conclusionHead
-  | hypothesisConst
-  | hypothesisHead
-  | binderDomainHead
-  deriving BEq
-
-namespace Role
-
-private def asString : Role → String
-  | .conclusionConst => "conclusion_const"
-  | .conclusionHead => "conclusion_head"
-  | .hypothesisConst => "hypothesis_const"
-  | .hypothesisHead => "hypothesis_head"
-  | .binderDomainHead => "binder_domain_head"
-
-end Role
-
-private structure RoleFeature where
-  role : Role
-  name : Name
-
-private def RoleFeature.sortKey (feature : RoleFeature) : String :=
-  s!"{feature.role.asString}:{feature.name}"
-
-private def roleKey (feature : RoleFeature) : String :=
-  let text := feature.sortKey
-  s!"{roleKeyVersion}:{stableHash text}"
-
-private def RoleFeature.toJson (feature : RoleFeature) : Json :=
-  Json.mkObj
-    [ ("role", Json.str feature.role.asString)
-    , ("key", Json.str (roleKey feature))
-    , ("display", Json.str feature.name.toString)
-    ]
-
-private def containsFeature (features : Array RoleFeature) (feature : RoleFeature) : Bool :=
-  features.any fun existing =>
-    existing.role == feature.role && existing.name == feature.name
-
-private def pushFeature (features : Array RoleFeature) (feature : RoleFeature) :
-    Array RoleFeature :=
-  if containsFeature features feature then features else features.push feature
-
-private def sortedFeatures (features : Array RoleFeature) : Array RoleFeature :=
-  features.qsort fun left right => left.sortKey < right.sortKey
-
-private def featuresJson (features : Array RoleFeature) : Json :=
-  Json.arr (sortedFeatures features |>.map RoleFeature.toJson)
-
-private def broadHeadNames : Std.HashSet String :=
-  [ "Eq"
-  , "Iff"
-  , "Exists"
-  , "Nonempty"
-  , "False"
-  , "True"
-  , "Ne"
-  , "Not"
-  , "And"
-  , "Or"
-  , "LE.le"
-  , "LT.lt"
-  , "Membership.mem"
-  , "HasSubset.Subset"
-  ].foldl (fun set name => set.insert name) {}
-
-private def isBroadHead (name : Name) : Bool :=
-  broadHeadNames.contains name.toString
-
-private partial def appHead (expr : Expr) : Expr :=
-  match expr with
-  | .app fn _ => appHead fn
-  | .mdata _ body => appHead body
-  | other => other
-
-private def headName? (expr : Expr) : Option Name :=
-  match appHead expr with
-  | .const name _ => some name
-  | _ => none
-
-private def sortedNamesFromSet (names : NameSet) : Array Name :=
-  names.toArray.qsort fun left right => left.toString < right.toString
-
-private def addConstants
-    (role : Role)
-    (expr : Expr)
-    (features : Array RoleFeature) : Array RoleFeature := Id.run do
-  let mut result := features
-  for name in sortedNamesFromSet expr.getUsedConstantsAsSet do
-    result := pushFeature result { role := role, name := name }
-  pure result
-
-private def addHead
-    (role : Role)
-    (expr : Expr)
-    (features : Array RoleFeature) : Array RoleFeature :=
-  match headName? expr with
-  | some name => pushFeature features { role := role, name := name }
-  | none => features
-
-private def lowSignalMarkers (features : Array RoleFeature) : Array String := Id.run do
-  let mut markers := #[]
-  for feature in features do
-    match feature.role with
-    | .conclusionHead | .hypothesisHead | .binderDomainHead =>
-        if isBroadHead feature.name then
-          let marker := s!"broad_head:{feature.name}"
-          if !markers.contains marker then
-            markers := markers.push marker
-    | .conclusionConst | .hypothesisConst => pure ()
-  pure <| markers.qsort (· < ·)
-
-private def markersJson (markers : Array String) : Json :=
-  Json.arr (markers.map Json.str)
-
-private def roleFactsFromTelescope
-    (fvars : Array Expr)
-    (conclusion : Expr) : MetaM (Array RoleFeature × Array String) := do
-  let mut features := #[]
-  features := addConstants .conclusionConst conclusion features
-  features := addHead .conclusionHead conclusion features
-  for fvar in fvars do
-    let localDecl ← fvar.fvarId!.getDecl
-    if ← Meta.isProp localDecl.type then
-      features := addConstants .hypothesisConst localDecl.type features
-      features := addHead .hypothesisHead localDecl.type features
-    else
-      features := addHead .binderDomainHead localDecl.type features
-  pure (sortedFeatures features, lowSignalMarkers features)
-
+/-- Compute the shared neutral semantic facts for one declaration: translate its
+    signature into the package-owned `StatementShape`, then derive canonical
+    fingerprints and role features. Identical keys to the former local
+    implementation — same `canonical.expr.v3` / `features.roles.v3` algorithms,
+    now sourced from `lean-semantic-search`. -/
 private def semanticFacts
     (declaration : LeanDup.Extract.AcceptedDeclaration) :
-    MetaM (LeanDup.Canonical.Fingerprints × Array RoleFeature × Array String) := do
-  forallTelescope declaration.constInfo.type fun fvars conclusion => do
-    let fingerprints ←
-      LeanDup.Canonical.computeFromTelescope declaration.constInfo fvars conclusion
-    let (roleFeatures, markers) ← roleFactsFromTelescope fvars conclusion
-    pure (fingerprints, roleFeatures, markers)
+    MetaM (Canonical.Fingerprints × Array RoleFeatures.RoleFeature × Array String) := do
+  let statement ← LeanCompat.statementOfConstant declaration.constInfo
+  let fingerprints := Canonical.computeFromStatement statement
+  let (roleFeatures, markers) := RoleFeatures.factsFromStatement statement
+  pure (fingerprints, roleFeatures, markers)
 
 private def parseDeclarationIds (payload : Json) : Except Error (Option (Array String)) := do
   match optionalJsonField payload "declaration_ids" with
@@ -240,32 +110,28 @@ private def selectDeclarations
             (some <| Json.mkObj [("declaration_ids", stringArrayJson missing)])
       pure selected
 
-private def fingerprintsJson (fingerprints : LeanDup.Canonical.Fingerprints) : Json :=
-  Json.mkObj
-    [ ("statement", Json.str fingerprints.statement)
-    , ("safe_binder_permutation", Json.str fingerprints.safeBinderPermutation)
-    , ("connective_shape", Json.str fingerprints.connectiveShape)
-    , ("conclusion_shape", Json.str fingerprints.conclusionShape)
-    ]
-
 /--
 Encode one accepted declaration's semantic features as a protocol payload.
+
+The opaque-key encoders (`Fingerprints.toJson`, `RoleFeatures.featuresJson`,
+`RoleFeatures.markersJson`) are shared and byte-identical to the former local
+ones; this row keeps the `lean-dup.worker.v1` field set (no `source` field).
 
 Rust may store and compare the returned opaque keys but must not infer Lean
 expression structure from them.
 -/
 def rowPayload
     (declaration : LeanDup.Extract.AcceptedDeclaration)
-    (fingerprints : LeanDup.Canonical.Fingerprints)
-    (roleFeatures : Array RoleFeature)
+    (fingerprints : Canonical.Fingerprints)
+    (roleFeatures : Array RoleFeatures.RoleFeature)
     (markers : Array String) : Json :=
   Json.mkObj
     [ ("declaration_id", Json.str declaration.declarationId)
     , ("feature_version", Json.str version)
-    , ("fingerprints", fingerprintsJson fingerprints)
-    , ("role_features", featuresJson roleFeatures)
+    , ("fingerprints", fingerprints.toJson)
+    , ("role_features", RoleFeatures.featuresJson roleFeatures)
     , ("binder_count", Json.num fingerprints.binderCount)
-    , ("low_signal_markers", markersJson markers)
+    , ("low_signal_markers", RoleFeatures.markersJson markers)
     ]
 
 /--

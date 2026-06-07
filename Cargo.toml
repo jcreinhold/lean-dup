@@ -42,8 +42,13 @@ lean-dup-report = { path = "crates/report", version = "0.1.0" }
 lean-dup-search = { path = "crates/search", version = "0.1.0" }
 lean-dup-vector-index = { path = "crates/vector-index", version = "0.1.0" }
 lean-dup-worker = { path = "crates/worker", version = "0.1.0" }
+# Shared semantic-search package (sibling checkout). Path deps in this prompt;
+# the lean-rs-worker migration and proper publishing remain future work.
+lean-semantic-search-contract = { path = "../lean-semantic-search/crates/contract", version = "0.1.0" }
+lean-semantic-search-retrieval = { path = "../lean-semantic-search/crates/retrieval", version = "0.1.0" }
+lean-semantic-search-store = { path = "../lean-semantic-search/crates/store", version = "0.1.0" }
 predicates = "3"
-rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 rustc-hash = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

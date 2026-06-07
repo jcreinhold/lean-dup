@@ -1,4 +1,3 @@
-import LeanDup.Canonical
 import LeanDup.Extract
 import LeanDup.Features
 import LeanDup.Probe

@@ -1,9 +1,14 @@
 import Lean
-import LeanDup.Canonical
 import LeanDup.Extract
+import LeanSemanticSearch.Canonical
+import LeanSemanticSearch.LeanCompat
 
 /-!
 `LeanDup.Probe` owns bounded semantic checks between candidate declarations.
+
+Fingerprint comparison reuses the shared `lean-semantic-search` canonicalization
+(`canonical.expr.v3`); the probe's own structural-specialization shape and the
+reducibility checks stay local.
 
 Callers may rely on protocol-level probe result fields and per-pair status.
 They must not depend on traversal order, matching heuristics, reducibility
@@ -14,6 +19,7 @@ namespace LeanDup.Probe
 
 open Lean
 open Lean.Meta
+open LeanSemanticSearch
 
 /-- Semantic algorithm marker for Lean-owned probe rows. -/
 def version : String := "probe.semantic.v1"
@@ -433,8 +439,8 @@ private def probePair
       isDefEq left.constInfo.type right.constInfo.type
     else
       pure false
-  let leftFingerprints ← LeanDup.Canonical.compute left.constInfo
-  let rightFingerprints ← LeanDup.Canonical.compute right.constInfo
+  let leftFingerprints := Canonical.computeFromStatement (← LeanCompat.statementOfConstant left.constInfo)
+  let rightFingerprints := Canonical.computeFromStatement (← LeanCompat.statementOfConstant right.constInfo)
   let sameSafe :=
     theoremPair &&
       leftFingerprints.safeBinderPermutation == rightFingerprints.safeBinderPermutation
