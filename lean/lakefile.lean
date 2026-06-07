@@ -9,9 +9,16 @@ package «lean-dup-worker» where
 -- second copy; the subprocess worker protocol stays lean-dup's own.
 require «lean-semantic-search» from ".." / ".." / "lean-semantic-search" / "lean"
 
+-- Generic Lean/Rust worker-streaming helpers (callback-envelope mechanics) used by
+-- the lean-rs-worker-child capability path. Spike: building LeanDup as a shared
+-- capability dylib that the worker child loads.
+require «lean_rs_interop_shims» from
+  ".." / ".." / "lean-rs" / "crates" / "lean-rs" / "shims" / "lean-rs-interop-shims"
+
 lean_lib LeanDup where
   roots := #[`LeanDup]
   globs := #[.andSubmodules `LeanDup]
+  defaultFacets := #[LeanLib.sharedFacet]
 
 @[default_target]
 lean_exe lean_dup_worker where
