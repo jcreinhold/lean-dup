@@ -71,11 +71,10 @@ framing cost to account for.
 - **Mathlib-scale A/B benchmark.** The fixture-scale perf note above shows the subprocess startup/transport cost class
   vanishing, but a full mathlib-scale before/after wall-clock and RSS comparison needs an operator-supplied Lake
   workspace and is left as an operator follow-up.
-- **Capability packaging debt.** `crates/worker/build.rs` still patches the dependency manifest by hand and resolves
-  sibling-checkout Lake paths (`../../lean-rs`, `../../lean-semantic-search`). Per the
-  [capability-runtime design](../../../../prompts/designs/2026-06-08-lean-capability-runtime-architecture.md) this is the
-  flagged anti-pattern. It is isolated behind the private `LeanDupCapabilityRuntime` seam so the steady-state fix —
-  replacing `from_build_manifest` with a `build_cached(...)` call into a package-owned runtime crate — touches only that
-  one module, not the command path. Tracked as documented debt, not done in this migration.
+- **Remaining capability packaging debt.** `crates/worker/build.rs` no longer resolves
+  `../../lean-semantic-search/lean`; semantic-search source and its dylib come from
+  `lean-semantic-search-runtime`, and the generated capability manifest records that dylib through
+  `CargoLeanCapability`'s generic `LeanLibraryDependency` hook. The remaining follow-up is a package-owned source helper
+  for the `lean-rs` interop shims so the `../../lean-rs` checkout path can disappear too.
 </content>
 </invoke>

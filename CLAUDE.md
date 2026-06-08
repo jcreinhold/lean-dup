@@ -18,7 +18,9 @@ toolchain is `leanprover/lean4:v4.30.0` (other 4.x untested).
 ```sh
 # Build
 cargo build --release -p lean-dup-cli
-(cd lean && lake build LeanDup)   # builds the LeanDup shared-facet capability dylib + LeanDup.olean (needed by the audit pipeline)
+cargo build -p lean-dup-worker    # builds the generated LeanDup shared-facet capability root used by the audit pipeline
+# Optional direct Lean developer check, after materializing semantic search:
+# LEAN_DUP_SEMANTIC_SEARCH_ROOT=/path/to/materialized/lean-semantic-search lake -d lean build LeanDup
 
 # Lint / format (CI runs with -D warnings; treat all clippy warnings as errors)
 cargo fmt --all -- --check

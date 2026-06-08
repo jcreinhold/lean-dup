@@ -14,8 +14,13 @@ workspace whose `lake build` already succeeds, with `.olean` files present for t
 
 ```sh
 cargo build --release -p lean-dup-cli
-cd lean && lake build
+cargo build --release -p lean-dup-worker
 ```
+
+The Cargo worker build materializes the `LeanSemanticSearch` Lean package from
+`lean-semantic-search-runtime` and builds a private generated `LeanDup` Lake root. A direct
+`lake -d lean build` is only a Lean-developer check; set `LEAN_DUP_SEMANTIC_SEARCH_ROOT` to a
+materialized semantic-search runtime source root first.
 
 ## Install
 

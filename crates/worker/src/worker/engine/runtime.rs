@@ -2,14 +2,12 @@
 //! capability is produced and loaded*: the built-capability manifest, the
 //! worker-child binary, and the command export declarations.
 //!
-//! Steady-state note (see `docs/architecture/worker-migration-spike.md`): today
-//! the manifest is built from a sibling Lake checkout, and its semantic-search
-//! dylib dependency is injected by `crates/worker/build.rs`. That packaging
-//! coupling is deliberately confined to this module. The intended end state is a
-//! package-owned runtime crate that ships/materializes/builds the Lean payload
-//! and returns a `LeanBuiltCapability`; adopting it would replace only
-//! [`LeanDupCapabilityRuntime::from_build_manifest`] with a `build_cached(...)`
-//! call. The command path in `pool.rs` does not change.
+//! Steady-state note (see `docs/architecture/shared-search-adoption.md`):
+//! `crates/worker/build.rs` builds a private generated Lake root for `LeanDup`
+//! and receives the `LeanSemanticSearch` source/dylib from the package-owned
+//! `lean-semantic-search-runtime` crate. That build packaging stays below this
+//! module: callers receive only a build manifest, while the command path in
+//! `pool.rs` remains independent of source materialization details.
 
 use std::path::PathBuf;
 use std::time::Duration;

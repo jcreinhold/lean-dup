@@ -89,3 +89,23 @@ Adopting the shared Lean package via Lake requires a single toolchain across the
 toolchain is bumped to `leanprover/lean4:v4.31.0-rc1` to match the shared package (the package's `LeanCompat` owned-IR
 boundary is what makes the shared extraction version-stable across the bump). The Rust path dependencies require one
 `libsqlite3-sys` (`links = "sqlite3"`), so both workspaces align on rusqlite 0.40.
+
+## Packaged Lean source boundary
+
+`lean-dup` no longer depends on `../../lean-semantic-search/lean` as the steady-state Lake package path. The worker
+build script asks `lean-semantic-search-runtime` to materialize the package-owned `LeanSemanticSearch` source payload
+for `lean/lean-toolchain`, then builds a private generated `LeanDup` Lake root under Cargo's `OUT_DIR` with:
+
+- `require lean_semantic_search from <materialized runtime source root>`;
+- `require «lean_rs_interop_shims» from <lean-rs interop shim root>`;
+- the checked-in `LeanDup.lean` and `LeanDup/` sources copied unchanged.
+
+This keeps semantic-search source ownership in `lean-semantic-search` while preserving the `lean-dup.worker.v1` command
+payloads and duplicate-audit workflow. The checked-in `lean/lakefile.lean` is now a developer-facing Lean check, not the
+release build root: direct `lake -d lean build` requires `LEAN_DUP_SEMANTIC_SEARCH_ROOT` to point at a materialized
+semantic-search runtime source root. Release and CI builds should use `cargo build -p lean-dup-worker`, which performs
+that materialization itself.
+
+The generated capability manifest records the `lean_semantic_search` dylib through `CargoLeanCapability`'s generic
+`LeanLibraryDependency` hook, so the dependency is described before the manifest is written. `lean-dup` does not patch
+manifest JSON after the build and does not consult a sibling semantic-search checkout.

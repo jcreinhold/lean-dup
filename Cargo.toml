@@ -52,10 +52,12 @@ lean-rs-worker-child = { version = "0.2" }
 lean-rs-worker-parent = { version = "0.2" }
 lean-rs-worker-protocol = { version = "0.2" }
 lean-toolchain = { version = "0.2" }
-# Shared semantic-search package (sibling checkout). Path deps in this prompt;
-# the lean-rs-worker migration and proper publishing remain future work.
+# Shared semantic-search Rust crates. The runtime crate owns the packaged Lean
+# source used by the worker build; the temporary patch below is local until that
+# runtime crate is published.
 lean-semantic-search-contract = { version = "0.2" }
 lean-semantic-search-retrieval = { version = "0.2" }
+lean-semantic-search-runtime = { version = "0.2" }
 lean-semantic-search-store = { version = "0.2" }
 predicates = "3"
 rusqlite = { version = "0.40", features = ["bundled"] }
@@ -68,6 +70,16 @@ thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 toml = "1"
 walkdir = "2"
+
+# Temporary local integration for the package-owned semantic runtime crate and
+# the lean-toolchain manifest-dependency helper reviewed in prompt 07. Remove
+# once matching crate releases are published.
+[patch.crates-io]
+lean-rs-worker-child = { path = "../lean-rs/crates/lean-rs-worker-child" }
+lean-rs-worker-parent = { path = "../lean-rs/crates/lean-rs-worker-parent" }
+lean-rs-worker-protocol = { path = "../lean-rs/crates/lean-rs-worker-protocol" }
+lean-toolchain = { path = "../lean-rs/crates/lean-toolchain" }
+lean-semantic-search-runtime = { path = "../lean-semantic-search/crates/runtime" }
 
 [workspace.lints.rust]
 future-incompatible = "warn"
