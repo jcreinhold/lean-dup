@@ -40,6 +40,7 @@ Freshness is determined by the inputs that can change Lean semantic rows. Nothin
 | index schema and provenance versions | row layout might have changed |
 | worker protocol version | wire contract might have changed |
 | worker, extraction, feature, probe semantic versions | algorithm might have changed |
+| worker substrate facts (pool transport-protocol version, pooled worker runtime version) | the runtime that produced the rows might have changed |
 | Lean worker source digest | local worker code might have changed |
 | Lean toolchain text | elaboration might differ |
 | Lake file and manifest digests | dependencies or build settings might have changed |
@@ -55,7 +56,9 @@ Freshness is determined by the inputs that can change Lean semantic rows. Nothin
 | compiled-artifact stamps when `require_oleans` is in the workflow | oleans are part of the contract |
 
 Freshness is **not** determined by unrelated non-Lean files or workspace git dirtiness. A README change, a note, or an
-unrelated generated artifact does not invalidate the cache.
+unrelated generated artifact does not invalidate the cache. Ephemeral worker-pool state — pool ids, child pids, queue
+counters, lease keys — is likewise excluded from the key: only the substrate *facts* above, which describe the runtime
+contract that produced the rows, participate.
 
 Project-pinned mathlib indexes are content-addressed and shared under the normal cache root. Their key excludes the
 audited project's absolute root and includes the pinned mathlib source content and the project execution toolchain.

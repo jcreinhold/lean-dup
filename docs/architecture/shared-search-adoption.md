@@ -5,8 +5,10 @@ feature DTOs, persistent semantic-index storage, and the storage-neutral retriev
 what moved to the shared package, what stays local, and why.
 
 The shared package was extracted from `lean-dup` (prompt sequence 02–06), so the migration is an adoption, not a
-redesign. The subprocess worker transport (`lean-dup.worker.v1`, six commands) is unchanged; the future `lean-rs-worker`
-migration is separate and out of scope here.
+redesign. The worker transport was a separate effort, since completed: Rust now drives Lean through the
+`lean-rs-worker-parent` pool capability rather than a subprocess (see [worker-protocol.md](worker-protocol.md) and
+[validation/worker-migration-validation.md](validation/worker-migration-validation.md)). The `lean-dup.worker.v1` schema
+and command semantics are unchanged.
 
 ## What moved to `lean-semantic-search`
 

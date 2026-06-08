@@ -156,18 +156,21 @@ The emitted fingerprints and role features are Lean-owned opaque keys. Rust may
 compare and weight them, but it must not reconstruct them from display or source
 facts.
 -/
-unsafe def runProfiled (payload : Json) (modules : Array LeanDup.Extract.ModuleSpec) :
+unsafe def runProfiled (payload : Json) (modules : Array LeanDup.Extract.ModuleSpec)
+    (initializeSearchPath : Bool := true) :
     IO (Except Error LeanDup.Extract.RunOutput) := do
   match parseDeclarationIds payload with
   | Except.error err => pure <| Except.error err
   | Except.ok ids? =>
       let result ←
-        LeanDup.Extract.withAcceptedDeclarationsProfiled payload modules fun _options declarations => do
-          match selectDeclarations ids? declarations with
-          | Except.error err => pure <| Except.error err
-          | Except.ok selected => do
-              let rows ← featureRows selected
-              pure <| Except.ok rows
+        LeanDup.Extract.withAcceptedDeclarationsProfiled payload modules
+          (fun _options declarations => do
+            match selectDeclarations ids? declarations with
+            | Except.error err => pure <| Except.error err
+            | Except.ok selected => do
+                let rows ← featureRows selected
+                pure <| Except.ok rows)
+          (initializeSearchPath := initializeSearchPath)
       match result with
       | Except.error err => pure <| Except.error (fromExtractError err)
       | Except.ok (Except.error err, _stats) => pure <| Except.error err

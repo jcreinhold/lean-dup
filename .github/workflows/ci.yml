@@ -62,11 +62,11 @@ jobs:
       - name: Build lean/ and Lean fixtures
         run: |
           set -euo pipefail
-          # The lean/ package's default target is the lean_dup_worker exe,
-          # which doesn't pull in the top-level LeanDup.olean that the audit
-          # pipeline imports. Build the LeanDup library explicitly alongside
-          # the exe so cargo tests find LeanDup.olean.
-          ( cd lean && lake build LeanDup lean_dup_worker )
+          # The lean/ package builds the LeanDup shared-facet capability dylib
+          # that the lean-rs-worker-parent pool loads (Rust drives Lean through
+          # the pool, not a subprocess). This also produces LeanDup.olean, which
+          # the audit pipeline imports, so cargo tests find it.
+          ( cd lean && lake build LeanDup )
           for fixture in tests/fixtures/tiny tests/fixtures/external tests/fixtures/source-backed; do
             ( cd "$fixture" && lake build )
           done

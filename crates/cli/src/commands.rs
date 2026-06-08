@@ -120,14 +120,15 @@ fn doctor(args: DoctorArgs, reporter: &mut Reporter) -> Result<DoctorReport> {
         args.module_root,
         reporter,
     )?;
-    let worker_version = reporter.measure("worker.version", |_| {
-        WorkerClient::with_timeout(Duration::from_secs(60)).version(foundation.workspace.root.clone())
+    let worker_identity = reporter.measure("worker.version", |_| {
+        WorkerClient::with_timeout(Duration::from_secs(60)).worker_identity(foundation.workspace.root.clone())
     })?;
-    let worker_version = worker_version
+    let worker_identity = worker_identity
         .rows
         .into_iter()
         .next()
         .expect("worker version returns one version row");
+    let worker_version = worker_identity.semantic.clone();
     let store = IndexStore::new(foundation.cache.root.clone());
     let current_index = store.expected_entry(
         &IndexBuildRequest {
@@ -142,7 +143,7 @@ fn doctor(args: DoctorArgs, reporter: &mut Reporter) -> Result<DoctorReport> {
             force: false,
             kind: IndexBuildKind::Local,
         },
-        &worker_version,
+        &worker_identity,
     )?;
     let cache_diagnostics = lean_dup_report::cache_diagnostics_report(lean_dup_index::diagnose_cache(
         foundation.cache.root.clone(),
@@ -220,8 +221,9 @@ fn cache_cleanup(args: CacheCleanupArgs, reporter: &mut Reporter) -> Result<Cach
         if let Ok(cache) = lean_dup_index::resolve_cache(&workspace) {
             protected_fingerprints.push(cache.fingerprint);
         }
-        let version_call = WorkerClient::with_timeout(Duration::from_secs(60)).version(workspace.root.clone())?;
-        let worker_version = version_call.rows.into_iter().next().ok_or_else(|| AppError::Cli {
+        let version_call =
+            WorkerClient::with_timeout(Duration::from_secs(60)).worker_identity(workspace.root.clone())?;
+        let worker_identity = version_call.rows.into_iter().next().ok_or_else(|| AppError::Cli {
             message: "worker version returned no rows".to_owned(),
         })?;
         vec![store.expected_entry(
@@ -237,7 +239,7 @@ fn cache_cleanup(args: CacheCleanupArgs, reporter: &mut Reporter) -> Result<Cach
                 force: false,
                 kind: IndexBuildKind::Local,
             },
-            &worker_version,
+            &worker_identity,
         )?]
     } else {
         Vec::new()

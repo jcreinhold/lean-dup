@@ -1,8 +1,9 @@
 # Worker protocol v1
 
-The Lean worker answers six commands over a JSON request → JSONL response wire format. This document is the
-caller-facing contract: schema versions, command guarantees, what Rust may rely on, and what stays hidden inside the
-worker.
+The Lean worker answers five command exports loaded as a shared-facet capability into a pooled worker child. This
+document is the caller-facing contract: schema versions, command guarantees, what Rust may rely on, and what stays
+hidden inside the worker. Rust drives Lean through the `lean-rs-worker-parent` pool, not a subprocess — see
+[Transport model](#transport-model) below.
 
 For the pipeline that uses this protocol, see [end-to-end-architecture.md](end-to-end-architecture.md). For the layering
 rule behind the boundary, see [overview.md](overview.md).
@@ -12,23 +13,25 @@ rule behind the boundary, see [overview.md](overview.md).
 | Command | Answers |
 | --- | --- |
 | `version` | what worker, protocol, and semantic algorithm versions am I? |
-| `doctor` | can I serve this schema, and can I import these modules? |
 | `extract` | which declarations exist, where do they come from, what display/source facts can callers show? |
 | `features` | which opaque semantic keys may Rust index and compare? |
 | `index` | stream declaration and feature rows for these modules without forcing caller-side chunking policy |
 | `probe` | which candidate relations are confirmed, refuted, or unavailable? |
 
+`doctor`-style workspace health is composed Rust-side from `version` plus workspace/cache checks; it is not a worker
+command (see [Transport model](#transport-model)).
+
 ## What Rust may and may not rely on
 
-**May rely on:** the six commands; the eight response kinds (`version_result`, `doctor_result`, `declaration_row`,
-`feature_row`, `probe_result`, `progress`, `complete`, `error`); schema-version and compatibility rules; opaque
-declaration ids, semantic keys, and probe pair ids as values to store and compare; machine-readable completion,
-progress, and structured error envelopes.
+**May rely on:** the five command exports; the response kinds (`version_result`, `declaration_row`, `feature_row`,
+`probe_result`, `progress`, `complete`, `error`); schema-version and compatibility rules; opaque declaration ids,
+semantic keys, and probe pair ids as values to store and compare; machine-readable completion, progress, and structured
+error events.
 
 **May not rely on:** Lean `Expr` constructors, binder representation, universe representation, or traversal order;
 `statement_text`, pretty-printed types, or display names as semantic inputs; transport field names as encodings of Lean
-syntax; worker batching, import scheduling, stderr wording, or subprocess setup outside the Rust worker runtime; index
-storage layout, row ids, transaction order, or report/ranking policy.
+syntax; worker batching, import scheduling, capability symbol names, pool lease/session mechanics, or the worker-child
+ABI outside the Rust worker runtime; index storage layout, row ids, transaction order, or report/ranking policy.
 
 ## Why opaque ids and JSONL
 
@@ -41,24 +44,48 @@ traversal; Rust owns storage and retrieval; either side can be re-implemented wi
 
 ## Transport model
 
-Each worker run receives exactly one UTF-8 JSON request on stdin. Common request fields:
+Rust drives Lean by loading the `LeanDup` shared-facet capability dylib into a pooled worker child through the
+`lean-rs-worker-parent` pool — not by spawning a subprocess per call. Only the `lean-dup-worker-child` binary links
+`libleanshared`; the parent holds a warm worker session per audited workspace (keyed on the import workspace root, so
+all commands reuse one import-once session). The capability is built by `crates/worker/build.rs` and produced behind the
+private `LeanDupCapabilityRuntime` seam in the `lean-dup-worker` crate.
 
-- `schema_version`: required string, `lean-dup.worker.v1` for this document.
-- `request_id`: required nonempty string, chosen by Rust for correlation.
-- `command`: required, one of the six commands above.
-- `capabilities`: optional required-capability names; the worker rejects the request if any cannot be satisfied.
-- `extensions`: optional object for optional, non-required v1 data.
+The protocol is exposed as exported capability symbols, each taking one UTF-8 JSON request string:
 
-The worker writes UTF-8 JSONL envelopes to stdout. Each line is a complete JSON object with `schema_version`,
-`request_id` (copied from the request when parsed), `command` (when known), `kind` (one of the eight response kinds),
-`payload` (kind-specific), and optional `extensions`.
+| Command | Exported symbol | Kind |
+| --- | --- | --- |
+| `version` | `lean_dup_capability_version` | json command (`String → IO String`) |
+| `extract` | `lean_dup_capability_extract` | streaming |
+| `features` | `lean_dup_capability_features` | streaming |
+| `probe` | `lean_dup_capability_probe` | streaming |
+| `index` | `lean_dup_capability_index` | streaming |
 
-Stdout is machine-only. Progress and profile data ride `progress` envelopes, not stderr. Stderr is for panic
-diagnostics, Lean runtime fallback diagnostics, or errors that happen before a structured `error` can be emitted.
+Common request fields are unchanged from the wire schema: `schema_version` (required, `lean-dup.worker.v1`), `command`,
+optional required `capabilities`, and optional `extensions`. The transport no longer carries a Rust-chosen `request_id`:
+correlation is the pool lease, not a field in the payload.
 
-A successful command emits exactly one `complete` envelope after all results. A fatal failure emits an `error` envelope
-when possible and exits nonzero. Rust treats nonzero exit, EOF before `complete`, or invalid JSONL as worker failure and
-discards partial output. The protocol does not specify a Lean/Rust FFI ABI.
+A json command returns exactly one JSON response string. A streaming command emits typed data rows on caller-named
+streams (`declarations`, `features`, `probe`) — the `index` command emits on both `declarations` and `features`, routed
+by stream name — plus out-of-band progress events and structured diagnostic events. The eight logical response *kinds*
+(`version_result`, `declaration_row`, `feature_row`, `probe_result`, `progress`, `complete`, `error`, plus the
+doctor-style health facts below) remain the semantic contract; framing is the worker-child callback ABI, not
+stdin/stdout JSONL.
+
+Two protocol surfaces are **not** capability exports and are composed Rust-side instead:
+
+- **`doctor`** is not a worker command. The CLI `doctor` subcommand is built from the `version` facts plus Rust-owned
+  workspace and cache checks (olean presence, cache-entry status). The worker never had a Rust caller for a `doctor`
+  command on the audit path, so it is not part of the capability surface.
+- **Worker substrate facts** (the `lean-rs-worker-parent` handshake's transport-framing protocol version and pooled
+  worker runtime version) come from `lease.runtime_metadata()`, not from a Lean export. These are distinct from the
+  `lean-dup.worker.v1` schema string and from the semantic algorithm versions; the index cache key folds them in (see
+  [cache-validity-lifecycle.md](cache-validity-lifecycle.md)) so a worker-substrate change invalidates stale entries.
+  Pool ids, pids, queue counters, and lease keys are deliberately excluded.
+
+A fatal failure surfaces as a mapped `WorkerError`: timeouts and cancellation stay recoverable (probe chunk-splitting
+depends on this); child exit, panic, stream-export failure, and worker-reported errors are fatal and discard partial
+output. The protocol does not commit callers to a specific Lean/Rust FFI ABI — only to the request schema, the command
+set, and the response kinds above.
 
 ## Failure behavior
 

@@ -46,7 +46,7 @@ pub struct Cli {
 const ENV_VAR_HELP: &str = "\
 Environment variables:
   LEAN_DUP_CACHE_DIR                    Override the on-disk cache root (default: platform user cache dir)
-  LEAN_DUP_DISABLE_WORKER_BUILD_CACHE   Set to any value to disable the Lean worker subprocess build cache
+  LEAN_DUP_DISABLE_WORKER_BUILD_CACHE   Set to any value to disable the Lean worker capability build cache
   LEAN_DUP_GIT_REVISION                 Build-time only; embeds the git revision shown by --version
 ";
 

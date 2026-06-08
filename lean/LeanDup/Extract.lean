@@ -358,13 +358,17 @@ private def uniqueModuleImports (modules : Array ModuleSpec) : Array Import := I
 /--
 Import the distinct requested modules and return the resulting environment.
 
-Callers provide module descriptors; this function owns search-path setup and
-Lean import mechanics.
+Callers provide module descriptors; this function owns Lean import mechanics.
+Subprocess callers use the default search-path initialization. Capability
+callers set `initializeSearchPath := false` because the host session has
+already installed the audited workspace's import search path.
 -/
-unsafe def importRequestedModules (modules : Array ModuleSpec) :
+unsafe def importRequestedModules (modules : Array ModuleSpec)
+    (initializeSearchPath : Bool := true) :
     IO (Except Error Environment) := do
   Lean.enableInitializersExecution
-  initSearchPath (← getBuildDir)
+  if initializeSearchPath then
+    initSearchPath (← getBuildDir)
   let imports := uniqueModuleImports modules
   try
     let env ← importModules imports Options.empty (loadExts := true)
@@ -387,7 +391,8 @@ snippets as semantic input.
 unsafe def withAcceptedDeclarationsProfiled {α : Type}
     (payload : Json)
     (modules : Array ModuleSpec)
-    (operation : Options → Array AcceptedDeclaration → MetaM α) :
+    (operation : Options → Array AcceptedDeclaration → MetaM α)
+    (initializeSearchPath : Bool := true) :
     IO (Except Error (α × RunStats)) := do
   if modules.isEmpty then
     return .error <| invalidRequest "`modules` must contain at least one module"
@@ -395,7 +400,7 @@ unsafe def withAcceptedDeclarationsProfiled {α : Type}
   | .error err => pure <| .error err
   | .ok options =>
       let importStarted ← IO.monoMsNow
-      match ← importRequestedModules modules with
+      match ← importRequestedModules modules initializeSearchPath with
       | .error err => pure <| .error err
       | .ok env =>
           let importFinished ← IO.monoMsNow
@@ -441,9 +446,11 @@ snippets as semantic input.
 unsafe def withAcceptedDeclarations {α : Type}
     (payload : Json)
     (modules : Array ModuleSpec)
-    (operation : Options → Array AcceptedDeclaration → MetaM α) :
+    (operation : Options → Array AcceptedDeclaration → MetaM α)
+    (initializeSearchPath : Bool := true) :
     IO (Except Error α) := do
-  match ← withAcceptedDeclarationsProfiled payload modules operation with
+  match ← withAcceptedDeclarationsProfiled payload modules operation
+      (initializeSearchPath := initializeSearchPath) with
   | .error err => pure <| .error err
   | .ok (result, _stats) => pure <| .ok result
 
@@ -451,10 +458,14 @@ unsafe def withAcceptedDeclarations {α : Type}
 Import the requested modules once and return declaration-row payloads accepted
 by the supplied extraction options.
 -/
-unsafe def runProfiled (payload : Json) (modules : Array ModuleSpec) :
+unsafe def runProfiled (payload : Json) (modules : Array ModuleSpec)
+    (initializeSearchPath : Bool := true) :
     IO (Except Error RunOutput) := do
-  match ← withAcceptedDeclarationsProfiled payload modules fun options declarations =>
-      collectRows options declarations with
+  match ← withAcceptedDeclarationsProfiled
+      payload
+      modules
+      (fun options declarations => collectRows options declarations)
+      (initializeSearchPath := initializeSearchPath) with
   | .error err => pure <| .error err
   | .ok (rows, stats) =>
       pure <| .ok { rows := rows, stats := { stats with rowCount := rows.size } }

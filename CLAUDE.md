@@ -10,7 +10,7 @@ local and deterministic: no network, no embeddings, no proof-term analysis. The 
 only reads source, builds Lean artifacts through Lake, and writes indexes/reports/diagnostics under the cache root or
 `target/`.
 
-It is a Rust workspace (`edition = "2024"`, Rust 1.85+) plus a small Lean worker package under `lean/`. The pinned Lean
+It is a Rust workspace (`edition = "2024"`, Rust 1.91+) plus a small Lean worker package under `lean/`. The pinned Lean
 toolchain is `leanprover/lean4:v4.30.0` (other 4.x untested).
 
 ## Commands
@@ -18,7 +18,7 @@ toolchain is `leanprover/lean4:v4.30.0` (other 4.x untested).
 ```sh
 # Build
 cargo build --release -p lean-dup-cli
-(cd lean && lake build LeanDup lean_dup_worker)   # both targets; LeanDup.olean is needed by the audit pipeline
+(cd lean && lake build LeanDup)   # builds the LeanDup shared-facet capability dylib + LeanDup.olean (needed by the audit pipeline)
 
 # Lint / format (CI runs with -D warnings; treat all clippy warnings as errors)
 cargo fmt --all -- --check
@@ -53,9 +53,11 @@ single rule above everything else:
 - **Rust** owns everything else: workspace discovery, Lake invocation, worker lifecycle, persistence, retrieval,
   ranking, reporting, evaluation.
 
-Rust talks to Lean only through the narrow, versioned worker protocol (`docs/architecture/worker-protocol.md`). Rust
-must **not** inspect Lean `Expr`s, recompute semantic fingerprints from pretty-printed type text, or rely on
-pretty-printed statement strings as anything but display. JSON/JSONL are transport, not architecture.
+Rust talks to Lean only through the narrow, versioned worker protocol (`docs/architecture/worker-protocol.md`), carried
+by the `lean-rs-worker-parent` pool loading the `LeanDup` shared-facet capability through `lean-dup-worker-child` (no
+subprocess). Rust must **not** inspect Lean `Expr`s, recompute semantic fingerprints from pretty-printed type text, or
+rely on pretty-printed statement strings as anything but display. The request schema and JSON payloads are transport,
+not architecture.
 
 ## Layout and boundaries
 
@@ -67,7 +69,7 @@ lower-level steps.
 | --- | --- | --- |
 | `cli` | command surface (`cli.rs`), routing + I/O (`commands.rs`), rendering, hidden `perf`/`release` | Lake layout, worker transport, SQLite schema, audit phase order, ranking policy |
 | `project` | `workspace.rs` (Lake discovery, module roots, source enumeration), `mathlib.rs` (project-pinned mathlib contract) | — |
-| `worker` | Rust side of the worker protocol; subprocess lifecycle, framing, error mapping | Lean `Expr` constructors, pretty text, private worker batching, stderr wording |
+| `worker` | Rust side of the worker protocol; pool capability lifecycle (`engine/`: `WorkerEngine`/`PoolEngine`/`LeanDupCapabilityRuntime`), substrate facts, error mapping | Lean `Expr` constructors, pretty text, private worker batching, capability symbol names, child ABI |
 | `index` | `index.rs` (SQLite local/external/mathlib), `cache.rs` + `cache_lifecycle.rs`, `external_provenance.rs` (source-backed vs static) | SQLite table names, cache-key JSON, latest-pointer details must stay inside this crate |
 | `search` | the full audit workflow (`audit::run_audit`): `retrieval.rs`, `semantic_verification.rs`, `ranking.rs`, `source_refs.rs`, `replacement_hints.rs`, `baseline.rs` | SQLite layout, worker command names |
 | `report` | stable explanation facts → text/JSON/`show`/`diff` (`report-contract.md`) | terminal layout leaking into audit/ranking |
@@ -75,8 +77,11 @@ lower-level steps.
 | `diagnostics` | progress (`indicatif`), profiling, structured errors | — |
 | `embedding`, `vector-index`, `vector-search` | optional/experimental external extensions (`fastembed`, `lancedb`); **not** on the core audit path | — |
 
-The Lean worker lives in `lean/LeanDup/` (`Extract`, `Features`, `Probe`, `Canonical`, `Protocol`, `Worker`). Six worker
-commands: `extract`, `features`, `index`, `probe`, `doctor`, `version`.
+The Lean worker lives in `lean/LeanDup/` (`Extract`, `Features`, `Probe`, `Protocol`, `Index`, `Capability`).
+`Capability` exposes five capability command exports loaded by the pool: `version` (json command) and the streaming
+`extract`, `features`, `index`, `probe`. `doctor`-style health is composed Rust-side from `version` plus
+workspace/cache checks; worker substrate facts come from the pool handshake. See
+`docs/architecture/validation/worker-migration-validation.md`.
 
 Red flags (from `overview.md#design-rules`): table-name leakage outside `index`; worker-command names in
 retrieval/ranking/reporting; Rust recomputing Lean facts from pretty text; modules named after audit *phases* that share

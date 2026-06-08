@@ -5,9 +5,16 @@ name = "lean-dup-worker"
 version = { workspace = true }
 
 [dependencies]
+lean-rs-worker-parent = { workspace = true }
+lean-toolchain = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+[build-dependencies]
+lean-rs-worker-protocol = { workspace = true }
+lean-toolchain = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

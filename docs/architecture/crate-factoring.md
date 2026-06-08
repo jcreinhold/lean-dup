@@ -11,7 +11,7 @@ For the pipeline the crates implement, see [end-to-end-architecture.md](end-to-e
 
 | Crate | Owns | May not depend on |
 | --- | --- | --- |
-| `lean-dup-worker` | Lean worker protocol, subprocess transport, worker version/build policy, timeouts. | any other `lean-dup` crate |
+| `lean-dup-worker` | Lean worker protocol, pool capability transport (`lean-rs-worker-parent` + `lean-dup-worker-child`), worker version/substrate/build policy, timeouts. | any other `lean-dup` crate |
 | `lean-dup-diagnostics` | Progress/profile events, runtime perf collection, generic file/JSON helpers. | any other `lean-dup` crate |
 | `lean-dup-project` | Lake workspace discovery, module roots, mathlib source/execution roots, toolchain facts. | index, search, eval, cli |
 | `lean-dup-index` | SQLite indexes, cache keys, provenance metadata, latest pointers, cache diagnostics, cleanup. | search, eval, cli |
@@ -29,8 +29,10 @@ Package and directory names omit `-rs`. The binary is `lean-dup` until a user-fa
 
 Each crate root is the supported public facade. Submodules and internals stay private.
 
-- **`lean-dup-worker`**: `WorkerClient`, request/result DTOs, version/build policy. Subprocess transport, JSONL framing,
-  protocol envelopes, request ids, and timeouts are private.
+- **`lean-dup-worker`**: `WorkerClient`, request/result DTOs (`WorkerVersion`, `WorkerIdentity`, `WorkerSubstrateFacts`,
+  rows/batches), version/substrate/build policy. The pool capability transport, the private engine seam
+  (`WorkerEngine`/`PoolEngine`/`LeanDupCapabilityRuntime`), capability symbol names, lease/session mechanics, the
+  `lean-dup-worker-child` ABI, and timeouts are private.
 - **`lean-dup-diagnostics`**: progress/profile events, runtime measurement helpers. No semantic dependencies.
 - **`lean-dup-project`**: `WorkspaceRequest`, `ResolvedWorkspace`, `SourceFile`, `resolve`, `ProjectMathlib`, mathlib
   resolution entry points. Lake path rules and `.olean` discovery sit on `ResolvedWorkspace`.

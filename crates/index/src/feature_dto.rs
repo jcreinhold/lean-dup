@@ -1,6 +1,6 @@
 //! Conversions between the worker-wire feature row and the shared contract row.
 //!
-//! The subprocess worker speaks `lean-dup.worker.v1` (`lean_dup_worker` types,
+//! The worker capability speaks `lean-dup.worker.v1` (`lean_dup_worker` types,
 //! plain `String` keys); the shared semantic-index store speaks the contract DTO
 //! (`OpaqueFeatureKey`-typed keys). The two encode the same opaque keys, so these
 //! conversions are field-for-field and lossless. They live here so neither the

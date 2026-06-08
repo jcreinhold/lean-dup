@@ -11,9 +11,11 @@ One rule sits above everything else:
 - **Lean** computes semantic facts that require the elaborated Lean environment.
 - **Rust** owns everything else: persistence, workflow, retrieval, ranking, reporting, evaluation, release.
 
-Rust asks Lean semantic questions through a narrow, versioned [worker protocol](worker-protocol.md). JSON and JSONL are
-transport encodings, not architecture. Rust must not inspect Lean expressions, recompute semantic fingerprints from
-pretty-printed types, or let SQLite layout leak into audit, ranking, or reporting code.
+Rust asks Lean semantic questions through a narrow, versioned [worker protocol](worker-protocol.md), carried by a pooled
+shared-facet capability (`lean-rs-worker-parent` loading the `LeanDup` dylib through `lean-dup-worker-child`). The
+request schema and JSON payloads are transport encodings, not architecture. Rust must not inspect Lean expressions,
+recompute semantic fingerprints from pretty-printed types, or let SQLite layout leak into audit, ranking, or reporting
+code.
 
 ### What each side computes
 
@@ -103,8 +105,9 @@ These capabilities are preserved across the rewrite; new work must not regress t
 ## Non-goals
 
 `lean-dup` is not a theorem prover or a semantic search service. The default auditor does not perform broad proof
-search, use embeddings, call network services, or rewrite Lean files. The default route is a versioned worker API over
-subprocess transport. FFI is not used unless a future measurement justifies its safety and maintenance cost.
+search, use embeddings, call network services, or rewrite Lean files. The default route is a versioned worker API
+carried by a pooled shared-facet capability: only the `lean-dup-worker-child` binary links `libleanshared`, so the audit
+process itself stays free of the Lean runtime ABI.
 
 ## Architectural commitments
 

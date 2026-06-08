@@ -502,14 +502,17 @@ statistics for candidate declaration pairs.
 Each pair is isolated: a pair-local failure becomes `status = "unavailable"`;
 only malformed requests or import/environment failures abort the command.
 -/
-unsafe def runProfiled (payload : Json) (modules : Array LeanDup.Extract.ModuleSpec) :
+unsafe def runProfiled (payload : Json) (modules : Array LeanDup.Extract.ModuleSpec)
+    (initializeSearchPath : Bool := true) :
     IO (Except Error LeanDup.Extract.RunOutput) := do
   match parseRequestPairs payload with
   | Except.error err => pure <| Except.error err
   | Except.ok pairs =>
       let result ←
-        LeanDup.Extract.withAcceptedDeclarationsProfiled payload modules fun _options declarations => do
-          probeRows pairs declarations
+        LeanDup.Extract.withAcceptedDeclarationsProfiled payload modules
+          (fun _options declarations => do
+            probeRows pairs declarations)
+          (initializeSearchPath := initializeSearchPath)
       match result with
       | Except.error err => pure <| Except.error (fromExtractError err)
       | Except.ok (rows, stats) =>

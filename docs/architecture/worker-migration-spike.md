@@ -1,81 +1,101 @@
-# Worker Migration Spike — Workspace-Import Mechanism
+# Worker Migration Slice -- Capability `extract`
 
-Phase 0 of the `lean-rs-worker-*` migration
-([guide](../../../prompts/guides/lean-dup-lean-rs-worker-migration-guide.md)). Goal: prove a pooled
-`lean-rs-worker-child` running a `sharedFacet` `LeanDup` capability can import an **arbitrary audited workspace's**
-`.olean`s, or pin down the exact `lean-rs` change required. This note records the findings and the resulting Phase 1
-seam design.
+> **Status: superseded.** This slice converted only `extract`. The full cut-over (all five commands, subprocess
+> substrate deleted, substrate facts in the cache key) is complete — see
+> [validation/worker-migration-validation.md](validation/worker-migration-validation.md). This document is retained for
+> historical context; statements below about commands "still on the subprocess path" or the surviving
+> `lean_exe lean_dup_worker` target no longer hold.
 
-## Conclusion
+This document records the migration gate that follows the Phase 0 spike
+([guide](../../../prompts/guides/lean-dup-lean-rs-worker-migration-guide.md)). The slice converts one command,
+`extract`, from lean-dup's subprocess JSONL worker to a `LeanDup` `sharedFacet` capability loaded by the
+`lean-rs-worker-child` runtime and driven through a `lean-rs-worker-parent` pool.
 
-The migration is feasible. The audited-workspace import path is **already the production mechanism**, the `sharedFacet`
-capability **builds**, and the worker child **preserves a caller-set environment**. The one true gap is that
-`lean-rs-worker-parent`'s capability/pool builder does not *surface* a per-session import root, even though
-`lean-rs-host` already computes one. Phase 1 is a **surfacing** job plus a session-key fold, not new import machinery.
+The semantic boundary is unchanged: Lean computes declaration facts from the elaborated environment, and Rust owns
+workspace discovery, lifecycle, persistence, retrieval, ranking, reporting, and evaluation. This slice changes the
+transport substrate beneath `WorkerClient::extract_batch`; it does not change row schemas, ranking, retrieval, reports,
+eval behavior, or the `lean-dup.worker.v1` semantic protocol.
 
-## Evidence
+## Design Record
 
-### (a) The import mechanism is production-proven — not a new unknown
+The capability-load substrate hides child binary discovery, capability build and manifest lookup, the audited workspace
+import root supplied by `ExtractBatch.workspace_root`, host-owned search-path construction, pool lease lifetime, and the
+typed command boundary. Callers still ask `WorkerClient` for semantic facts. There is no new public engine trait, no new
+`WorkerClient` constructor, no new worker-planning API, and no project-to-worker wiring surface.
 
-`LeanDup.Extract.importRequestedModules` (`lean/LeanDup/Extract.lean:364`) does
-`Lean.enableInitializersExecution; initSearchPath (← getBuildDir)` then `importModules`. `initSearchPath` augments the
-search path with the **`LEAN_PATH`** environment variable. The current subprocess worker is invoked via `lake env <bin>`
-with `cwd` = the audited workspace, so `LEAN_PATH` already carries the target's `.lake/build/lib` (plus deps). Target
-modules resolve through `LEAN_PATH` today; the worker's own code is statically linked and needs no import. So "child
-imports the target via `LEAN_PATH`" is how lean-dup works now.
+The worker boundary must not leak pool internals, worker ids, process ids, lease ids, capability manifest paths,
+`LEAN_PATH` contents, child environment details, Lean `Expr`s, transport frames, or subprocess request ids into `index`,
+`search`, `cli`, reports, or eval. The validated user-facing capability is declaration extraction: the capability path
+streams the same declaration-row payloads that the subprocess worker emits, so the existing `DeclarationRow` DTO
+deserializes unchanged.
 
-### (b) The `sharedFacet` capability dylib builds (empirically verified)
+The subprocess-era implementation behavior intentionally discarded for capability-mode `extract` is the stdin/stdout
+JSONL driver, Rust request ids, and the worker's own `initSearchPath` call. Those remain for the five commands still on
+the subprocess path until the later migration prompts convert them.
 
-Spike changes on branch `adopt-lean-rs-worker`:
+## Search Path Design
 
-- `lean/lakefile.lean`: added `defaultFacets := #[LeanLib.sharedFacet]` to `lean_lib LeanDup` and
-  `require «lean_rs_interop_shims» from ".." / ".." / "lean-rs" / "crates" / "lean-rs" / "shims" / "lean-rs-interop-shims"`
-  (kept the `lean_exe` target so both coexist during migration).
-- `lean/LeanDup/Capability.lean`: one streaming `@[export] lean_dup_capability_extract` over the unchanged
-  `LeanDup.Extract.runProfiled`, emitting rows via `LeanRsInterop.Worker.Stream.{diagnostic,row,metadata,emitAll}`.
+Three designs were considered:
 
-`lake build LeanDup` produces `.lake/build/lib/liblean-dup-worker_LeanDup.dylib` with a global
-`_lean_dup_capability_extract` symbol; `lean-semantic-search` (shared) and the interop-shims C trampoline link cleanly
-(the trampoline resolves transitively via `LeanRsInterop.dylib`, matching the `LeanRsInteropConsumer` fixture layering).
-`lake build lean_dup_worker LeanDup` builds both targets.
+- Keep `LeanDup.Extract.importRequestedModules` calling `initSearchPath (← getBuildDir)` and pass the audited workspace
+  through `LEAN_PATH` via a child environment knob. This matches the old executable but exposes environment names and
+  bypasses the typed import-root seam added in `lean-rs-worker-parent`.
+- Let the host session own imports through `LeanWorkerCapabilityBuilder::import_workspace_root`, and parameterize
+  `LeanDup.Extract.importRequestedModules` so capability mode skips search-path initialization. This is the chosen
+  design.
+- Merge the capability dylib's Lake project root with the audited workspace's roots in one search path. This is rejected
+  because it can shadow the audited workspace's declared dependency closure with lean-dup's dependencies.
 
-### (c) The worker child preserves a caller-set environment
+The chosen design treats the audited workspace as one typed session input. The capability project still supplies the
+`LeanDup` dylib and manifest; the audited workspace supplies the import search path for requested modules. The two roots
+are not merged.
 
-`LeanWorker::spawn` (`lean-rs/crates/lean-rs-worker-parent/src/supervisor.rs:752`) applies `config.env` and
-`config.current_dir` to the child `Command` and does **not** `env_clear()`. Neither `lean-rs-worker-child` nor
-`lean-rs-host` resets/overrides `LEAN_PATH` at startup (no `env_clear`/`set_var`/`remove_var`). So a `LEAN_PATH` set
-through `LeanWorkerConfig::env("LEAN_PATH", …)` reaches the loaded capability's `initSearchPath`.
+## Spike Evidence Kept
 
-### The gap, and what already exists
+Phase 0 proved the migration preconditions:
 
-The production *pool* path goes through `LeanWorkerCapabilityBuilder`, which **deliberately refuses a generic child-env
-passthrough** (`capability.rs:207,1424-1432`) and keys sessions on `(project_root, package, lib_name, imports)`. There
-is no current way to point a pooled session at an arbitrary audited workspace's search path.
+- The audited-workspace import path is the production mechanism. The subprocess worker already runs under `lake env` in
+  the audited workspace, so target modules resolve through the target workspace's Lake search path.
+- The `LeanDup` shared facet builds. `lean/lakefile.lean` keeps both `defaultFacets := #[LeanLib.sharedFacet]` for
+  `LeanDup` and the still-present `lean_exe lean_dup_worker` target.
+- `lean/LeanDup/Capability.lean` exports `lean_dup_capability_extract` over unchanged extraction semantics, streaming
+  rows through `LeanRsInterop.Worker.Stream`.
+- `lean-rs-worker-parent` exposes `LeanWorkerCapabilityBuilder::import_workspace_root(path)`, and the import root is
+  folded into `LeanWorkerSessionKey` so warm sessions do not alias across audited workspaces.
+- The worker child preserves caller-set runtime facts needed by the worker stack; no generic child-env passthrough is
+  used by lean-dup for audited workspace imports.
 
-But the computation already exists one layer down: `lean-rs-host`'s `LakeProject::olean_search_paths`
-(`lean-rs/crates/lean-rs-host/src/host/lake.rs:106`) walks a project root's `lake-manifest.json` and returns every
-package's olean dir for `initSearchPath` — exactly what importing an audited workspace needs. It is `pub(crate)`, driven
-by the host session's root, and not surfaced through the worker boundary.
+## Slice Shape
 
-## Phase 1 seam design (refined)
+`crates/worker-child` is the app-owned child binary. Its only job is to delegate to
+`lean_rs_worker_child::run_worker_child_stdio()`, and it is the only lean-dup crate that depends on
+`lean-rs-worker-child` and links the Lean runtime.
 
-Surface a **typed audited-workspace import root** through the capability/pool API, distinct from the capability dylib's
-own `project_root` (the capability is lean-dup's `LeanDup`; the modules to import live in the audited workspace). Two
-viable mechanisms — Phase 1 picks based on which the host session accepts most directly:
+`crates/worker/build.rs` builds the `LeanDup` shared capability with `lean_toolchain::CargoLeanCapability`, records the
+trusted streaming export ABI for `lean_dup_capability_extract`, and emits the manifest environment variable consumed by
+the parent-side worker crate. The Lean package uses the Lake identifier `lean_dup_worker` so the dylib name and module
+initializer agree with the worker loader's identifier rules.
 
-1. **Host-root mechanism (preferred).** Let the session carry an import root for the audited workspace and reuse
-   `olean_search_paths` to `initSearchPath`. No env var; reuses existing manifest-walking.
-2. **`LEAN_PATH` mechanism.** A typed `workspace_search_path(roots)` builder that sets the child's `LEAN_PATH` via
-   `LeanWorkerConfig::env` (matches today's `lake env` exactly; lean-dup already computes the target `LEAN_PATH`).
+`crates/worker` keeps the public `WorkerClient` facade. Internally, `extract_batch` uses a private concrete adapter over
+`LeanWorkerPool`, `LeanWorkerCapabilityBuilder`, `LeanWorkerChild::sibling("lean-dup-worker-child")`,
+`import_workspace_root(batch.workspace_root)`, and `LeanWorkerStreamingCommand`. The other five commands keep using the
+subprocess transport in this slice.
 
-Either way: keep the "no generic `env()`" rule (this is one typed concept — the audited workspace), and **fold the
-import root into `LeanWorkerSessionKey`** (`pool.rs`) so different audited workspaces get distinct sessions and don't
-alias a warm child. Update `docs/api-review/lean-rs-worker-parent-public.txt`, add tests (key distinctness,
-out-of-package import fixture).
+## Red Lines
 
-## Spike artifacts (kept as Phase 2 foundation)
+- Do not merge the capability project's search paths with the audited workspace's search paths.
+- Do not use the capability project's root as the audited workspace import root.
+- Do not put `lean-rs-worker-child`, `lean-rs-host`, `lean-rs`, or `libleanshared` in the parent worker or CLI runtime
+  graph. `lean-toolchain` and its metadata-only `lean-rs-sys` dependency are allowed for manifest and fingerprint
+  handling, but must not make parent binaries link the Lean runtime.
+- Do not remove `lean_exe lean_dup_worker` or subprocess code in this slice.
+- Do not change `lean-dup.worker.v1`, the `DeclarationRow` payload shape, ranking, retrieval, reports, or eval.
+- Do not expose pool internals, manifest paths, transport frames, child env, or Lean expressions through interface
+  comments or public APIs.
 
-The lakefile `sharedFacet` change and `LeanDup/Capability.lean` build and are retained as the starting point for Phase 2
-(full capability conversion). A throwaway end-to-end Rust harness was judged unnecessary: (a) is production-proven,
-(b)+(c) are verified above, and Phase 3's integration test against `tests/fixtures/tiny` will be the end-to-end gate
-once the Phase 1 seam exists.
+## Proof Obligation
+
+The gate is an integration-style worker test against `tests/fixtures/tiny`, a Lake workspace distinct from lean-dup's
+own Lean package. It runs the same `ExtractBatch` through the old subprocess worker and the new pool-backed capability
+path, sorts rows by declaration id, and asserts both `DeclarationRow` equality and identical `serde_json` serialization
+for the row list.

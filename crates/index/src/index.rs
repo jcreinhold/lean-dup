@@ -14,7 +14,7 @@ use lean_dup_project::ResolvedWorkspace;
 use lean_dup_worker::{
     DeclarationRow, ExtractBatch, FeatureRow, FeaturesBatch, Fingerprints, IndexBatch, IndexStreamItem,
     ModuleDescriptor, ProbePair, ProbeResult, RoleFeature, SourceSpan, WorkerClient, WorkerDiagnostic, WorkerError,
-    WorkerEvent, WorkerVersion,
+    WorkerEvent, WorkerIdentity, WorkerVersion,
 };
 use lean_semantic_search_contract::OpaqueFeatureKey;
 use lean_semantic_search_retrieval::Corpus;
@@ -391,6 +391,13 @@ struct IndexCacheKey {
     extract_version: String,
     features_version: String,
     probe_version: String,
+    // Worker *substrate* facts from the lean-rs-worker-parent handshake. These are
+    // distinct from the semantic `protocol_version`/`worker_version` strings above:
+    // they describe the runtime contract that produced the cached rows, so a pool
+    // substrate change invalidates stale entries. Pool ids, pids, queue counters,
+    // and lease keys are deliberately excluded — they do not affect row content.
+    substrate_protocol_version: u16,
+    substrate_worker_version: String,
     worker_source_digest: Option<String>,
     label: String,
     kind: IndexBuildKind,
@@ -439,13 +446,14 @@ impl IndexStore {
     ) -> Result<IndexSummary> {
         require_oleans_if_requested(&request)?;
 
-        let version_call = reporter.measure("worker.version", |_| worker.version(request.execution_root()))?;
+        let version_call = reporter.measure("worker.version", |_| worker.worker_identity(request.execution_root()))?;
         record_worker_events(reporter, &version_call.events);
-        let version = version_call.rows.into_iter().next().ok_or_else(|| Error::Index {
+        let identity = version_call.rows.into_iter().next().ok_or_else(|| Error::Index {
             message: "worker version returned no rows".to_owned(),
         })?;
+        let version = &identity.semantic;
 
-        let expected = self.expected_entry(&request, &version)?;
+        let expected = self.expected_entry(&request, &identity)?;
         let index_dir = expected.index_dir.clone();
         let index_path = expected.index_path.clone();
 
@@ -474,7 +482,7 @@ impl IndexStore {
                 &index_path,
                 &expected.cache_key_json,
                 &request,
-                &version,
+                version,
                 worker,
                 reporter,
             )?;
@@ -506,7 +514,7 @@ impl IndexStore {
                 &index_path,
                 &expected.cache_key_json,
                 &request,
-                &version,
+                version,
                 declarations.rows,
                 features.rows,
             )?;
@@ -533,8 +541,8 @@ impl IndexStore {
         })
     }
 
-    pub fn expected_entry(&self, request: &IndexBuildRequest, version: &WorkerVersion) -> Result<ExpectedIndexEntry> {
-        let cache_key = index_cache_key(request, version)?;
+    pub fn expected_entry(&self, request: &IndexBuildRequest, identity: &WorkerIdentity) -> Result<ExpectedIndexEntry> {
+        let cache_key = index_cache_key(request, identity)?;
         let cache_key_json = serde_json::to_string(&cache_key)?;
         let cache_id = hex_digest(cache_key_json.as_bytes());
         let index_dir = self.label_dir(&request.label).join(cache_id);
@@ -882,9 +890,10 @@ fn modules_for(request: &IndexBuildRequest) -> Vec<ModuleDescriptor> {
         .collect()
 }
 
-fn index_cache_key(request: &IndexBuildRequest, version: &WorkerVersion) -> Result<IndexCacheKey> {
+fn index_cache_key(request: &IndexBuildRequest, identity: &WorkerIdentity) -> Result<IndexCacheKey> {
     let shared_mathlib = request.kind == IndexBuildKind::ProjectMathlib;
     let execution_root = request.execution_root();
+    let version = &identity.semantic;
     Ok(IndexCacheKey {
         index_schema_version: INDEX_SCHEMA_VERSION,
         index_provenance_version: INDEX_PROVENANCE_VERSION,
@@ -894,6 +903,8 @@ fn index_cache_key(request: &IndexBuildRequest, version: &WorkerVersion) -> Resu
         extract_version: version.extract_version.clone(),
         features_version: version.features_version.clone(),
         probe_version: version.probe_version.clone(),
+        substrate_protocol_version: identity.substrate.protocol_version,
+        substrate_worker_version: identity.substrate.worker_version.clone(),
         worker_source_digest: worker_source_digest()?,
         label: request.label.clone(),
         kind: request.kind,
@@ -1643,7 +1654,7 @@ mod tests {
     };
     use lean_dup_diagnostics::progress::Reporter;
     use lean_dup_project::{ResolvedWorkspace, WorkspaceRequest, resolve};
-    use lean_dup_worker::{ProbePair, ProbeResult, WorkerClient, WorkerVersion};
+    use lean_dup_worker::{ProbePair, ProbeResult, WorkerClient, WorkerIdentity, WorkerSubstrateFacts, WorkerVersion};
 
     fn repo_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1812,11 +1823,11 @@ name = "B"
         )
         .unwrap();
         let request_a = request_for(workspace_a, "A");
-        let version = fake_version("features.v1");
+        let version = fake_identity("features.v1");
         let first = serde_json::to_string(&index_cache_key(&request_a, &version).unwrap()).unwrap();
 
         let changed_version =
-            serde_json::to_string(&index_cache_key(&request_a, &fake_version("features.v2")).unwrap()).unwrap();
+            serde_json::to_string(&index_cache_key(&request_a, &fake_identity("features.v2")).unwrap()).unwrap();
         assert_ne!(first, changed_version);
 
         let workspace_b = resolve(
@@ -1861,7 +1872,7 @@ name = "B"
             &mut Reporter::new(false, false),
         )
         .unwrap();
-        let version = fake_version("features.v1");
+        let version = fake_identity("features.v1");
         let first =
             serde_json::to_string(&index_cache_key(&request_for(workspace.clone(), "A"), &version).unwrap()).unwrap();
 
@@ -1908,7 +1919,7 @@ name = "B"
             fs::write(mathlib.join("Mathlib.lean"), "#check Nat\n").unwrap();
         }
 
-        let version = fake_version("features.v1");
+        let version = fake_identity("features.v1");
         let left_workspace = resolve(
             WorkspaceRequest {
                 requested_root: left_mathlib,
@@ -1966,6 +1977,57 @@ name = "B"
         )
         .unwrap();
         assert_ne!(left_key, changed_key);
+    }
+
+    #[test]
+    fn cache_key_tracks_worker_substrate_facts() {
+        let temp = TempDir::new().unwrap();
+        fs::write(temp.path().join("lakefile.toml"), "[[lean_lib]]\nname = \"A\"\n").unwrap();
+        fs::write(temp.path().join("lean-toolchain"), "leanprover/lean4:v4.30.0\n").unwrap();
+        fs::write(temp.path().join("A.lean"), "#check Nat\n").unwrap();
+        let workspace = resolve(
+            WorkspaceRequest {
+                requested_root: temp.path().to_path_buf(),
+                module_root: Some("A".to_owned()),
+            },
+            &mut Reporter::new(false, false),
+        )
+        .unwrap();
+        let request = request_for(workspace, "A");
+
+        let identity = fake_identity("features.v1");
+        let baseline = serde_json::to_string(&index_cache_key(&request, &identity).unwrap()).unwrap();
+
+        // An identical substrate produces an identical key (no ephemeral pool
+        // state — ids, pids, queue counters — leaks into the cache key).
+        let same = WorkerIdentity {
+            semantic: identity.semantic.clone(),
+            substrate: fake_substrate(),
+        };
+        let same_key = serde_json::to_string(&index_cache_key(&request, &same).unwrap()).unwrap();
+        assert_eq!(baseline, same_key);
+
+        // A substrate transport-protocol bump invalidates the cache.
+        let bumped_protocol = WorkerIdentity {
+            semantic: identity.semantic.clone(),
+            substrate: WorkerSubstrateFacts {
+                protocol_version: 11,
+                ..fake_substrate()
+            },
+        };
+        let bumped_protocol_key = serde_json::to_string(&index_cache_key(&request, &bumped_protocol).unwrap()).unwrap();
+        assert_ne!(baseline, bumped_protocol_key);
+
+        // A pooled-worker runtime version bump invalidates the cache.
+        let bumped_worker = WorkerIdentity {
+            semantic: identity.semantic,
+            substrate: WorkerSubstrateFacts {
+                worker_version: "lean-rs-worker-parent.0.3.0".to_owned(),
+                ..fake_substrate()
+            },
+        };
+        let bumped_worker_key = serde_json::to_string(&index_cache_key(&request, &bumped_worker).unwrap()).unwrap();
+        assert_ne!(baseline, bumped_worker_key);
     }
 
     #[test]
@@ -2027,6 +2089,20 @@ name = "B"
             probe_version: "probe.v1".to_owned(),
             supported_commands: vec![],
             supported_capabilities: vec![],
+        }
+    }
+
+    fn fake_substrate() -> WorkerSubstrateFacts {
+        WorkerSubstrateFacts {
+            protocol_version: 10,
+            worker_version: "lean-rs-worker-parent.0.2.0".to_owned(),
+        }
+    }
+
+    fn fake_identity(features_version: &str) -> WorkerIdentity {
+        WorkerIdentity {
+            semantic: fake_version(features_version),
+            substrate: fake_substrate(),
         }
     }
 }

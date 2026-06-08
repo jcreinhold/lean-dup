@@ -12,12 +12,16 @@ members = [
   "crates/vector-index",
   "crates/vector-search",
   "crates/worker",
+  "crates/worker-child",
 ]
 resolver = "3"
 
 [workspace.package]
 edition = "2024"
+# Floor raised from 1.85 to 1.91 by adopting the lean-rs 0.2.0 pool worker crates,
+# whose workspace pins rust-version = "1.91".
 license = "MIT OR Apache-2.0"
+rust-version = "1.91"
 version = "0.1.0"
 
 [workspace.dependencies]
@@ -25,14 +29,14 @@ arrow-array = "58"
 arrow-schema = "58"
 assert_cmd = "2"
 clap = { version = "4", features = ["derive"] }
-fastembed = { version = "5.13.4", default-features = false, features = [
+fastembed = { version = "5.16.0", default-features = false, features = [
   "hf-hub-rustls-tls",
   "ort-download-binaries-rustls-tls",
 ] }
 futures = "0.3"
 hf-hub = { version = "0.5", default-features = false, features = ["rustls-tls", "ureq"] }
 indicatif = "0.18"
-lancedb = "0.29.0"
+lancedb = "0.30"
 lean-dup-diagnostics = { path = "crates/diagnostics", version = "0.1.0" }
 lean-dup-embedding = { path = "crates/embedding", version = "0.1.0" }
 lean-dup-eval = { path = "crates/eval", version = "0.1.0" }
@@ -42,11 +46,17 @@ lean-dup-report = { path = "crates/report", version = "0.1.0" }
 lean-dup-search = { path = "crates/search", version = "0.1.0" }
 lean-dup-vector-index = { path = "crates/vector-index", version = "0.1.0" }
 lean-dup-worker = { path = "crates/worker", version = "0.1.0" }
+# lean-rs worker stack (sibling checkout). The parent crate carries no
+# libleanshared linkage; only the worker-child binary links the Lean runtime.
+lean-rs-worker-child = { version = "0.2" }
+lean-rs-worker-parent = { version = "0.2" }
+lean-rs-worker-protocol = { version = "0.2" }
+lean-toolchain = { version = "0.2" }
 # Shared semantic-search package (sibling checkout). Path deps in this prompt;
 # the lean-rs-worker migration and proper publishing remain future work.
-lean-semantic-search-contract = { path = "../lean-semantic-search/crates/contract", version = "0.1.0" }
-lean-semantic-search-retrieval = { path = "../lean-semantic-search/crates/retrieval", version = "0.1.0" }
-lean-semantic-search-store = { path = "../lean-semantic-search/crates/store", version = "0.1.0" }
+lean-semantic-search-contract = { version = "0.2" }
+lean-semantic-search-retrieval = { version = "0.2" }
+lean-semantic-search-store = { version = "0.2" }
 predicates = "3"
 rusqlite = { version = "0.40", features = ["bundled"] }
 rustc-hash = "2"

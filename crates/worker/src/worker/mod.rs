@@ -1,11 +1,9 @@
-mod protocol;
-mod subprocess;
-mod transport;
+mod engine;
 
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -14,11 +12,8 @@ use thiserror::Error;
 
 use crate::perf::{self, CostClass};
 
-use self::protocol::{Command, ProtocolItem, Request, Row};
-use self::subprocess::SubprocessTransport;
-use self::transport::{CallControl, WorkerTransport};
+use self::engine::WorkerEngine;
 
-static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 const DEFAULT_WORKER_TIMEOUT: Duration = Duration::from_secs(60);
 const INDEX_WORKER_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
@@ -26,10 +21,11 @@ const INDEX_WORKER_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 ///
 /// Callers ask for semantic facts by capability: worker version, declaration
 /// extraction, feature extraction, and semantic probes. The client returns typed
-/// rows, progress events, and diagnostics; callers do not receive process
-/// handles, protocol envelopes, transport frames, or stderr as machine data.
+/// rows, progress events, and diagnostics; callers do not receive lifecycle
+/// handles, protocol envelopes, transport frames, or child diagnostics as
+/// machine data.
 pub struct WorkerClient {
-    transport: Box<dyn WorkerTransport + Send + Sync>,
+    engine: WorkerEngine,
     timeout: Duration,
     cancelled: Arc<AtomicBool>,
 }
@@ -53,7 +49,7 @@ impl WorkerClient {
     /// Create a worker client with the default timeout policy.
     pub fn new() -> Self {
         Self {
-            transport: Box::new(SubprocessTransport::new()),
+            engine: WorkerEngine::pool(),
             timeout: DEFAULT_WORKER_TIMEOUT,
             cancelled: Arc::new(AtomicBool::new(false)),
         }
@@ -71,7 +67,7 @@ impl WorkerClient {
     /// Create a worker client with an explicit per-call timeout.
     pub fn with_timeout(timeout: Duration) -> Self {
         Self {
-            transport: Box::new(SubprocessTransport::new()),
+            engine: WorkerEngine::pool(),
             timeout,
             cancelled: Arc::new(AtomicBool::new(false)),
         }
@@ -79,120 +75,64 @@ impl WorkerClient {
 
     /// Request cancellation for calls started from this client.
     ///
-    /// Cancellation is cooperative at the Rust transport boundary: a running
-    /// worker subprocess is terminated and the call returns a structured
-    /// cancellation error.
+    /// Cancellation is cooperative at the Rust worker boundary: a running
+    /// request is interrupted and the call returns a structured cancellation
+    /// error.
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Relaxed);
     }
 
     /// Return the worker and semantic algorithm versions for a Lake workspace.
     pub fn version(&self, workspace_root: PathBuf) -> Result<WorkerCall<WorkerVersion>, WorkerError> {
-        let payload = serde_json::json!({ "workspace_root": workspace_root });
-        self.call(Request::new(request_id(), Command::Version, payload))
+        let call = self
+            .engine
+            .identity(workspace_root, self.timeout, self.cancelled.clone())?;
+        Ok(WorkerCall {
+            rows: call.rows.into_iter().map(|identity| identity.semantic).collect(),
+            events: call.events,
+            diagnostics: call.diagnostics,
+        })
+    }
+
+    /// Return the worker version facts together with the worker substrate facts
+    /// that legitimately affect cached results.
+    ///
+    /// The index cache layer folds the substrate facts into its cache key;
+    /// callers that only display version facts use [`WorkerClient::version`].
+    pub fn worker_identity(&self, workspace_root: PathBuf) -> Result<WorkerCall<WorkerIdentity>, WorkerError> {
+        self.engine
+            .identity(workspace_root, self.timeout, self.cancelled.clone())
     }
 
     /// Extract typed declaration rows for a batch of Lean modules.
     pub fn extract_batch(&self, batch: ExtractBatch) -> Result<WorkerCall<DeclarationRow>, WorkerError> {
-        let mut payload = protocol::modules_payload(&batch.workspace_root_string(), &batch.modules);
-        payload["include_private"] = Value::Bool(batch.include_private);
-        payload["include_generated"] = Value::Bool(batch.include_generated);
-        self.call(Request::new(request_id(), Command::Extract, payload))
+        self.engine.extract(batch, self.timeout, self.cancelled.clone())
     }
 
     /// Compute Lean-owned semantic feature rows for a module batch.
     pub fn features_batch(&self, batch: FeaturesBatch) -> Result<WorkerCall<FeatureRow>, WorkerError> {
-        let mut payload = protocol::modules_payload(&batch.workspace_root_string(), &batch.modules);
-        payload["include_private"] = Value::Bool(batch.include_private);
-        payload["include_generated"] = Value::Bool(batch.include_generated);
-        if let Some(declaration_ids) = batch.declaration_ids {
-            payload["declaration_ids"] = serde_json::json!(declaration_ids);
-        }
-        self.call(Request::new(request_id(), Command::Features, payload))
+        self.engine.features(batch, self.timeout, self.cancelled.clone())
     }
 
     /// Stream declaration and feature rows from one import-once index command.
     ///
     /// The caller receives semantic rows and progress events as they arrive.
-    /// The worker client still owns JSONL framing, request ids, subprocess
-    /// lifetime, and structured diagnostic handling.
+    /// The worker client still owns worker lifetime, cancellation, and
+    /// structured diagnostic handling.
     pub fn index_stream(
         &self,
         batch: IndexBatch,
         sink: &mut dyn FnMut(IndexStreamItem) -> Result<(), WorkerError>,
     ) -> Result<WorkerCall<()>, WorkerError> {
-        let mut payload = protocol::modules_payload(&batch.workspace_root_string(), &batch.modules);
-        payload["include_private"] = Value::Bool(batch.include_private);
-        payload["include_generated"] = Value::Bool(batch.include_generated);
-        payload["declaration_chunk_size"] = serde_json::json!(batch.declaration_chunk_size);
-        payload["declaration_parallelism"] = serde_json::json!(batch.declaration_parallelism);
-        let request = Request::new(request_id(), Command::Index, payload);
-        let mut adapter = |item: ProtocolItem| match item {
-            ProtocolItem::Row(Row::Declaration(row)) => sink(IndexStreamItem::Declaration(row)),
-            ProtocolItem::Row(Row::Feature(row)) => sink(IndexStreamItem::Feature(row)),
-            ProtocolItem::Row(_) => Err(WorkerError::Protocol {
-                message: "worker returned non-index row for index call".to_owned(),
-            }),
-            ProtocolItem::Event(event) => sink(IndexStreamItem::Event(event)),
-            ProtocolItem::Diagnostic(diagnostic) => sink(IndexStreamItem::Diagnostic(diagnostic)),
-            ProtocolItem::Complete => Ok(()),
-        };
-        let output = self.transport.call_stream(
-            request,
-            CallControl {
-                timeout: self.timeout,
-                cancelled: self.cancelled.clone(),
-            },
-            &mut adapter,
-        )?;
-        for event in &output.events {
-            perf::record_worker_event(&event.phase, event.elapsed_ms, event.current);
-        }
-        Ok(WorkerCall {
-            rows: Vec::new(),
-            events: output.events,
-            diagnostics: output.diagnostics,
-        })
+        self.engine
+            .index_stream(batch, self.timeout, self.cancelled.clone(), sink)
     }
 
     /// Run bounded semantic probes for candidate declaration pairs.
     pub fn probe_batch(&self, batch: ProbeBatch) -> Result<WorkerCall<ProbeResult>, WorkerError> {
         perf::record_count(CostClass::LeanSemantic, "worker.probe.batch", 1);
         perf::record_count(CostClass::LeanSemantic, "worker.probe.pairs", batch.pairs.len() as u64);
-        let mut payload = protocol::modules_payload(&batch.workspace_root_string(), &batch.modules);
-        payload["include_private"] = Value::Bool(batch.include_private);
-        payload["include_generated"] = Value::Bool(batch.include_generated);
-        payload["pairs"] = serde_json::json!(batch.pairs);
-        if let Some(max_pairs) = batch.max_pairs {
-            payload["max_pairs"] = serde_json::json!(max_pairs);
-        }
-        self.call(Request::new(request_id(), Command::Probe, payload))
-    }
-
-    fn call<T>(&self, request: Request) -> Result<WorkerCall<T>, WorkerError>
-    where
-        T: TryFrom<Row, Error = WorkerError>,
-    {
-        let output = self.transport.call(
-            request,
-            CallControl {
-                timeout: self.timeout,
-                cancelled: self.cancelled.clone(),
-            },
-        )?;
-        for event in &output.events {
-            perf::record_worker_event(&event.phase, event.elapsed_ms, event.current);
-        }
-        let rows = output
-            .rows
-            .into_iter()
-            .map(T::try_from)
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(WorkerCall {
-            rows,
-            events: output.events,
-            diagnostics: output.diagnostics,
-        })
+        self.engine.probe(batch, self.timeout, self.cancelled.clone())
     }
 }
 
@@ -213,12 +153,6 @@ pub struct IndexBatch {
     pub include_generated: bool,
     pub declaration_chunk_size: usize,
     pub declaration_parallelism: usize,
-}
-
-impl IndexBatch {
-    fn workspace_root_string(&self) -> String {
-        self.workspace_root.to_string_lossy().into_owned()
-    }
 }
 
 /// One streamed event from an import-once index command.
@@ -262,11 +196,37 @@ impl WorkerVersion {
     }
 }
 
+/// Worker substrate facts that legitimately affect cached results.
+///
+/// These describe the worker/runtime contract carried by the
+/// `lean-rs-worker-parent` pool handshake — not semantic algorithm versions and
+/// not ephemeral pool state. The index cache key folds them in so a change to
+/// the worker transport substrate invalidates stale entries; pool ids, pids, and
+/// queue counters are deliberately excluded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkerSubstrateFacts {
+    /// The `lean-rs-worker` transport framing protocol version (not the
+    /// `lean-dup.worker.v1` schema string).
+    pub protocol_version: u16,
+    /// The pooled worker runtime version reported at handshake.
+    pub worker_version: String,
+}
+
+/// Worker identity: the semantic version facts plus the worker substrate facts.
+///
+/// `semantic` is the unchanged [`WorkerVersion`] DTO callers display; `substrate`
+/// carries the pool runtime facts the index cache key depends on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkerIdentity {
+    pub semantic: WorkerVersion,
+    pub substrate: WorkerSubstrateFacts,
+}
+
 /// One Lean declaration accepted by extraction filters.
 ///
 /// Display fields are safe to show to users. Semantic comparison must use
 /// feature rows, not `statement_text`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeclarationRow {
     pub declaration_id: String,
     pub origin: String,
@@ -287,7 +247,7 @@ pub struct DeclarationRow {
 ///
 /// Fingerprints and role keys are opaque equality keys. Callers may store and
 /// compare them but must not parse or reconstruct them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FeatureRow {
     pub declaration_id: String,
     pub feature_version: String,
@@ -372,12 +332,6 @@ pub struct ExtractBatch {
     pub include_generated: bool,
 }
 
-impl ExtractBatch {
-    fn workspace_root_string(&self) -> String {
-        self.workspace_root.to_string_lossy().into_owned()
-    }
-}
-
 /// Input for semantic feature extraction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FeaturesBatch {
@@ -386,12 +340,6 @@ pub struct FeaturesBatch {
     pub declaration_ids: Option<Vec<String>>,
     pub include_private: bool,
     pub include_generated: bool,
-}
-
-impl FeaturesBatch {
-    fn workspace_root_string(&self) -> String {
-        self.workspace_root.to_string_lossy().into_owned()
-    }
 }
 
 /// Input for semantic pair probes.
@@ -403,12 +351,6 @@ pub struct ProbeBatch {
     pub include_generated: bool,
     pub pairs: Vec<ProbePair>,
     pub max_pairs: Option<u64>,
-}
-
-impl ProbeBatch {
-    fn workspace_root_string(&self) -> String {
-        self.workspace_root.to_string_lossy().into_owned()
-    }
 }
 
 /// One candidate pair to check with Lean-owned semantic probes.
@@ -488,72 +430,15 @@ fn format_worker_diagnostics(diagnostics: &[WorkerDiagnostic]) -> String {
         .join("; ")
 }
 
-impl TryFrom<Row> for WorkerVersion {
-    type Error = WorkerError;
-
-    fn try_from(row: Row) -> Result<Self, Self::Error> {
-        match row {
-            Row::Version(row) => Ok(row),
-            _ => Err(WorkerError::Protocol {
-                message: "worker returned non-version row for version call".to_owned(),
-            }),
-        }
-    }
-}
-
-impl TryFrom<Row> for DeclarationRow {
-    type Error = WorkerError;
-
-    fn try_from(row: Row) -> Result<Self, Self::Error> {
-        match row {
-            Row::Declaration(row) => Ok(row),
-            _ => Err(WorkerError::Protocol {
-                message: "worker returned non-declaration row for extract call".to_owned(),
-            }),
-        }
-    }
-}
-
-impl TryFrom<Row> for FeatureRow {
-    type Error = WorkerError;
-
-    fn try_from(row: Row) -> Result<Self, Self::Error> {
-        match row {
-            Row::Feature(row) => Ok(row),
-            _ => Err(WorkerError::Protocol {
-                message: "worker returned non-feature row for features call".to_owned(),
-            }),
-        }
-    }
-}
-
-impl TryFrom<Row> for ProbeResult {
-    type Error = WorkerError;
-
-    fn try_from(row: Row) -> Result<Self, Self::Error> {
-        match row {
-            Row::Probe(row) => Ok(row),
-            _ => Err(WorkerError::Protocol {
-                message: "worker returned non-probe row for probe call".to_owned(),
-            }),
-        }
-    }
-}
-
-fn request_id() -> String {
-    let id = NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed);
-    format!("rust-worker-{id}")
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::process::Command as ProcessCommand;
     use std::sync::atomic::AtomicBool;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, OnceLock};
     use std::time::Duration;
 
-    use super::protocol::ProtocolOutput;
-    use super::transport::{CallControl, WorkerTransport};
+    use super::engine::WorkerEngine;
     use super::{ExtractBatch, FeaturesBatch, ModuleDescriptor, ProbeBatch, ProbePair, WorkerClient};
 
     fn repo_root() -> PathBuf {
@@ -576,8 +461,30 @@ mod tests {
         }]
     }
 
+    fn tiny_extract_batch() -> ExtractBatch {
+        ExtractBatch {
+            workspace_root: tiny_root(),
+            modules: tiny_basic(),
+            include_private: true,
+            include_generated: false,
+        }
+    }
+
+    fn ensure_worker_child_built() {
+        static BUILT: OnceLock<()> = OnceLock::new();
+        BUILT.get_or_init(|| {
+            let status = ProcessCommand::new("cargo")
+                .args(["build", "-p", "lean-dup-worker-child", "--locked"])
+                .current_dir(repo_root())
+                .status()
+                .unwrap();
+            assert!(status.success(), "failed to build lean-dup-worker-child");
+        });
+    }
+
     #[test]
     fn public_client_version_returns_typed_version() {
+        ensure_worker_child_built();
         let client = WorkerClient::new();
         let call = client.version(tiny_root()).unwrap();
         let version = call.rows.first().unwrap();
@@ -585,6 +492,17 @@ mod tests {
         for command in ["extract", "features", "probe", "doctor", "version"] {
             assert!(version.supported_commands.iter().any(|value| value == command));
         }
+    }
+
+    #[test]
+    fn worker_identity_reports_substrate_facts() {
+        ensure_worker_child_built();
+        let call = WorkerClient::new().worker_identity(tiny_root()).unwrap();
+        let identity = call.rows.first().unwrap();
+        assert_eq!(identity.semantic.protocol_version, "lean-dup.worker.v1");
+        // The substrate protocol version is the pool transport framing version,
+        // distinct from the `lean-dup.worker.v1` schema string.
+        assert!(!identity.substrate.worker_version.is_empty());
     }
 
     #[test]
@@ -615,29 +533,17 @@ mod tests {
 
     #[test]
     fn public_client_extract_returns_typed_declarations() {
+        ensure_worker_child_built();
         let client = WorkerClient::new();
-        let call = client
-            .extract_batch(ExtractBatch {
-                workspace_root: tiny_root(),
-                modules: tiny_basic(),
-                include_private: true,
-                include_generated: false,
-            })
-            .unwrap();
+        let call = client.extract_batch(tiny_extract_batch()).unwrap();
         assert!(call.rows.iter().any(|row| row.qualified_name == "Tiny.same_left"));
     }
 
     #[test]
     fn public_client_features_returns_typed_feature_rows() {
+        ensure_worker_child_built();
         let client = WorkerClient::new();
-        let declarations = client
-            .extract_batch(ExtractBatch {
-                workspace_root: tiny_root(),
-                modules: tiny_basic(),
-                include_private: true,
-                include_generated: false,
-            })
-            .unwrap();
+        let declarations = client.extract_batch(tiny_extract_batch()).unwrap();
         let ids = declarations
             .rows
             .iter()
@@ -659,6 +565,7 @@ mod tests {
 
     #[test]
     fn public_client_probe_returns_typed_probe_results() {
+        ensure_worker_child_built();
         let client = WorkerClient::new();
         let left = "workspace:Tiny.Basic:Tiny.same_left".to_owned();
         let right = "workspace:Tiny.Basic:Tiny.same_right".to_owned();
@@ -684,9 +591,7 @@ mod tests {
     fn probe_batch_serializes_extraction_filters() {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let client = WorkerClient {
-            transport: Box::new(CapturingTransport {
-                requests: requests.clone(),
-            }),
+            engine: WorkerEngine::fake(requests.clone()),
             timeout: Duration::from_secs(1),
             cancelled: Arc::new(AtomicBool::new(false)),
         };
@@ -711,38 +616,5 @@ mod tests {
         assert_eq!(captured.len(), 1);
         assert_eq!(captured[0]["include_private"], true);
         assert_eq!(captured[0]["include_generated"], false);
-    }
-
-    struct CapturingTransport {
-        requests: Arc<Mutex<Vec<serde_json::Value>>>,
-    }
-
-    impl WorkerTransport for CapturingTransport {
-        fn call(
-            &self,
-            request: super::protocol::Request,
-            _control: CallControl,
-        ) -> Result<ProtocolOutput, super::WorkerError> {
-            self.requests.lock().unwrap().push(request.to_json());
-            Ok(ProtocolOutput {
-                rows: Vec::new(),
-                events: Vec::new(),
-                diagnostics: Vec::new(),
-            })
-        }
-
-        fn call_stream(
-            &self,
-            request: super::protocol::Request,
-            _control: CallControl,
-            _sink: &mut dyn FnMut(super::protocol::ProtocolItem) -> Result<(), super::WorkerError>,
-        ) -> Result<ProtocolOutput, super::WorkerError> {
-            self.requests.lock().unwrap().push(request.to_json());
-            Ok(ProtocolOutput {
-                rows: Vec::new(),
-                events: Vec::new(),
-                diagnostics: Vec::new(),
-            })
-        }
     }
 }
