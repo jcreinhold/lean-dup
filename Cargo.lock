@@ -3976,7 +3976,7 @@ dependencies = [
  "lean-dup-diagnostics",
  "lean-dup-project",
  "lean-dup-worker",
- "lean-semantic-search-contract 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lean-semantic-search-contract",
  "lean-semantic-search-retrieval",
  "lean-semantic-search-store",
  "rusqlite",
@@ -4023,7 +4023,7 @@ dependencies = [
  "lean-dup-index",
  "lean-dup-project",
  "lean-dup-worker",
- "lean-semantic-search-contract 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lean-semantic-search-contract",
  "lean-semantic-search-retrieval",
  "lean-semantic-search-store",
  "rustc-hash",
@@ -4099,7 +4099,9 @@ dependencies = [
 
 [[package]]
 name = "lean-rs"
-version = "0.2.0"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac794aa7f29e511f953fc764db8a83501e475cb6a2c1f1d445d050a842ac80dd"
 dependencies = [
  "lean-rs-sys",
  "lean-toolchain",
@@ -4112,14 +4114,18 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-abi"
-version = "0.2.0"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "697d63e003bd50931c09638ee1119d10b5c97539ccc04b237b61e5b7006f6698"
 dependencies = [
  "sha2 0.11.0",
 ]
 
 [[package]]
 name = "lean-rs-host"
-version = "0.2.0"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "353b5990ad76a44456526fe0c999ea7ce76c14be79f53e9f16599a4634ac29ff"
 dependencies = [
  "lean-rs",
  "lean-toolchain",
@@ -4130,7 +4136,9 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-interop-shims"
-version = "0.2.0"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28ee3a625eb8140609fee7b8bdb0db7a898033f70422645aa33af291e12c9c60"
 dependencies = [
  "lean-toolchain",
  "sha2 0.11.0",
@@ -4138,7 +4146,9 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-sys"
-version = "0.2.0"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "991dcfefedd619aac26a3f8b7c87c48ed85452d413c89411aebac1bb5e9964ba"
 dependencies = [
  "lean-rs-abi",
  "sha2 0.11.0",
@@ -4146,7 +4156,9 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-worker-child"
-version = "0.2.0"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f01c7b1b94bf074841a6c4d293a4ed07518730107e49b55c71c50a1b84d2158"
 dependencies = [
  "lean-rs",
  "lean-rs-host",
@@ -4160,7 +4172,9 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-worker-parent"
-version = "0.2.0"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b27008a420150bb71565d4bdffe045cc8420b0ed09a68d292352830ec39003d"
 dependencies = [
  "lean-rs-worker-protocol",
  "lean-toolchain",
@@ -4170,7 +4184,9 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-worker-protocol"
-version = "0.2.0"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4e83f0ec027953c5db1244a93cd605c45fc3746836d69231d00bc3aa066aef1"
 dependencies = [
  "lean-toolchain",
  "serde",
@@ -4179,25 +4195,19 @@ dependencies = [
 
 [[package]]
 name = "lean-semantic-search-capability"
-version = "0.2.0"
-dependencies = [
- "lean-semantic-search-contract 0.2.0",
- "serde_json",
-]
-
-[[package]]
-name = "lean-semantic-search-contract"
-version = "0.2.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "lean-semantic-search-contract"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a755ce36de183590670373060b7cbec2d661d4aed267d336c299a208947ea5aa"
+checksum = "3465c5d96a8fbbd3d04ac218e4a27e800627669f797f55c1b197a0b8d77c6d13"
+dependencies = [
+ "lean-semantic-search-contract",
+ "serde_json",
+]
+
+[[package]]
+name = "lean-semantic-search-contract"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6fb3d27353cf00da9bab4e5a427e967fa8032e768bec0a8dc10df124836372c7"
 dependencies = [
  "serde",
  "serde_json",
@@ -4205,18 +4215,20 @@ dependencies = [
 
 [[package]]
 name = "lean-semantic-search-retrieval"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0335a9066f1926e6506ee6b9d1bd089748ded0b4867bb1fb6ad8447c7041827e"
+checksum = "38c394a5c1f612dff4061421850fbc55f3b70586ef2b3f7c9f001baff4cde703"
 dependencies = [
- "lean-semantic-search-contract 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lean-semantic-search-contract",
  "serde",
  "serde_json",
 ]
 
 [[package]]
 name = "lean-semantic-search-runtime"
-version = "0.2.0"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fac9ca2e59d17e91000dc1f57d55962dbc9e3a15b3c8a3eefbf05047590e8bb2"
 dependencies = [
  "fs4",
  "lean-rs-worker-protocol",
@@ -4231,11 +4243,11 @@ dependencies = [
 
 [[package]]
 name = "lean-semantic-search-store"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a00bf1936b560eb3168ec97d33d1d67cd44f41f62853e6513fa72c0da67bc91a"
+checksum = "faf86e2371a96867aa15cd4c62994f9ab492e2f7eea2156c5e74ce90ecffb472"
 dependencies = [
- "lean-semantic-search-contract 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lean-semantic-search-contract",
  "lean-semantic-search-retrieval",
  "rusqlite",
  "serde_json",
@@ -4243,7 +4255,9 @@ dependencies = [
 
 [[package]]
 name = "lean-toolchain"
-version = "0.2.0"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f146f52f8155da9d95e9b985d3d9ecfffa7da0f57feb9ef67a538a4d2e4bd93"
 dependencies = [
  "fs4",
  "lean-rs-abi",

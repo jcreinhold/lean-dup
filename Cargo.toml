@@ -46,20 +46,19 @@ lean-dup-report = { path = "crates/report", version = "0.1.0" }
 lean-dup-search = { path = "crates/search", version = "0.1.0" }
 lean-dup-vector-index = { path = "crates/vector-index", version = "0.1.0" }
 lean-dup-worker = { path = "crates/worker", version = "0.1.0" }
-# lean-rs worker stack (sibling checkout). The parent crate carries no
-# libleanshared linkage; only the worker-child binary links the Lean runtime.
-lean-rs-worker-child = { version = "0.2" }
+# lean-rs worker stack (published crates.io releases). The parent crate carries
+# no libleanshared linkage; only the worker-child binary links the Lean runtime.
 lean-rs-interop-shims = { version = "0.2" }
+lean-rs-worker-child = { version = "0.2" }
 lean-rs-worker-parent = { version = "0.2" }
 lean-rs-worker-protocol = { version = "0.2" }
 lean-toolchain = { version = "0.2" }
-# Shared semantic-search Rust crates. The runtime crate owns the packaged Lean
-# source used by the worker build; the temporary patch below is local until that
-# runtime crate is published.
-lean-semantic-search-contract = { version = "0.2" }
-lean-semantic-search-retrieval = { version = "0.2" }
-lean-semantic-search-runtime = { version = "0.2" }
-lean-semantic-search-store = { version = "0.2" }
+# Shared semantic-search Rust crates (published crates.io releases). The runtime
+# crate owns the packaged Lean source materialized by the worker build.
+lean-semantic-search-contract = { version = "0.3" }
+lean-semantic-search-retrieval = { version = "0.3" }
+lean-semantic-search-runtime = { version = "0.3" }
+lean-semantic-search-store = { version = "0.3" }
 predicates = "3"
 rusqlite = { version = "0.40", features = ["bundled"] }
 rustc-hash = "2"
@@ -71,17 +70,6 @@ thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 toml = "1"
 walkdir = "2"
-
-# Temporary local integration for the package-owned semantic runtime crate and
-# the lean-toolchain manifest-dependency helper reviewed in prompt 07. Remove
-# once matching crate releases are published.
-[patch.crates-io]
-lean-rs-worker-child = { path = "../lean-rs/crates/lean-rs-worker-child" }
-lean-rs-interop-shims = { path = "../lean-rs/crates/lean-rs/shims/lean-rs-interop-shims" }
-lean-rs-worker-parent = { path = "../lean-rs/crates/lean-rs-worker-parent" }
-lean-rs-worker-protocol = { path = "../lean-rs/crates/lean-rs-worker-protocol" }
-lean-toolchain = { path = "../lean-rs/crates/lean-toolchain" }
-lean-semantic-search-runtime = { path = "../lean-semantic-search/crates/runtime" }
 
 [workspace.lints.rust]
 future-incompatible = "warn"
