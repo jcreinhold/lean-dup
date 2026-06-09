@@ -108,6 +108,9 @@ pub struct AuditRequest {
     pub probe_budget: usize,
     pub probe_policy: ProbePolicy,
     pub probe_chunk_size: usize,
+    /// Per-declaration elaboration heartbeat budget for the worker. `None` leaves
+    /// the worker default; `Some(0)` disables the limit.
+    pub max_heartbeats: Option<u64>,
 }
 
 /// Result of a complete audit computation before report projection.
@@ -124,6 +127,11 @@ pub struct AuditOutput {
     pub compare_mathlib: bool,
     pub include_generated: bool,
     pub visibility: AuditVisibilityOptions,
+    /// Declarations omitted from the local workspace index because their
+    /// elaboration exceeded the per-declaration heartbeat budget. `0` for the
+    /// default budget on well-behaved corpora; raise `--max-heartbeats` to
+    /// include skipped declarations.
+    pub declarations_skipped_by_budget: u64,
     pub scoring: SearchScoringSummary,
     pub review_policy: SearchReviewPolicySummary,
     pub retrieval: AuditRetrievalSummary,
@@ -420,6 +428,7 @@ struct WorkflowOutput {
     compare_mathlib: bool,
     include_generated: bool,
     visibility: AuditVisibilityOptions,
+    declarations_skipped_by_budget: u64,
     retrieval: RetrievalDiagnostics,
     comparison_provenance: Vec<ComparisonProvenanceReport>,
     semantic_verification: ProbeDiagnostics,
@@ -451,7 +460,7 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
     let store = IndexStore::new(foundation.cache.root.clone());
     let local_label = "audit-workspace".to_owned();
     let local_module_root = module_root.unwrap_or_else(|| foundation.workspace.selected_roots.join(","));
-    reporter.measure("index.local", |reporter| {
+    let local_summary = reporter.measure("index.local", |reporter| {
         store.build_or_reuse(
             IndexBuildRequest {
                 workspace: foundation.workspace.clone(),
@@ -464,11 +473,13 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
                 require_oleans: false,
                 force: false,
                 kind: IndexBuildKind::Local,
+                max_heartbeats: request.max_heartbeats,
             },
             &WorkerClient::for_indexing(),
             reporter,
         )
     })?;
+    let declarations_skipped_by_budget = local_summary.declarations_skipped_by_budget;
     let local_index = store.resolve(IndexReference::Label(local_label))?;
     let local_handles = local_index.all_handles()?;
     let workspace_rows = local_index.hydrate(&local_handles)?;
@@ -514,6 +525,7 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
                 budget: request.probe_budget,
                 per_declaration_cap: 2,
                 chunk_size: request.probe_chunk_size,
+                max_heartbeats: request.max_heartbeats,
             },
         },
         reporter,
@@ -609,6 +621,7 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
         compare_mathlib: request.compare_mathlib,
         include_generated: request.include_generated,
         visibility: request.visibility,
+        declarations_skipped_by_budget,
         retrieval: retrieval_output.diagnostics,
         comparison_provenance: compare.provenance.reports,
         semantic_verification: verification.diagnostics,
@@ -723,6 +736,7 @@ fn project_audit_output(workflow: WorkflowOutput) -> AuditOutput {
         compare_mathlib: workflow.compare_mathlib,
         include_generated: workflow.include_generated,
         visibility: workflow.visibility,
+        declarations_skipped_by_budget: workflow.declarations_skipped_by_budget,
         scoring: default_summary(),
         review_policy: review_policy::summary(),
         retrieval: audit_retrieval_summary(&workflow.retrieval),
@@ -1279,6 +1293,7 @@ fn open_compare_indexes(
                 require_oleans: true,
                 force: false,
                 kind: IndexBuildKind::ProjectMathlib,
+                max_heartbeats: request.max_heartbeats,
             },
             &WorkerClient::for_indexing(),
             reporter,

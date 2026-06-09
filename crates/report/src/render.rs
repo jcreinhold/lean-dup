@@ -702,6 +702,12 @@ fn render_audit(report: &AuditReport, options: RenderOptions) -> String {
             report.workspace.selected_roots.join(", ")
         },
     ));
+    if report.workspace.declarations_skipped_by_budget > 0 {
+        lines.push(format!(
+            "warning: skipped {} declaration(s) exceeding the heartbeat budget; raise --max-heartbeats (0 = unlimited) to include them",
+            report.workspace.declarations_skipped_by_budget,
+        ));
+    }
     let truncated = if report.visible_groups_truncated {
         " (truncated)"
     } else {

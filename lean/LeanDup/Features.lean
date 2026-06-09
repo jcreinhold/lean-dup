@@ -134,19 +134,21 @@ def rowPayload
     , ("low_signal_markers", RoleFeatures.markersJson markers)
     ]
 
+/-- Compute the feature-row payload for one accepted declaration. -/
+def featureRow (declaration : LeanDup.Extract.AcceptedDeclaration) : MetaM Json := do
+  let (fingerprints, roleFeatures, markers) ← semanticFacts declaration
+  pure (rowPayload declaration fingerprints roleFeatures markers)
+
 /--
 Compute semantic feature rows for accepted declarations in the current Lean
-environment.
+environment, skipping (and counting) any declaration that exceeds the heartbeat
+budget. Returns the rows and the skipped count.
 
 The caller controls chunking. This function owns the semantic row contents.
 -/
 def featureRows
-    (declarations : Array LeanDup.Extract.AcceptedDeclaration) : MetaM (Array Json) := do
-  let mut rows := #[]
-  for declaration in declarations do
-    let (fingerprints, roleFeatures, markers) ← semanticFacts declaration
-    rows := rows.push (rowPayload declaration fingerprints roleFeatures markers)
-  pure rows
+    (declarations : Array LeanDup.Extract.AcceptedDeclaration) : MetaM (Array Json × Nat) :=
+  LeanDup.Extract.forEachDeclarationSkippingSlow declarations featureRow
 
 /--
 Import requested modules once and emit feature-row payloads for declarations
@@ -168,14 +170,14 @@ unsafe def runProfiled (payload : Json) (modules : Array LeanDup.Extract.ModuleS
             match selectDeclarations ids? declarations with
             | Except.error err => pure <| Except.error err
             | Except.ok selected => do
-                let rows ← featureRows selected
-                pure <| Except.ok rows)
+                let (rows, skipped) ← featureRows selected
+                pure <| Except.ok (rows, skipped))
           (initializeSearchPath := initializeSearchPath)
       match result with
       | Except.error err => pure <| Except.error (fromExtractError err)
       | Except.ok (Except.error err, _stats) => pure <| Except.error err
-      | Except.ok (Except.ok rows, stats) =>
-          pure <| Except.ok { rows := rows, stats := { stats with rowCount := rows.size } }
+      | Except.ok (Except.ok (rows, skipped), stats) =>
+          pure <| Except.ok { rows := rows, stats := { stats with rowCount := rows.size, skippedCount := skipped } }
 
 unsafe def run (payload : Json) (modules : Array LeanDup.Extract.ModuleSpec) :
     IO (Except Error (Array Json)) := do

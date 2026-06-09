@@ -47,6 +47,9 @@ structure Options where
   workspaceRoot? : Option String
   includePrivate : Bool
   includeGenerated : Bool
+  /-- Per-declaration elaboration heartbeat budget (the value Lean prints in a
+      timeout message). `0` disables the limit. -/
+  maxHeartbeats : Nat
   deriving Repr
 
 /-- Extraction context shared by worker commands that reuse one imported environment. -/
@@ -60,6 +63,9 @@ structure RunStats where
   semanticMs : Nat
   declarationCount : Nat
   rowCount : Nat
+  /-- Declarations skipped because their elaboration exceeded the heartbeat
+      budget. Non-fatal: the command still completes with the remaining rows. -/
+  skippedCount : Nat := 0
 
 /-- Semantic rows plus coarse cost facts. -/
 structure RunOutput where
@@ -107,6 +113,16 @@ private def parseWorkspaceRoot (json : Json) : Except Error (Option String) := d
       if value.isEmpty then pure none else pure (some value)
   | some _ => throw <| invalidRequest "`workspace_root` must be a string or null"
 
+private def parseNatField (json : Json) (key : String) (default : Nat) :
+    Except Error Nat := do
+  match optionalJsonField json key with
+  | none | some Json.null => pure default
+  | some (Json.num value) =>
+      match value.toString.toNat? with
+      | some parsed => pure parsed
+      | none => throw <| invalidRequest s!"`{key}` must be a natural number"
+  | some _ => throw <| invalidRequest s!"`{key}` must be a natural number"
+
 /--
 Parse extraction options shared by declaration, feature, and index commands.
 
@@ -117,7 +133,8 @@ def parseOptions (payload : Json) : Except Error Options := do
   let workspaceRoot? ← parseWorkspaceRoot payload
   let includePrivate ← parseBoolField payload "include_private" false
   let includeGenerated ← parseBoolField payload "include_generated" false
-  pure { workspaceRoot?, includePrivate, includeGenerated }
+  let maxHeartbeats ← parseNatField payload "max_heartbeats" 200000
+  pure { workspaceRoot?, includePrivate, includeGenerated, maxHeartbeats }
 
 private def dottedName (text : String) : Name :=
   (text.splitOn ".").foldl
@@ -312,6 +329,36 @@ def collectAcceptedDeclarations (context : Context) : MetaM (Array AcceptedDecla
       declarations := declarations.push declaration
   pure declarations
 
+/-- Elaboration options carrying the request's per-declaration heartbeat budget.
+    A budget of `0` disables the limit (Lean convention for `maxHeartbeats`). -/
+def elaborationOptions (options : Options) : Lean.Options :=
+  Lean.maxHeartbeats.set Lean.Options.empty options.maxHeartbeats
+
+/--
+Process each accepted declaration under its own heartbeat budget, skipping (and
+counting) any declaration whose elaboration exceeds the budget.
+
+`Core.withCurrHeartbeats` resets the heartbeat baseline per declaration, so each
+gets the full budget; a heartbeat timeout in one declaration is caught and that
+declaration is omitted rather than failing the whole command. Non-heartbeat
+errors still propagate. Returns the successful payloads and the skipped count.
+-/
+def forEachDeclarationSkippingSlow {α : Type}
+    (declarations : Array AcceptedDeclaration)
+    (body : AcceptedDeclaration → MetaM α) : MetaM (Array α × Nat) := do
+  let mut rows := #[]
+  let mut skipped := 0
+  for declaration in declarations do
+    try
+      let row ← Core.withCurrHeartbeats (body declaration)
+      rows := rows.push row
+    catch ex =>
+      if ex.isMaxHeartbeat then
+        skipped := skipped + 1
+      else
+        throw ex
+  pure (rows, skipped)
+
 /--
 Encode one accepted declaration as the protocol declaration-row payload.
 
@@ -340,11 +387,8 @@ def rowPayloadFromAccepted (options : Options) (decl : AcceptedDeclaration) : Me
       definitionBodySummary?
 
 private def collectRows (options : Options) (declarations : Array AcceptedDeclaration) :
-    MetaM (Array Json) := do
-  let mut rows := #[]
-  for declaration in declarations do
-    rows := rows.push (← rowPayloadFromAccepted options declaration)
-  pure rows
+    MetaM (Array Json × Nat) :=
+  forEachDeclarationSkippingSlow declarations (rowPayloadFromAccepted options)
 
 private def uniqueModuleImports (modules : Array ModuleSpec) : Array Import := Id.run do
   let mut seen : Std.HashSet String := {}
@@ -408,7 +452,7 @@ unsafe def withAcceptedDeclarationsProfiled {α : Type}
           let coreContext : Core.Context :=
             { fileName := "<lean-dup-extract>"
               fileMap := default
-              options := Options.empty }
+              options := elaborationOptions options }
           try
             let semanticStarted ← IO.monoMsNow
             let (result, _, _) ←
@@ -467,8 +511,8 @@ unsafe def runProfiled (payload : Json) (modules : Array ModuleSpec)
       (fun options declarations => collectRows options declarations)
       (initializeSearchPath := initializeSearchPath) with
   | .error err => pure <| .error err
-  | .ok (rows, stats) =>
-      pure <| .ok { rows := rows, stats := { stats with rowCount := rows.size } }
+  | .ok ((rows, skipped), stats) =>
+      pure <| .ok { rows := rows, stats := { stats with rowCount := rows.size, skippedCount := skipped } }
 
 unsafe def run (payload : Json) (modules : Array ModuleSpec) :
     IO (Except Error (Array Json)) := do

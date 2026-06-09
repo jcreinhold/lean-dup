@@ -59,6 +59,7 @@ private structure IndexChunkResult where
   stop : Nat
   declarationRows : Array Json
   featureRows : Array Json
+  skipped : Nat
 
 private abbrev IndexChunkTask :=
   Task (Except IO.Error (Nat × Nat × Nat × Nat × Except LeanDup.Extract.Error IndexChunkResult))
@@ -67,20 +68,25 @@ private unsafe def computeIndexChunk
     (options : LeanDup.Extract.Options)
     (env : Environment)
     (declarations : Array LeanDup.Extract.AcceptedDeclaration) :
-    IO (Except LeanDup.Extract.Error (Array Json × Array Json)) := do
+    IO (Except LeanDup.Extract.Error (Array Json × Array Json × Nat)) := do
   let coreContext : Core.Context :=
     { fileName := "<lean-dup-index>"
       fileMap := default
-      options := Options.empty }
+      options := LeanDup.Extract.elaborationOptions options }
   try
     let (rows, _, _) ←
       MetaM.toIO
         (do
-          let mut declarationRows := #[]
-          for declaration in declarations do
-            declarationRows := declarationRows.push (← LeanDup.Extract.rowPayloadFromAccepted options declaration)
-          let featureRows ← LeanDup.Features.featureRows declarations
-          pure (declarationRows, featureRows))
+          -- Process each declaration's display row and feature row together under
+          -- one per-declaration heartbeat budget, so a slow declaration is skipped
+          -- from both streams consistently rather than failing the whole chunk.
+          let (pairs, skipped) ←
+            LeanDup.Extract.forEachDeclarationSkippingSlow declarations
+              (fun declaration => do
+                let declarationRow ← LeanDup.Extract.rowPayloadFromAccepted options declaration
+                let featureRow ← LeanDup.Features.featureRow declaration
+                pure (declarationRow, featureRow))
+          pure (pairs.map (·.1), pairs.map (·.2), skipped))
         coreContext
         { env := env }
         {}
@@ -101,8 +107,8 @@ private unsafe def computeIndexRange
     IO (Except LeanDup.Extract.Error IndexChunkResult) := do
   let chunk := declarations.extract start stop
   match ← computeIndexChunk options env chunk with
-  | .ok (declarationRows, featureRows) =>
-      pure <| .ok { start, stop, declarationRows, featureRows }
+  | .ok (declarationRows, featureRows, skipped) =>
+      pure <| .ok { start, stop, declarationRows, featureRows, skipped }
   | .error err => pure <| .error err
 
 private unsafe def spawnIndexRange
@@ -150,7 +156,7 @@ private unsafe def emitIndexRanges
     (options : LeanDup.Extract.Options)
     (env : Environment)
     (declarations : Array LeanDup.Extract.AcceptedDeclaration)
-    (chunkSize parallelism : Nat) : IO (Except String Unit) := do
+    (chunkSize parallelism : Nat) : IO (Except String Nat) := do
   let mut pending : List (Nat × Nat) := []
   let mut start := 0
   while start < declarations.size do
@@ -162,6 +168,7 @@ private unsafe def emitIndexRanges
   let mut active : List IndexChunkTask := []
   let mut serial := 0
   let mut failed : Option String := none
+  let mut skippedTotal := 0
 
   while failed.isNone && (← abort.get).isNone && active.length < maxActive && !pending.isEmpty do
     match pending with
@@ -181,6 +188,7 @@ private unsafe def emitIndexRanges
         | .error ioErr =>
             failed := some s!"mathlib index task failed: {ioErr}"
         | .ok (_serial, _rangeStart, _rangeStop, _elapsedMs, .ok result) =>
+            skippedTotal := skippedTotal + result.skipped
             emitIndexChunkResult handle trampoline abort declarations result
         | .ok (_serial, rangeStart, rangeStop, _elapsedMs, .error err) =>
             if heartbeatLike err.message && rangeStop - rangeStart > 1 then
@@ -203,7 +211,7 @@ private unsafe def emitIndexRanges
     IO.cancel task
   match failed with
   | some err => pure <| .error err
-  | none => pure <| .ok ()
+  | none => pure <| .ok skippedTotal
 
 /--
 Import the requested modules once and stream declaration and feature rows from
@@ -217,7 +225,7 @@ when it asked the stream to stop.
 unsafe def streamIndex
     (handle trampoline : USize)
     (json : Json)
-    (modules : Array LeanDup.Extract.ModuleSpec) : IO (Except String UInt8) := do
+    (modules : Array LeanDup.Extract.ModuleSpec) : IO (Except String (UInt8 × Nat)) := do
   if modules.isEmpty then
     return .error "`modules` must contain at least one module"
   match LeanDup.Extract.parseOptions json with
@@ -240,7 +248,7 @@ unsafe def streamIndex
                   let coreContext : Core.Context :=
                     { fileName := "<lean-dup-index>"
                       fileMap := default
-                      options := Options.empty }
+                      options := LeanDup.Extract.elaborationOptions options }
                   let context : LeanDup.Extract.Context := { modules := modules, options := options }
                   let collected ←
                     try
@@ -264,6 +272,6 @@ unsafe def streamIndex
                         (LeanRsInterop.Worker.Stream.progress "lean.index.scheduler" 0 (some declarations.size))
                       match ← emitIndexRanges handle trampoline abort options env declarations chunkSize parallelism with
                       | .error message => return .error message
-                      | .ok () => return .ok ((← abort.get).getD 0)
+                      | .ok skipped => return .ok ((← abort.get).getD 0, skipped)
 
 end LeanDup.Index

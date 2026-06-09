@@ -100,8 +100,13 @@ label like `mathlib` implying proof-grade evidence without provenance.
 - **Default queue is high-precision, not a dump.** Feature-only/noisy groups are hidden unless the user passes
   `--private`, `--low-priority`, or `--diagnostics`. Don't make broad candidate dumps the default.
 - **Cache invalidation tracks semantic inputs only** (Lean source, Lake files, toolchain, worker/protocol/ index
-  semantic versions, include policy, selected roots, relevant deps) — never unrelated non-Lean files or broad repo
-  dirtiness. Default cache root `~/.cache/lean-dup`, override `LEAN_DUP_CACHE_DIR`.
+  semantic versions, include policy, selected roots, relevant deps, the `--max-heartbeats` budget) — never unrelated
+  non-Lean files or broad repo dirtiness. Default cache root `~/.cache/lean-dup`, override `LEAN_DUP_CACHE_DIR`.
+- **Heartbeat budget is Lean-owned, skips are non-fatal.** `--max-heartbeats N` (worker default 200000; `0` = unlimited)
+  threads to the worker as an optional additive `lean-dup.worker.v1` payload field. A declaration exceeding the budget is
+  skipped (its rows omitted), never aborting the run; the count is persisted in index metadata and surfaced
+  (`workspace.declarations_skipped_by_budget` in audit JSON, a stderr event). Rust supplies the budget but never inspects
+  elaboration state — the skip strategy lives in `lean/LeanDup` (`forEachDeclarationSkippingSlow`).
 - **Lints are strict.** The workspace denies `unsafe-code` and `rust-2024-compatibility`; clippy runs
   `pedantic`/`nursery` plus restriction lints (`unwrap_used`, `expect_used`, `panic`, `indexing_slicing`,
   `arithmetic_side_effects`, `todo`, `unimplemented` are all `warn` → errors in CI). Prefer `.get()`, checked

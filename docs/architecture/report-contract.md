@@ -65,7 +65,8 @@ Representative shape:
       "fingerprint": "sha256:07049e02f8629df73d07d007"
     },
     "selected_roots": ["Tiny"],
-    "source_count": 3
+    "source_count": 3,
+    "declarations_skipped_by_budget": 0
   },
   "cache": {
     "root": {

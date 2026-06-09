@@ -209,6 +209,11 @@ pub struct IndexArgs {
     /// Fail if Lean's compiled `.olean` outputs are missing for the selected module root.
     #[arg(long)]
     pub require_oleans: bool,
+
+    /// Per-declaration Lean elaboration heartbeat budget (worker default 200000; 0 = unlimited).
+    /// Declarations whose elaboration exceeds it are skipped, with the count reported.
+    #[arg(long = "max-heartbeats")]
+    pub max_heartbeats: Option<u64>,
 }
 
 #[derive(Debug, Clone, clap::Args)]
@@ -233,6 +238,11 @@ pub struct IndexMathlibArgs {
     /// Rebuild the mathlib index even if a cached entry would have been reused.
     #[arg(long)]
     pub force: bool,
+
+    /// Per-declaration Lean elaboration heartbeat budget (worker default 200000; 0 = unlimited).
+    /// Declarations whose elaboration exceeds it are skipped, with the count reported.
+    #[arg(long = "max-heartbeats")]
+    pub max_heartbeats: Option<u64>,
 }
 
 #[derive(Debug, Clone, clap::Args)]
@@ -311,6 +321,11 @@ pub struct AuditArgs {
     /// Show at most N groups in the text table (default: 20). Has no effect on JSON output.
     #[arg(long)]
     pub limit: Option<usize>,
+
+    /// Per-declaration Lean elaboration heartbeat budget (worker default 200000; 0 = unlimited).
+    /// Declarations whose elaboration exceeds it are skipped, with the count reported.
+    #[arg(long = "max-heartbeats")]
+    pub max_heartbeats: Option<u64>,
 
     #[arg(long = "probe-budget", hide = true, default_value_t = 500)]
     pub probe_budget: usize,

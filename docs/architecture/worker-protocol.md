@@ -97,7 +97,18 @@ set, and the response kinds above.
 | Unsupported schema or command | fatal `unsupported_schema` / `unsupported_command` before importing | abort, surface diagnostic |
 | Worker panic or nonzero exit without `complete` | none guaranteed | `worker_panic` with bounded stderr; discard partial stdout |
 | Probe declaration unavailable | nonfatal `probe_result` with `status = "unavailable"` | continue with remaining pairs |
+| Declaration exceeds the heartbeat budget | nonfatal: omit that declaration's rows, count it in the `complete` `skipped` total | continue; surface the skip count and raise `--max-heartbeats` to include it |
 | Internal worker error after partial output | fatal `internal_error` when possible, exit nonzero | discard command output |
+
+### Heartbeat budget and skips
+
+The per-declaration heartbeat budget (`max_heartbeats`, optional; `0` = unlimited) and the strategy for recovering from
+a declaration that exceeds it are **Lean-owned** — Rust supplies the budget as a hint and never inspects elaboration
+state. The worker resets the budget per declaration, and a declaration whose elaboration exceeds it is skipped (its rows
+omitted) rather than failing the whole command. The skip is never silent: the worker counts skips in the `complete`
+envelope's `skipped` total, Rust persists that total in the index and surfaces it (`declarations_skipped_by_budget` in
+audit JSON, a stderr progress event, and an index diagnostic). Skips are deterministic for a fixed budget, so
+`max_heartbeats` participates in the index cache key — a different budget is a different corpus.
 
 ## Command reference
 
@@ -139,6 +150,9 @@ Request payload:
 - `workspace_root`: display path for source spans and diagnostics.
 - `modules`: nonempty array of module descriptors with `module` and `origin`.
 - `include_private`, `include_generated`: booleans.
+- `max_heartbeats`: optional natural number; the per-declaration Lean elaboration heartbeat budget in the same units the
+  toolchain prints (`0` = unlimited). Additive `lean-dup.worker.v1` field; omitted means the worker's default. A
+  declaration whose elaboration exceeds the budget is skipped, not fatal (see *Heartbeat budget and skips* below).
 
 - *Callers may rely on:* one `declaration_row` per declaration accepted by the request filters; declaration ids stable
   within the command and usable as keys for later feature/probe requests under the same schema and cache context;
@@ -158,6 +172,8 @@ Request payload:
 - `modules`: nonempty array of module descriptors.
 - `declaration_ids`: optional array of ids previously emitted under the same schema/cache context.
 - `include_private`, `include_generated`: booleans.
+- `max_heartbeats`: optional natural number; same meaning as for `extract` (`0` = unlimited). Additive
+  `lean-dup.worker.v1` field. A declaration whose feature computation exceeds the budget is skipped, not fatal.
 
 - *Callers may rely on:* feature rows using declaration ids from `extract` when supplied; fingerprint and feature-key
   equality being meaningful under the advertised semantic algorithm versions; `binder_count` as a Lean-computed
@@ -178,6 +194,8 @@ Request payload:
 - `include_private`, `include_generated`: booleans.
 - `declaration_chunk_size`: optional natural number, a private worker hint.
 - `declaration_parallelism`: optional natural number, derived by Rust from the effective `LEAN_NUM_THREADS` setting.
+- `max_heartbeats`: optional natural number; same meaning as for `extract` (`0` = unlimited). Additive
+  `lean-dup.worker.v1` field. Declarations exceeding the budget that cannot be split further are skipped, not fatal.
 
 - *Callers may rely on:* streamed `declaration_row` and `feature_row` envelopes using the same row schemas as `extract`
   and `features`; progress events before import, after import, after declaration enumeration, at chunk start/finish, and
@@ -199,6 +217,8 @@ Request payload:
   produced the pair ids.
 - `pairs`: array of pair descriptors with `pair_id`, `left_declaration_id`, `right_declaration_id`.
 - `max_pairs`: optional positive integer; a defensive limit, not retrieval policy. Rust owns batching.
+- `max_heartbeats`: optional natural number; same meaning as for `extract` (`0` = unlimited). Additive
+  `lean-dup.worker.v1` field. Probe already recovers from per-pair heartbeat timeouts via chunk-split and `unavailable`.
 
 - *Callers may rely on:* one `probe_result` per accepted pair unless the command fails fatally before pair processing;
   unavailable pair results being nonfatal when imports succeeded; boolean probe fields being meaningful only under the
@@ -278,6 +298,8 @@ semantic results.
 ### `complete`
 
 - `row_counts`: object mapping emitted row/event kinds to nonnegative counts.
+- `skipped`: nonnegative integer; declarations omitted because their elaboration exceeded the heartbeat budget. Additive
+  `lean-dup.worker.v1` field; absent or `0` when nothing was skipped.
 - `elapsed_ms`: nonnegative integer or null.
 
 `complete` is the commit point. Rust discards result rows from a command that exits before `complete`.

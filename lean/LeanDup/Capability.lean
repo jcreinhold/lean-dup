@@ -51,8 +51,13 @@ private def parseModules (json : Json) : Array LeanDup.Extract.ModuleSpec := Id.
   | _ => pure ()
   return out
 
-private def successSummary (command : String) (rowCount : Nat) : String :=
-  (Json.mkObj [("command", Json.str command), ("rows", Json.num rowCount), ("ok", Json.bool true)]).compress
+private def successSummary (command : String) (rowCount skipped : Nat) : String :=
+  (Json.mkObj
+    [ ("command", Json.str command)
+    , ("rows", Json.num rowCount)
+    , ("skipped", Json.num skipped)
+    , ("ok", Json.bool true)
+    ]).compress
 
 private def failureSummary (command : String) (message : String) : String :=
   (Json.mkObj
@@ -68,18 +73,18 @@ private def failureSummary (command : String) (message : String) : String :=
 private def emitProfiledRows
     (handle trampoline : USize)
     (command stream : String)
-    (result : Except String (Array Json)) : IO UInt8 := do
+    (result : Except String (Array Json × Nat)) : IO UInt8 := do
   match result with
   | .error message =>
       LeanRsInterop.Worker.Stream.emitAll handle trampoline
         #[ LeanRsInterop.Worker.Stream.diagnostic s!"{command}.failed" message
          , LeanRsInterop.Worker.Stream.metadata (failureSummary command message)
          ]
-  | .ok rows =>
+  | .ok (rows, skipped) =>
       let mut payloads : Array String := #[]
       for row in rows do
         payloads := payloads.push (LeanRsInterop.Worker.Stream.row stream row.compress)
-      payloads := payloads.push (LeanRsInterop.Worker.Stream.metadata (successSummary command rows.size))
+      payloads := payloads.push (LeanRsInterop.Worker.Stream.metadata (successSummary command rows.size skipped))
       LeanRsInterop.Worker.Stream.emitAll handle trampoline payloads
 
 /--
@@ -111,7 +116,7 @@ unsafe def extract (requestJson : String) (handle trampoline : USize) : IO UInt8
       let modules := parseModules json
       let result ← LeanDup.Extract.runProfiled json modules (initializeSearchPath := false)
       emitProfiledRows handle trampoline "extract" "declarations"
-        (result.map (·.rows) |>.mapError (·.message))
+        (result.map (fun output => (output.rows, output.stats.skippedCount)) |>.mapError (·.message))
 
 /-- Streaming export for Lean-owned semantic feature rows. -/
 @[export lean_dup_capability_features]
@@ -126,7 +131,7 @@ unsafe def features (requestJson : String) (handle trampoline : USize) : IO UInt
       let modules := parseModules json
       let result ← LeanDup.Features.runProfiled json modules (initializeSearchPath := false)
       emitProfiledRows handle trampoline "features" "features"
-        (result.map (·.rows) |>.mapError (·.message))
+        (result.map (fun output => (output.rows, output.stats.skippedCount)) |>.mapError (·.message))
 
 /-- Streaming export for bounded semantic pair probes. -/
 @[export lean_dup_capability_probe]
@@ -141,7 +146,7 @@ unsafe def probe (requestJson : String) (handle trampoline : USize) : IO UInt8 :
       let modules := parseModules json
       let result ← LeanDup.Probe.runProfiled json modules (initializeSearchPath := false)
       emitProfiledRows handle trampoline "probe" "probe"
-        (result.map (·.rows) |>.mapError (·.message))
+        (result.map (fun output => (output.rows, output.stats.skippedCount)) |>.mapError (·.message))
 
 /--
 Streaming export for import-once declaration and feature indexing.
@@ -165,10 +170,10 @@ unsafe def index (requestJson : String) (handle trampoline : USize) : IO UInt8 :
             #[ LeanRsInterop.Worker.Stream.diagnostic "index.failed" message
              , LeanRsInterop.Worker.Stream.metadata (failureSummary "index" message)
              ]
-      | .ok status =>
+      | .ok (status, skipped) =>
           if status == 0 then
             LeanRsInterop.Worker.Stream.emitAll handle trampoline
-              #[ LeanRsInterop.Worker.Stream.metadata (successSummary "index" 0) ]
+              #[ LeanRsInterop.Worker.Stream.metadata (successSummary "index" 0 skipped) ]
           else
             pure status
 

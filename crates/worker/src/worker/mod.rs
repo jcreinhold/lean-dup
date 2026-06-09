@@ -91,6 +91,7 @@ impl WorkerClient {
             rows: call.rows.into_iter().map(|identity| identity.semantic).collect(),
             events: call.events,
             diagnostics: call.diagnostics,
+            skipped: call.skipped,
         })
     }
 
@@ -142,6 +143,10 @@ pub struct WorkerCall<T> {
     pub rows: Vec<T>,
     pub events: Vec<WorkerEvent>,
     pub diagnostics: Vec<WorkerDiagnostic>,
+    /// Declarations the worker skipped because their elaboration exceeded the
+    /// heartbeat budget. Non-fatal; surfaced so the count is never silently lost.
+    #[serde(default)]
+    pub skipped: u64,
 }
 
 /// Input for import-once declaration and feature indexing.
@@ -153,6 +158,9 @@ pub struct IndexBatch {
     pub include_generated: bool,
     pub declaration_chunk_size: usize,
     pub declaration_parallelism: usize,
+    /// Optional per-declaration elaboration heartbeat budget. `None` leaves the
+    /// worker default; `Some(0)` disables the limit.
+    pub max_heartbeats: Option<u64>,
 }
 
 /// One streamed event from an import-once index command.
@@ -330,6 +338,9 @@ pub struct ExtractBatch {
     pub modules: Vec<ModuleDescriptor>,
     pub include_private: bool,
     pub include_generated: bool,
+    /// Optional per-declaration elaboration heartbeat budget. `None` leaves the
+    /// worker default; `Some(0)` disables the limit.
+    pub max_heartbeats: Option<u64>,
 }
 
 /// Input for semantic feature extraction.
@@ -340,6 +351,9 @@ pub struct FeaturesBatch {
     pub declaration_ids: Option<Vec<String>>,
     pub include_private: bool,
     pub include_generated: bool,
+    /// Optional per-declaration elaboration heartbeat budget. `None` leaves the
+    /// worker default; `Some(0)` disables the limit.
+    pub max_heartbeats: Option<u64>,
 }
 
 /// Input for semantic pair probes.
@@ -351,6 +365,9 @@ pub struct ProbeBatch {
     pub include_generated: bool,
     pub pairs: Vec<ProbePair>,
     pub max_pairs: Option<u64>,
+    /// Optional per-declaration elaboration heartbeat budget. `None` leaves the
+    /// worker default; `Some(0)` disables the limit.
+    pub max_heartbeats: Option<u64>,
 }
 
 /// One candidate pair to check with Lean-owned semantic probes.
@@ -467,6 +484,7 @@ mod tests {
             modules: tiny_basic(),
             include_private: true,
             include_generated: false,
+            max_heartbeats: None,
         }
     }
 
@@ -557,6 +575,7 @@ mod tests {
                 declaration_ids: Some(ids),
                 include_private: true,
                 include_generated: false,
+                max_heartbeats: None,
             })
             .unwrap();
         assert_eq!(call.rows.len(), 1);
@@ -581,6 +600,7 @@ mod tests {
                     right_declaration_id: right,
                 }],
                 max_pairs: Some(1),
+                max_heartbeats: None,
             })
             .unwrap();
         assert_eq!(call.rows.len(), 1);
@@ -608,6 +628,7 @@ mod tests {
                     right_declaration_id: "right".to_owned(),
                 }],
                 max_pairs: Some(1),
+                max_heartbeats: None,
             })
             .unwrap();
 

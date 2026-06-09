@@ -1244,6 +1244,7 @@ mod tests {
                     require_oleans: false,
                     force: false,
                     kind,
+                    max_heartbeats: None,
                 },
                 &WorkerClient::new(),
                 &mut Reporter::new(false, false),

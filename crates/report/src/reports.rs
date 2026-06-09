@@ -582,6 +582,10 @@ pub struct AuditWorkspaceReport {
     pub lake_root: PathBuf,
     pub selected_roots: Vec<String>,
     pub source_count: usize,
+    /// Declarations omitted from the workspace index because their elaboration
+    /// exceeded the per-declaration heartbeat budget. `0` on well-behaved
+    /// corpora at the default budget.
+    pub declarations_skipped_by_budget: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -1153,6 +1157,7 @@ pub fn audit_report(output: AuditOutput) -> AuditReport {
             lake_root: output.lake_root,
             selected_roots: output.selected_roots,
             source_count: output.source_count,
+            declarations_skipped_by_budget: output.declarations_skipped_by_budget,
         },
         cache: AuditCacheReport {
             root: output.cache_root,

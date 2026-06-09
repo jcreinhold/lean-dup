@@ -17,10 +17,9 @@ cargo build --release -p lean-dup-cli
 cargo build --release -p lean-dup-worker
 ```
 
-The Cargo worker build materializes the `LeanSemanticSearch` Lean package from
-`lean-semantic-search-runtime` and builds a private generated `LeanDup` Lake root. A direct
-`lake -d lean build` is only a Lean-developer check; set `LEAN_DUP_SEMANTIC_SEARCH_ROOT` to a
-materialized semantic-search runtime source root first.
+The Cargo worker build materializes the `LeanSemanticSearch` Lean package from `lean-semantic-search-runtime` and builds
+a private generated `LeanDup` Lake root. A direct `lake -d lean build` is only a Lean-developer check; set
+`LEAN_DUP_SEMANTIC_SEARCH_ROOT` to a materialized semantic-search runtime source root first.
 
 ## Install
 
@@ -55,7 +54,14 @@ exposes them through compiled modules; `--module Root.Module` scopes the audit t
 | `--compare-mathlib` | compare against the project's pinned mathlib index |
 | `--compare-index LABEL` | compare against a named cached external index |
 | `--profile` | include extraction and classification timings |
+| `--max-heartbeats N` | per-declaration Lean elaboration heartbeat budget (worker default 200000; `0` = unlimited) |
 | `--format json` | machine-readable output (stdout stays parseable with `--progress`/`--profile`) |
+
+A declaration whose elaboration exceeds the heartbeat budget is **skipped, not fatal** — the audit completes over the
+rest of the corpus instead of aborting on one pathological declaration. The skip count is surfaced
+(`workspace.declarations_skipped_by_budget` in `--format json`, plus a stderr progress line); raise `--max-heartbeats`
+(or set `0` for unlimited) to trade runtime for including those declarations. Because the budget changes which
+declarations are indexed, it participates in the cache key.
 
 For local development, swap `target/release/lean-dup` for `cargo run -p lean-dup-cli --`. Other commands: `doctor`
 (workspace, worker, Lake, cache health), `show --group <id>` (one ranked group), `diff` (saved baselines), `eval`

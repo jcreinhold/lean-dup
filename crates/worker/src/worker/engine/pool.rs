@@ -94,6 +94,7 @@ impl PoolEngine {
             rows: vec![identity],
             events: Vec::new(),
             diagnostics: Vec::new(),
+            skipped: 0,
         })
     }
 
@@ -107,7 +108,7 @@ impl PoolEngine {
         workspace_root: PathBuf,
         timeout: Duration,
         cancelled: Arc<AtomicBool>,
-    ) -> Result<Vec<Row>, WorkerError> {
+    ) -> Result<(Vec<Row>, u64), WorkerError> {
         if cancelled.load(Ordering::Relaxed) {
             return Err(WorkerError::Cancelled);
         }
@@ -127,6 +128,7 @@ impl PoolEngine {
         if token.is_cancelled() {
             return Err(WorkerError::Cancelled);
         }
+        let skipped = summary.metadata.as_ref().map_or(0, |metadata| metadata.skipped);
         if let Some(metadata) = summary.metadata
             && !metadata.ok
         {
@@ -141,7 +143,7 @@ impl PoolEngine {
                 }],
             });
         }
-        sink.into_rows()
+        Ok((sink.into_rows()?, skipped))
     }
 
     pub(super) fn extract(
@@ -151,7 +153,7 @@ impl PoolEngine {
         cancelled: Arc<AtomicBool>,
     ) -> Result<WorkerCall<DeclarationRow>, WorkerError> {
         let request = payload::extract_request(&batch);
-        let rows = self.collect_rows::<DeclarationRow>(
+        let (rows, skipped) = self.collect_rows::<DeclarationRow>(
             EXTRACT_EXPORT,
             "extract",
             request,
@@ -163,6 +165,7 @@ impl PoolEngine {
             rows,
             events: Vec::new(),
             diagnostics: Vec::new(),
+            skipped,
         })
     }
 
@@ -173,7 +176,7 @@ impl PoolEngine {
         cancelled: Arc<AtomicBool>,
     ) -> Result<WorkerCall<FeatureRow>, WorkerError> {
         let request = payload::features_request(&batch);
-        let rows = self.collect_rows::<FeatureRow>(
+        let (rows, skipped) = self.collect_rows::<FeatureRow>(
             FEATURES_EXPORT,
             "features",
             request,
@@ -185,6 +188,7 @@ impl PoolEngine {
             rows,
             events: Vec::new(),
             diagnostics: Vec::new(),
+            skipped,
         })
     }
 
@@ -195,12 +199,13 @@ impl PoolEngine {
         cancelled: Arc<AtomicBool>,
     ) -> Result<WorkerCall<ProbeResult>, WorkerError> {
         let request = payload::probe_request(&batch);
-        let rows =
+        let (rows, skipped) =
             self.collect_rows::<ProbeResult>(PROBE_EXPORT, "probe", request, batch.workspace_root, timeout, cancelled)?;
         Ok(WorkerCall {
             rows,
             events: Vec::new(),
             diagnostics: Vec::new(),
+            skipped,
         })
     }
 
@@ -286,6 +291,7 @@ impl PoolEngine {
         if token.is_cancelled() {
             return Err(WorkerError::Cancelled);
         }
+        let skipped = summary.metadata.as_ref().map_or(0, |metadata| metadata.skipped);
         if let Some(metadata) = summary.metadata
             && !metadata.ok
         {
@@ -304,6 +310,7 @@ impl PoolEngine {
             rows: Vec::new(),
             events: Vec::new(),
             diagnostics: Vec::new(),
+            skipped,
         })
     }
 }

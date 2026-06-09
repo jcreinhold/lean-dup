@@ -142,6 +142,7 @@ fn doctor(args: DoctorArgs, reporter: &mut Reporter) -> Result<DoctorReport> {
             require_oleans: false,
             force: false,
             kind: IndexBuildKind::Local,
+            max_heartbeats: None,
         },
         &worker_identity,
     )?;
@@ -238,6 +239,7 @@ fn cache_cleanup(args: CacheCleanupArgs, reporter: &mut Reporter) -> Result<Cach
                 require_oleans: false,
                 force: false,
                 kind: IndexBuildKind::Local,
+                max_heartbeats: None,
             },
             &worker_identity,
         )?]
@@ -277,6 +279,7 @@ fn index(args: IndexArgs, reporter: &mut Reporter) -> Result<IndexReport> {
                 require_oleans,
                 force,
                 kind: IndexBuildKind::External,
+                max_heartbeats: args.max_heartbeats,
             },
             &WorkerClient::for_indexing(),
             reporter,
@@ -310,6 +313,7 @@ fn index_mathlib(args: IndexMathlibArgs, reporter: &mut Reporter) -> Result<Inde
                 require_oleans: true,
                 force,
                 kind: IndexBuildKind::ProjectMathlib,
+                max_heartbeats: args.max_heartbeats,
             },
             &WorkerClient::for_indexing(),
             reporter,
@@ -340,6 +344,7 @@ fn audit_request(args: AuditArgs) -> AuditRequest {
         probe_budget: args.probe_budget,
         probe_policy: args.probe_policy.into(),
         probe_chunk_size: args.probe_chunk_size,
+        max_heartbeats: args.max_heartbeats,
     }
 }
 
@@ -674,6 +679,7 @@ fn default_audit_args(workspace: Option<PathBuf>, module_root: Option<String>) -
         semantic_probes: true,
         verbose: false,
         limit: None,
+        max_heartbeats: None,
         probe_budget: 500,
         probe_policy: crate::cli::CliProbePolicy::Actionable,
         probe_chunk_size: 16,

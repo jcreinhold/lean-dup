@@ -35,6 +35,9 @@ pub struct ProbeSettings {
     pub budget: usize,
     pub per_declaration_cap: usize,
     pub chunk_size: usize,
+    /// Per-declaration elaboration heartbeat budget for probe pairs. `None` leaves
+    /// the worker default; `Some(0)` disables the limit.
+    pub max_heartbeats: Option<u64>,
 }
 
 /// Input for turning a cheap review queue into recoverable Lean probes.
@@ -700,6 +703,7 @@ fn run_probe_chunk(
         include_generated: input.include_generated || chunk.iter().any(|planned| planned.include_generated),
         pairs,
         max_pairs: Some(chunk.len() as u64),
+        max_heartbeats: input.settings.max_heartbeats,
     }) {
         Ok(call) => {
             let by_pair = chunk
@@ -1518,6 +1522,7 @@ mod tests {
                 budget: 10,
                 per_declaration_cap: 2,
                 chunk_size: 16,
+                max_heartbeats: None,
             },
         };
 
@@ -1572,6 +1577,7 @@ mod tests {
                 budget: 10,
                 per_declaration_cap: 2,
                 chunk_size: 16,
+                max_heartbeats: None,
             },
         };
 
@@ -1649,6 +1655,7 @@ mod tests {
                 budget: 10,
                 per_declaration_cap: 10,
                 chunk_size: 16,
+                max_heartbeats: None,
             },
         };
 
@@ -1705,6 +1712,7 @@ mod tests {
                 budget: 10,
                 per_declaration_cap: 2,
                 chunk_size: 16,
+                max_heartbeats: None,
             },
         };
 
@@ -1751,6 +1759,7 @@ mod tests {
                 budget: 10,
                 per_declaration_cap: 2,
                 chunk_size: 16,
+                max_heartbeats: None,
             },
         };
 

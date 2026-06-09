@@ -68,6 +68,7 @@ impl FakeEngine {
             }],
             events: Vec::new(),
             diagnostics: Vec::new(),
+            skipped: 0,
         })
     }
 
@@ -118,5 +119,6 @@ fn empty_call<Row>() -> WorkerCall<Row> {
         rows: Vec::new(),
         events: Vec::new(),
         diagnostics: Vec::new(),
+        skipped: 0,
     }
 }

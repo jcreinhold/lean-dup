@@ -26,10 +26,20 @@ pub(super) fn version_request(workspace_root: &str) -> Value {
     json!({ "workspace_root": workspace_root })
 }
 
+/// Attach the optional per-declaration heartbeat budget when the caller set one.
+/// Omitted entirely when `None`, so the worker keeps its default; an additive
+/// `lean-dup.worker.v1` payload field.
+fn set_max_heartbeats(payload: &mut Value, max_heartbeats: Option<u64>) {
+    if let Some(budget) = max_heartbeats {
+        payload["max_heartbeats"] = json!(budget);
+    }
+}
+
 pub(super) fn extract_request(batch: &ExtractBatch) -> Value {
     let mut payload = modules_payload(&batch.workspace_root.to_string_lossy(), &batch.modules);
     payload["include_private"] = Value::Bool(batch.include_private);
     payload["include_generated"] = Value::Bool(batch.include_generated);
+    set_max_heartbeats(&mut payload, batch.max_heartbeats);
     payload
 }
 
@@ -40,6 +50,7 @@ pub(super) fn features_request(batch: &FeaturesBatch) -> Value {
     if let Some(declaration_ids) = &batch.declaration_ids {
         payload["declaration_ids"] = json!(declaration_ids);
     }
+    set_max_heartbeats(&mut payload, batch.max_heartbeats);
     payload
 }
 
@@ -51,6 +62,7 @@ pub(super) fn probe_request(batch: &ProbeBatch) -> Value {
     if let Some(max_pairs) = batch.max_pairs {
         payload["max_pairs"] = json!(max_pairs);
     }
+    set_max_heartbeats(&mut payload, batch.max_heartbeats);
     payload
 }
 
@@ -60,6 +72,7 @@ pub(super) fn index_request(batch: &IndexBatch) -> Value {
     payload["include_generated"] = Value::Bool(batch.include_generated);
     payload["declaration_chunk_size"] = json!(batch.declaration_chunk_size);
     payload["declaration_parallelism"] = json!(batch.declaration_parallelism);
+    set_max_heartbeats(&mut payload, batch.max_heartbeats);
     payload
 }
 
@@ -109,4 +122,8 @@ pub(super) struct CapabilityStreamSummary {
     pub(super) ok: bool,
     #[serde(default)]
     pub(super) message: Option<String>,
+    /// Declarations the worker skipped because their elaboration exceeded the
+    /// heartbeat budget. Advisory; surfaced so the count is never silently lost.
+    #[serde(default)]
+    pub(super) skipped: u64,
 }

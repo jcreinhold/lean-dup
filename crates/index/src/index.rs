@@ -73,6 +73,10 @@ pub struct IndexBuildRequest {
     pub require_oleans: bool,
     pub force: bool,
     pub kind: IndexBuildKind,
+    /// Per-declaration elaboration heartbeat budget passed to the worker. `None`
+    /// leaves the worker default; `Some(0)` disables the limit. Folded into the
+    /// cache key because it changes which declarations are featurized.
+    pub max_heartbeats: Option<u64>,
 }
 
 impl IndexBuildRequest {
@@ -106,6 +110,10 @@ pub struct IndexSummary {
     pub index_dir: PathBuf,
     pub cache_status: CacheStatus,
     pub declaration_count: usize,
+    /// Declarations omitted from this index because their elaboration exceeded
+    /// the per-declaration heartbeat budget. Persisted in index metadata, so it
+    /// is reported faithfully on both cache hits and fresh builds.
+    pub declarations_skipped_by_budget: u64,
     pub diagnostics: Vec<String>,
 }
 
@@ -407,6 +415,10 @@ struct IndexCacheKey {
     selected_roots: Vec<String>,
     include_private: bool,
     include_generated: bool,
+    // The heartbeat budget changes which declarations are featurized (a higher
+    // budget admits declarations that would otherwise be skipped), so it is part
+    // of the corpus identity.
+    max_heartbeats: Option<u64>,
     require_oleans: bool,
     lean_toolchain: Option<String>,
     lakefile: Option<FileDigest>,
@@ -459,7 +471,10 @@ impl IndexStore {
 
         if index_path.exists() && !request.force && sqlite_cache_is_current(&index_path, &expected.cache_key_json)? {
             let declaration_count = declaration_count(&index_path)?;
+            let declarations_skipped_by_budget = skipped_by_budget(&index_path)?;
             self.write_latest(&request.label, &index_dir)?;
+            let mut diagnostics = diagnostics_to_strings(version_call.diagnostics);
+            report_skipped_declarations(reporter, &mut diagnostics, declarations_skipped_by_budget);
             reporter.event(
                 "index",
                 Some(declaration_count as u64),
@@ -472,7 +487,8 @@ impl IndexStore {
                 index_dir,
                 cache_status: CacheStatus::Hit,
                 declaration_count,
-                diagnostics: diagnostics_to_strings(version_call.diagnostics),
+                declarations_skipped_by_budget,
+                diagnostics,
             });
         }
 
@@ -495,6 +511,7 @@ impl IndexStore {
                     modules: modules.clone(),
                     include_private: request.include_private,
                     include_generated: request.include_generated,
+                    max_heartbeats: request.max_heartbeats,
                 })
             })?;
             record_worker_events(reporter, &declarations.events);
@@ -506,6 +523,7 @@ impl IndexStore {
                     declaration_ids: None,
                     include_private: request.include_private,
                     include_generated: request.include_generated,
+                    max_heartbeats: request.max_heartbeats,
                 })
             })?;
             record_worker_events(reporter, &features.events);
@@ -517,6 +535,7 @@ impl IndexStore {
                 version,
                 declarations.rows,
                 features.rows,
+                declarations.skipped + features.skipped,
             )?;
             diagnostics.extend(diagnostics_to_strings(declarations.diagnostics));
             diagnostics.extend(diagnostics_to_strings(features.diagnostics));
@@ -524,6 +543,8 @@ impl IndexStore {
         self.write_latest(&request.label, &index_dir)?;
 
         let declaration_count = declaration_count(&index_path)?;
+        let declarations_skipped_by_budget = skipped_by_budget(&index_path)?;
+        report_skipped_declarations(reporter, &mut diagnostics, declarations_skipped_by_budget);
         reporter.event(
             "index",
             Some(declaration_count as u64),
@@ -537,6 +558,7 @@ impl IndexStore {
             index_dir,
             cache_status: CacheStatus::Miss,
             declaration_count,
+            declarations_skipped_by_budget,
             diagnostics,
         })
     }
@@ -918,6 +940,7 @@ fn index_cache_key(request: &IndexBuildRequest, identity: &WorkerIdentity) -> Re
         selected_roots: request.workspace.selected_roots.clone(),
         include_private: request.include_private,
         include_generated: request.include_generated,
+        max_heartbeats: request.max_heartbeats,
         require_oleans: request.require_oleans,
         lean_toolchain: optional_text(if shared_mathlib {
             execution_root.join("lean-toolchain")
@@ -960,6 +983,7 @@ fn write_sqlite_index(
     version: &WorkerVersion,
     declarations: Vec<DeclarationRow>,
     features: Vec<FeatureRow>,
+    skipped_by_budget: u64,
 ) -> Result<()> {
     let Some(index_dir) = index_path.parent() else {
         return Err(Error::Index {
@@ -989,6 +1013,7 @@ fn write_sqlite_index(
         initialize_schema(&connection)?;
         let transaction = connection.transaction()?;
         write_metadata(&transaction, cache_key_json, request, version)?;
+        record_skipped_by_budget(&transaction, skipped_by_budget)?;
         for declaration in declarations {
             let Some(feature) = features_by_id.get(&declaration.declaration_id) else {
                 return Err(Error::Index {
@@ -1072,6 +1097,7 @@ fn write_batched_sqlite_index(
                     include_generated: request.include_generated,
                     declaration_chunk_size: MATHLIB_DECLARATION_CHUNK_SIZE,
                     declaration_parallelism: index_threads,
+                    max_heartbeats: request.max_heartbeats,
                 },
                 &mut |item| {
                     match item {
@@ -1106,11 +1132,14 @@ fn write_batched_sqlite_index(
                     Ok(())
                 },
             )
-            .map(|call| call.diagnostics)
+            .map(|call| (call.diagnostics, call.skipped))
     });
-    match worker_result {
-        Ok(worker_diagnostics) => {
+    let skipped_by_budget = match worker_result {
+        Ok((worker_diagnostics, skipped)) => {
+            // The skip count is reported uniformly by `build_or_reuse` from the
+            // persisted metadata (hit and miss alike); only persist it here.
             diagnostics.extend(diagnostics_to_strings(worker_diagnostics));
+            skipped
         }
         Err(error) => {
             let _ = connection.execute_batch("ROLLBACK");
@@ -1119,12 +1148,13 @@ fn write_batched_sqlite_index(
             }
             return Err(error.into());
         }
-    }
+    };
     if let Some(error) = insertion_error {
         let _ = connection.execute_batch("ROLLBACK");
         return Err(error);
     }
     writer.finish()?;
+    record_skipped_by_budget(&connection, skipped_by_budget)?;
     connection.execute_batch("COMMIT")?;
     replace_file(&temp_path, index_path)?;
     Ok(BatchedIndexBuild { diagnostics })
@@ -1384,6 +1414,30 @@ fn declaration_count(index_path: &Path) -> Result<usize> {
     })
 }
 
+/// Metadata key recording how many declarations this index omitted because their
+/// elaboration exceeded the per-declaration heartbeat budget.
+const SKIPPED_BY_BUDGET_KEY: &str = "declarations_skipped_by_budget";
+
+/// Persist the heartbeat-budget skip count for this index. Written inside the
+/// build transaction so it shares the index's atomicity.
+fn record_skipped_by_budget(connection: &Connection, skipped: u64) -> Result<()> {
+    connection.execute(
+        "INSERT INTO metadata (key, value) VALUES (?1, ?2)",
+        params![SKIPPED_BY_BUDGET_KEY, skipped.to_string()],
+    )?;
+    Ok(())
+}
+
+/// Read back the heartbeat-budget skip count. Indexes written before this key
+/// existed report `0`, which is the truthful answer for the default budget.
+fn skipped_by_budget(index_path: &Path) -> Result<u64> {
+    let connection = open_readonly(index_path)?;
+    let skipped = metadata_value(&connection, SKIPPED_BY_BUDGET_KEY)?
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+    Ok(skipped)
+}
+
 /// Hydrate one declaration by joining its display row (from this index's
 /// `declarations` table) with its semantic feature row (from the shared corpus).
 /// The handle is the opaque, stable `declaration_id` that keys both stores.
@@ -1566,6 +1620,20 @@ fn record_worker_events(reporter: &mut Reporter, events: &[WorkerEvent]) {
     }
 }
 
+/// Surface declarations the worker skipped because their elaboration exceeded the
+/// heartbeat budget: a progress event (stderr) plus an index diagnostic, so the
+/// count is visible to the operator and never silently dropped from the corpus.
+fn report_skipped_declarations(reporter: &mut Reporter, diagnostics: &mut Vec<String>, skipped: u64) {
+    if skipped == 0 {
+        return;
+    }
+    let message = format!(
+        "skipped {skipped} declaration(s) exceeding the heartbeat budget; raise --max-heartbeats (0 = unlimited) to include them"
+    );
+    reporter.event("worker.skipped", Some(skipped), Some(skipped), message.clone());
+    diagnostics.push(message);
+}
+
 fn diagnostics_to_strings(diagnostics: Vec<WorkerDiagnostic>) -> Vec<String> {
     diagnostics
         .into_iter()
@@ -1697,12 +1765,17 @@ mod tests {
             require_oleans: false,
             force: false,
             kind: super::IndexBuildKind::External,
+            max_heartbeats: None,
         };
 
         let first = store
             .build_or_reuse(request.clone(), &worker, &mut Reporter::new(false, false))
             .unwrap();
         assert_eq!(first.cache_status, CacheStatus::Miss);
+        // Default budget: a well-behaved fixture skips nothing, and the count
+        // round-trips through index metadata.
+        assert_eq!(first.declarations_skipped_by_budget, 0);
+        assert_eq!(super::skipped_by_budget(&first.path).unwrap(), 0);
         assert_eq!(first.path.file_name().unwrap(), "index.sqlite");
         assert!(first.path.exists());
         assert!(!first.index_dir.join("declarations.jsonl.gz").exists());
@@ -1713,6 +1786,8 @@ mod tests {
             .build_or_reuse(request, &worker, &mut Reporter::new(false, false))
             .unwrap();
         assert_eq!(second.cache_status, CacheStatus::Hit);
+        // Cache hit reports the persisted skip count, not a recomputed zero.
+        assert_eq!(second.declarations_skipped_by_budget, 0);
         assert_eq!(first.path, second.path);
 
         let by_label = store.resolve(IndexReference::Label("fixture".to_owned())).unwrap();
@@ -1904,6 +1979,45 @@ name = "B"
     }
 
     #[test]
+    fn cache_key_tracks_max_heartbeats_budget() {
+        let temp = TempDir::new().unwrap();
+        fs::write(temp.path().join("lakefile.toml"), "[[lean_lib]]\nname = \"A\"\n").unwrap();
+        fs::write(temp.path().join("lean-toolchain"), "leanprover/lean4:v4.30.0\n").unwrap();
+        fs::write(temp.path().join("A.lean"), "#check Nat\n").unwrap();
+
+        let workspace = resolve(
+            WorkspaceRequest {
+                requested_root: temp.path().to_path_buf(),
+                module_root: Some("A".to_owned()),
+            },
+            &mut Reporter::new(false, false),
+        )
+        .unwrap();
+        let version = fake_identity("features.v1");
+
+        // The budget changes corpus membership (a higher budget featurizes more declarations),
+        // so distinct budgets must produce distinct cache keys.
+        let default_budget =
+            serde_json::to_string(&index_cache_key(&request_for(workspace.clone(), "A"), &version).unwrap()).unwrap();
+
+        let raised = request_for(workspace.clone(), "A");
+        let raised = IndexBuildRequest {
+            max_heartbeats: Some(400_000),
+            ..raised
+        };
+        let raised_budget = serde_json::to_string(&index_cache_key(&raised, &version).unwrap()).unwrap();
+        assert_ne!(default_budget, raised_budget);
+
+        let unlimited = IndexBuildRequest {
+            max_heartbeats: Some(0),
+            ..request_for(workspace, "A")
+        };
+        let unlimited_budget = serde_json::to_string(&index_cache_key(&unlimited, &version).unwrap()).unwrap();
+        assert_ne!(default_budget, unlimited_budget);
+        assert_ne!(raised_budget, unlimited_budget);
+    }
+
+    #[test]
     fn project_mathlib_cache_key_ignores_absolute_project_paths() {
         let left = TempDir::new().unwrap();
         let right = TempDir::new().unwrap();
@@ -2061,6 +2175,7 @@ name = "B"
             require_oleans: false,
             force: false,
             kind: IndexBuildKind::External,
+            max_heartbeats: None,
         }
     }
 
@@ -2076,6 +2191,7 @@ name = "B"
             require_oleans: true,
             force: false,
             kind: IndexBuildKind::ProjectMathlib,
+            max_heartbeats: None,
         }
     }
 
