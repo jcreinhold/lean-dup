@@ -3,6 +3,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest;
 use lean_semantic_search_runtime::{
     SemanticSearchRuntimeBuild, SemanticSearchRuntimeProvenance, SemanticSearchSourcePackageRequest,
 };
@@ -30,14 +31,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             cache_root: semantic_cache_root.clone(),
             toolchain_label: toolchain_label.clone(),
         })?;
-    install_developer_semantic_package_link(&lean_root, &semantic_source.project_root)?;
     let semantic_runtime = lean_semantic_search_runtime::build_cached(SemanticSearchRuntimeBuild {
         cache_root: semantic_cache_root,
         toolchain_label: toolchain_label.clone(),
         lean_sysroot: lean_sysroot.clone(),
     })?;
-    let semantic_dylib = semantic_runtime.built.dylib_path()?;
-    let interop_root = interop_shims_root(repo_root)?;
+    let semantic_dependency = semantic_runtime.dependency()?;
+    let interop_source = lean_rs_interop_shims::materialize_source_package(LeanRsInteropShimsSourcePackageRequest {
+        cache_root: out_dir.join("lean-rs-interop-shims-cache"),
+        toolchain_label: toolchain_label.clone(),
+    })?;
+    let interop_root = interop_source.project_root;
     let build_root = out_dir.join("lean-dup-capability-root");
     materialize_lean_dup_build_root(
         &lean_root,
@@ -49,12 +53,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     use lean_rs_worker_protocol::worker_exports::{json_command_signature, streaming_command_signature};
-    let semantic_dependency = lean_toolchain::LeanLibraryDependency::path(&semantic_dylib)
-        .export_symbols_for_dependents()
-        .initializer(
-            semantic_runtime.provenance.materialized_package.clone(),
-            semantic_runtime.provenance.library.clone(),
-        );
     let built = lean_toolchain::CargoLeanCapability::new(&build_root, "LeanDup")
         .package("lean_dup_worker")
         .module("LeanDup")
@@ -157,7 +155,7 @@ fn materialize_lean_dup_build_root(
     fs::copy(source_root.join("LeanDup.lean"), build_root.join("LeanDup.lean"))?;
     copy_dir_recursive(&source_root.join("LeanDup"), &build_root.join("LeanDup"))?;
     fs::write(build_root.join("lean-toolchain"), format!("{toolchain_label}\n"))?;
-    write_generated_lakefile(build_root, semantic_root, interop_root)?;
+    write_generated_lakefile(build_root, semantic_root, semantic_provenance, interop_root)?;
     write_generated_manifest(build_root, semantic_root, semantic_provenance, interop_root)?;
     Ok(())
 }
@@ -165,6 +163,7 @@ fn materialize_lean_dup_build_root(
 fn write_generated_lakefile(
     build_root: &Path,
     semantic_root: &Path,
+    semantic_provenance: &SemanticSearchRuntimeProvenance,
     interop_root: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let semantic_root = fs::canonicalize(semantic_root)?;
@@ -176,7 +175,7 @@ open Lake DSL
 package lean_dup_worker where
   version := v!"0.1.0"
 
-require lean_semantic_search from {}
+require {} from {}
 require «lean_rs_interop_shims» from {}
 
 @[default_target]
@@ -185,6 +184,7 @@ lean_lib LeanDup where
   globs := #[.andSubmodules `LeanDup]
   defaultFacets := #[LeanLib.sharedFacet]
 "#,
+        semantic_provenance.materialized_package.as_str(),
         lean_string_literal(&semantic_root),
         lean_string_literal(&interop_root)
     );
@@ -264,38 +264,4 @@ fn remove_path_if_exists(path: &Path) -> io::Result<()> {
     } else {
         fs::remove_file(path)
     }
-}
-
-fn interop_shims_root(repo_root: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let root = repo_root
-        .parent()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "repo root has no parent"))?
-        .join("lean-rs")
-        .join("crates")
-        .join("lean-rs")
-        .join("shims")
-        .join("lean-rs-interop-shims");
-    Ok(fs::canonicalize(root)?)
-}
-
-fn install_developer_semantic_package_link(
-    lean_root: &Path,
-    semantic_root: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let packages = lean_root.join(".lake").join("packages");
-    fs::create_dir_all(&packages)?;
-    let link = packages.join("lean-semantic-search-runtime");
-    remove_path_if_exists(&link)?;
-    symlink_dir(semantic_root, &link)?;
-    Ok(())
-}
-
-#[cfg(unix)]
-fn symlink_dir(source: &Path, link: &Path) -> io::Result<()> {
-    std::os::unix::fs::symlink(source, link)
-}
-
-#[cfg(not(unix))]
-fn symlink_dir(source: &Path, link: &Path) -> io::Result<()> {
-    copy_dir_recursive(source, link)
 }

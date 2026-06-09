@@ -72,9 +72,10 @@ framing cost to account for.
   vanishing, but a full mathlib-scale before/after wall-clock and RSS comparison needs an operator-supplied Lake
   workspace and is left as an operator follow-up.
 - **Remaining capability packaging debt.** `crates/worker/build.rs` no longer resolves
-  `../../lean-semantic-search/lean`; semantic-search source and its dylib come from
-  `lean-semantic-search-runtime`, and the generated capability manifest records that dylib through
-  `CargoLeanCapability`'s generic `LeanLibraryDependency` hook. The remaining follow-up is a package-owned source helper
-  for the `lean-rs` interop shims so the `../../lean-rs` checkout path can disappear too.
+  `../../lean-semantic-search/lean` or a sibling `../../lean-rs` interop-shims checkout. Semantic-search source and its
+  dylib come from `lean-semantic-search-runtime`; generic interop-shim source comes from the package-owned
+  `lean-rs-interop-shims` crate; and the generated capability manifest records the semantic-search dylib through
+  `CargoLeanCapability`'s generic `LeanLibraryDependency` hook. The remaining follow-up is extracting the repeated
+  package-source materialization mechanics once the `LeanDup` payload gets its own package-owned boundary.
 </content>
 </invoke>

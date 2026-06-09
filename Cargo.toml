@@ -49,6 +49,7 @@ lean-dup-worker = { path = "crates/worker", version = "0.1.0" }
 # lean-rs worker stack (sibling checkout). The parent crate carries no
 # libleanshared linkage; only the worker-child binary links the Lean runtime.
 lean-rs-worker-child = { version = "0.2" }
+lean-rs-interop-shims = { version = "0.2" }
 lean-rs-worker-parent = { version = "0.2" }
 lean-rs-worker-protocol = { version = "0.2" }
 lean-toolchain = { version = "0.2" }
@@ -76,6 +77,7 @@ walkdir = "2"
 # once matching crate releases are published.
 [patch.crates-io]
 lean-rs-worker-child = { path = "../lean-rs/crates/lean-rs-worker-child" }
+lean-rs-interop-shims = { path = "../lean-rs/crates/lean-rs/shims/lean-rs-interop-shims" }
 lean-rs-worker-parent = { path = "../lean-rs/crates/lean-rs-worker-parent" }
 lean-rs-worker-protocol = { path = "../lean-rs/crates/lean-rs-worker-protocol" }
 lean-toolchain = { path = "../lean-rs/crates/lean-toolchain" }

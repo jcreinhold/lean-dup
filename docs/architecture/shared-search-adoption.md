@@ -96,8 +96,8 @@ boundary is what makes the shared extraction version-stable across the bump). Th
 build script asks `lean-semantic-search-runtime` to materialize the package-owned `LeanSemanticSearch` source payload
 for `lean/lean-toolchain`, then builds a private generated `LeanDup` Lake root under Cargo's `OUT_DIR` with:
 
-- `require lean_semantic_search from <materialized runtime source root>`;
-- `require «lean_rs_interop_shims» from <lean-rs interop shim root>`;
+- `require <runtime-owned semantic-search package id> from <materialized runtime source root>`;
+- `require «lean_rs_interop_shims» from <materialized lean-rs interop shim source root>`;
 - the checked-in `LeanDup.lean` and `LeanDup/` sources copied unchanged.
 
 This keeps semantic-search source ownership in `lean-semantic-search` while preserving the `lean-dup.worker.v1` command
@@ -106,6 +106,11 @@ release build root: direct `lake -d lean build` requires `LEAN_DUP_SEMANTIC_SEAR
 semantic-search runtime source root. Release and CI builds should use `cargo build -p lean-dup-worker`, which performs
 that materialization itself.
 
-The generated capability manifest records the `lean_semantic_search` dylib through `CargoLeanCapability`'s generic
-`LeanLibraryDependency` hook, so the dependency is described before the manifest is written. `lean-dup` does not patch
-manifest JSON after the build and does not consult a sibling semantic-search checkout.
+The generated capability manifest records the semantic-search dylib through the runtime crate's typed dependency
+descriptor and `CargoLeanCapability`'s generic `LeanLibraryDependency` hook, so the dependency is described before the
+manifest is written. `lean-dup` does not patch manifest JSON after the build and does not consult a sibling
+semantic-search checkout.
+
+The generic `lean_rs_interop_shims` Lake package is likewise materialized through the package-owned
+`lean-rs-interop-shims` Rust crate. `lean-dup` no longer resolves the interop shim source from a sibling `lean-rs`
+checkout during the worker build.
