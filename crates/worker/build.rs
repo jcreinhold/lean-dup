@@ -7,6 +7,8 @@ use lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest;
 use lean_semantic_search_runtime::{
     SemanticSearchRuntimeBuild, SemanticSearchRuntimeProvenance, SemanticSearchSourcePackageRequest,
 };
+use lean_toolchain::{GeneratedSourceFile, SourcePackageManifestPolicy, SourcePackageMaterializationRequest};
+use sha2::{Digest, Sha256};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?);
@@ -42,10 +44,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         toolchain_label: toolchain_label.clone(),
     })?;
     let interop_root = interop_source.project_root;
-    let build_root = out_dir.join("lean-dup-capability-root");
-    materialize_lean_dup_build_root(
+    let build_root = materialize_lean_dup_build_root(
         &lean_root,
-        &build_root,
+        &out_dir.join("lean-dup-capability-root-cache"),
         &semantic_source.project_root,
         &semantic_runtime.provenance,
         &interop_root,
@@ -144,31 +145,51 @@ fn emit_lean_source_reruns(dir: &Path) -> io::Result<()> {
 
 fn materialize_lean_dup_build_root(
     source_root: &Path,
-    build_root: &Path,
+    cache_root: &Path,
     semantic_root: &Path,
     semantic_provenance: &SemanticSearchRuntimeProvenance,
     interop_root: &Path,
     toolchain_label: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    remove_path_if_exists(build_root)?;
-    fs::create_dir_all(build_root)?;
-    fs::copy(source_root.join("LeanDup.lean"), build_root.join("LeanDup.lean"))?;
-    copy_dir_recursive(&source_root.join("LeanDup"), &build_root.join("LeanDup"))?;
-    fs::write(build_root.join("lean-toolchain"), format!("{toolchain_label}\n"))?;
-    write_generated_lakefile(build_root, semantic_root, semantic_provenance, interop_root)?;
-    write_generated_manifest(build_root, semantic_root, semantic_provenance, interop_root)?;
-    Ok(())
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let lakefile = generated_lakefile_text(semantic_root, semantic_provenance, interop_root)?;
+    let manifest = generated_manifest_bytes(semantic_root, semantic_provenance, interop_root)?;
+    let source_digest = lean_dup_source_digest(source_root, &lakefile, &manifest)?;
+    let materialized = lean_toolchain::materialize_source_package(&SourcePackageMaterializationRequest {
+        source_root: source_root.to_path_buf(),
+        cache_root: cache_root.to_path_buf(),
+        package_name: "lean_dup_worker".to_owned(),
+        materialized_package_name: "lean_dup_worker".to_owned(),
+        library_name: "LeanDup".to_owned(),
+        source_digest,
+        source_revision: env!("CARGO_PKG_VERSION").to_owned(),
+        crate_name: env!("CARGO_PKG_NAME").to_owned(),
+        crate_version: env!("CARGO_PKG_VERSION").to_owned(),
+        toolchain_label: toolchain_label.to_owned(),
+        include_paths: vec![PathBuf::from("LeanDup.lean"), PathBuf::from("LeanDup")],
+        generated_files: vec![
+            GeneratedSourceFile {
+                relative_path: PathBuf::from("lakefile.lean"),
+                contents: lakefile.into_bytes(),
+            },
+            GeneratedSourceFile {
+                relative_path: PathBuf::from("lake-manifest.json"),
+                contents: manifest,
+            },
+        ],
+        sentinel_files: vec![PathBuf::from("LeanDup/Capability.lean")],
+        manifest_policy: SourcePackageManifestPolicy::AllowPackages,
+    })?;
+    Ok(materialized.project_root)
 }
 
-fn write_generated_lakefile(
-    build_root: &Path,
+fn generated_lakefile_text(
     semantic_root: &Path,
     semantic_provenance: &SemanticSearchRuntimeProvenance,
     interop_root: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<String, Box<dyn std::error::Error>> {
     let semantic_root = fs::canonicalize(semantic_root)?;
     let interop_root = fs::canonicalize(interop_root)?;
-    let text = format!(
+    Ok(format!(
         r#"import Lake
 open Lake DSL
 
@@ -187,17 +208,14 @@ lean_lib LeanDup where
         semantic_provenance.materialized_package.as_str(),
         lean_string_literal(&semantic_root),
         lean_string_literal(&interop_root)
-    );
-    fs::write(build_root.join("lakefile.lean"), text)?;
-    Ok(())
+    ))
 }
 
-fn write_generated_manifest(
-    build_root: &Path,
+fn generated_manifest_bytes(
     semantic_root: &Path,
     semantic_provenance: &SemanticSearchRuntimeProvenance,
     interop_root: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let manifest = serde_json::json!({
         "version": "1.2.0",
         "packagesDir": ".lake/packages",
@@ -225,43 +243,66 @@ fn write_generated_manifest(
         "lakeDir": ".lake",
         "fixedToolchain": false
     });
-    fs::write(
-        build_root.join("lake-manifest.json"),
-        serde_json::to_vec_pretty(&manifest)?,
-    )?;
-    Ok(())
+    Ok(serde_json::to_vec_pretty(&manifest)?)
 }
 
 fn lean_string_literal(path: &Path) -> String {
     serde_json::to_string(&path.display().to_string()).unwrap_or_else(|_| "\"\"".to_owned())
 }
 
-fn copy_dir_recursive(source: &Path, dest: &Path) -> io::Result<()> {
-    fs::create_dir_all(dest)?;
-    for entry in fs::read_dir(source)? {
-        let entry = entry?;
-        let source_path = entry.path();
-        let dest_path = dest.join(entry.file_name());
-        if source_path.is_dir() {
-            copy_dir_recursive(&source_path, &dest_path)?;
-        } else if source_path.is_file() {
-            fs::copy(&source_path, &dest_path)?;
+fn lean_dup_source_digest(
+    source_root: &Path,
+    lakefile: &str,
+    manifest: &[u8],
+) -> Result<String, Box<dyn std::error::Error>> {
+    let mut entries = Vec::new();
+    collect_digest_entries(source_root, Path::new("LeanDup.lean"), &mut entries)?;
+    collect_digest_entries(source_root, Path::new("LeanDup"), &mut entries)?;
+    entries.push(("lakefile.lean".to_owned(), sha256_hex(lakefile.as_bytes())));
+    entries.push(("lake-manifest.json".to_owned(), sha256_hex(manifest)));
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let mut outer = Sha256::new();
+    for (canonical_path, digest) in entries {
+        outer.update(digest.as_bytes());
+        outer.update(b"  ");
+        outer.update(canonical_path.as_bytes());
+        outer.update(b"\n");
+    }
+    Ok(hex_lower(&outer.finalize()))
+}
+
+fn collect_digest_entries(source_root: &Path, relative: &Path, entries: &mut Vec<(String, String)>) -> io::Result<()> {
+    let source = source_root.join(relative);
+    let metadata = fs::symlink_metadata(&source)?;
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        for entry in fs::read_dir(&source)? {
+            let entry = entry?;
+            collect_digest_entries(source_root, &relative.join(entry.file_name()), entries)?;
         }
+    } else if metadata.is_file() {
+        entries.push((relative.to_string_lossy().into_owned(), sha256_hex(&fs::read(source)?)));
     }
     Ok(())
 }
 
-fn remove_path_if_exists(path: &Path) -> io::Result<()> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error),
-    };
-    if metadata.file_type().is_symlink() || metadata.is_file() {
-        fs::remove_file(path)
-    } else if metadata.is_dir() {
-        fs::remove_dir_all(path)
-    } else {
-        fs::remove_file(path)
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex_lower(&hasher.finalize())
+}
+
+#[allow(
+    clippy::arithmetic_side_effects,
+    clippy::indexing_slicing,
+    reason = "hex encoding indexes a fixed 16-byte table with masked nibbles"
+)]
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(char::from(HEX[(byte >> 4) as usize]));
+        out.push(char::from(HEX[(byte & 0x0f) as usize]));
     }
+    out
 }

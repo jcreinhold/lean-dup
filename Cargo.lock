@@ -4084,6 +4084,7 @@ dependencies = [
  "lean-toolchain",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "tempfile",
  "thiserror",
 ]
@@ -4130,6 +4131,10 @@ dependencies = [
 [[package]]
 name = "lean-rs-interop-shims"
 version = "0.2.0"
+dependencies = [
+ "lean-toolchain",
+ "sha2 0.11.0",
+]
 
 [[package]]
 name = "lean-rs-sys"
@@ -4220,7 +4225,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "tempfile",
  "thiserror",
  "walkdir",
 ]
@@ -4241,7 +4245,9 @@ dependencies = [
 name = "lean-toolchain"
 version = "0.2.0"
 dependencies = [
+ "fs4",
  "lean-rs-abi",
+ "serde",
  "serde_json",
  "sha2 0.11.0",
  "toml",

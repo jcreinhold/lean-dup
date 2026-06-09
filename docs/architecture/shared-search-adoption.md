@@ -94,17 +94,23 @@ boundary is what makes the shared extraction version-stable across the bump). Th
 
 `lean-dup` no longer depends on `../../lean-semantic-search/lean` as the steady-state Lake package path. The worker
 build script asks `lean-semantic-search-runtime` to materialize the package-owned `LeanSemanticSearch` source payload
-for `lean/lean-toolchain`, then builds a private generated `LeanDup` Lake root under Cargo's `OUT_DIR` with:
+for `lean/lean-toolchain`, then asks `lean-toolchain`'s shared source-package materializer to install a private
+generated `LeanDup` Lake root under Cargo's `OUT_DIR` with:
 
 - `require <runtime-owned semantic-search package id> from <materialized runtime source root>`;
 - `require «lean_rs_interop_shims» from <materialized lean-rs interop shim source root>`;
-- the checked-in `LeanDup.lean` and `LeanDup/` sources copied unchanged.
+- the checked-in `LeanDup.lean` and `LeanDup/` sources copied unchanged by the shared materializer.
 
 This keeps semantic-search source ownership in `lean-semantic-search` while preserving the `lean-dup.worker.v1` command
 payloads and duplicate-audit workflow. The checked-in `lean/lakefile.lean` is now a developer-facing Lean check, not the
 release build root: direct `lake -d lean build` requires `LEAN_DUP_SEMANTIC_SEARCH_ROOT` to point at a materialized
 semantic-search runtime source root. Release and CI builds should use `cargo build -p lean-dup-worker`, which performs
 that materialization itself.
+
+The generated root uses the same digest-keyed, locked, provenance-recorded materialization primitive as the packaged
+semantic-search runtime and generic interop shims. `lean-dup` still owns the generated Lakefile and manifest text because
+only it knows the worker package dependencies and export surface; it no longer owns cache population, source copying,
+generated `lean-toolchain` installation, or provenance sidecar mechanics.
 
 The generated capability manifest records the semantic-search dylib through the runtime crate's typed dependency
 descriptor and `CargoLeanCapability`'s generic `LeanLibraryDependency` hook, so the dependency is described before the

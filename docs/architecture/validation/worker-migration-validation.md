@@ -71,11 +71,12 @@ framing cost to account for.
 - **Mathlib-scale A/B benchmark.** The fixture-scale perf note above shows the subprocess startup/transport cost class
   vanishing, but a full mathlib-scale before/after wall-clock and RSS comparison needs an operator-supplied Lake
   workspace and is left as an operator follow-up.
-- **Remaining capability packaging debt.** `crates/worker/build.rs` no longer resolves
+- **Capability packaging debt closed.** `crates/worker/build.rs` no longer resolves
   `../../lean-semantic-search/lean` or a sibling `../../lean-rs` interop-shims checkout. Semantic-search source and its
   dylib come from `lean-semantic-search-runtime`; generic interop-shim source comes from the package-owned
   `lean-rs-interop-shims` crate; and the generated capability manifest records the semantic-search dylib through
-  `CargoLeanCapability`'s generic `LeanLibraryDependency` hook. The remaining follow-up is extracting the repeated
-  package-source materialization mechanics once the `LeanDup` payload gets its own package-owned boundary.
+  `CargoLeanCapability`'s generic `LeanLibraryDependency` hook. The generated `LeanDup` build root now uses
+  `lean-toolchain`'s shared source-package materializer for cache population, locking, generated toolchain installation,
+  and provenance sidecars; `lean-dup` owns only the generated Lakefile and manifest contents.
 </content>
 </invoke>
