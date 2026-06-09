@@ -16,6 +16,10 @@ All notable changes to lean-dup are documented here. The format is based on
 - The index cache key now folds in worker *substrate* facts (the pool transport-protocol version and pooled worker
   runtime version from the handshake), so a worker-runtime change invalidates stale entries. Ephemeral pool state (ids,
   pids, queue counters, lease keys) is excluded.
+- `LeanDup` capability build-root materialization now uses the shared `lean-toolchain` source-package helper instead of
+  a hand-written cache/copy path. The worker command exports and `LeanDup` package behavior are unchanged, but generated
+  roots now share the same lock, provenance, generated-toolchain, and manifest-validation mechanics as the other
+  packaged Lean capabilities.
 - MSRV floor raised to Rust 1.91, matching the adopted lean-rs 0.2.0 crates.
 
 ### Added
