@@ -3919,6 +3919,7 @@ dependencies = [
  "lean-dup-project",
  "lean-dup-report",
  "lean-dup-search",
+ "lean-dup-test-support",
  "lean-dup-worker",
  "predicates",
  "rusqlite",
@@ -4035,6 +4036,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lean-dup-test-support"
+version = "0.1.0"
+
+[[package]]
 name = "lean-dup-vector-index"
 version = "0.1.0"
 dependencies = [
@@ -4077,6 +4082,7 @@ dependencies = [
 name = "lean-dup-worker"
 version = "0.1.0"
 dependencies = [
+ "lean-dup-test-support",
  "lean-rs-interop-shims",
  "lean-rs-worker-parent",
  "lean-rs-worker-protocol",

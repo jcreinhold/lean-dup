@@ -114,15 +114,33 @@ pub fn run(cli: Cli) -> Result<Outcome> {
     })
 }
 
+/// When the worker fails because its child binary cannot be located, replace the
+/// raw bootstrap error with an actionable hint; other worker failures pass
+/// through unchanged. The substring is the stable marker lean-rs emits for an
+/// unresolved worker child.
+fn worker_error_with_install_hint(error: lean_dup_worker::WorkerError) -> AppError {
+    if error.to_string().contains("could not resolve worker child") {
+        return AppError::Cli {
+            message: format!(
+                "{error}\nhint: the `lean-dup-worker-child` binary must sit beside `lean-dup`; \
+                 install it with `cargo install --path crates/worker-child`"
+            ),
+        };
+    }
+    AppError::from(error)
+}
+
 fn doctor(args: DoctorArgs, reporter: &mut Reporter) -> Result<DoctorReport> {
     let foundation = foundation(
         workspace_or_cwd(pick_workspace(args.workspace, args.workspace_positional)),
         args.module_root,
         reporter,
     )?;
-    let worker_identity = reporter.measure("worker.version", |_| {
-        WorkerClient::with_timeout(Duration::from_secs(60)).worker_identity(foundation.workspace.root.clone())
-    })?;
+    let worker_identity = reporter
+        .measure("worker.version", |_| {
+            WorkerClient::with_timeout(Duration::from_secs(60)).worker_identity(foundation.workspace.root.clone())
+        })
+        .map_err(worker_error_with_install_hint)?;
     let worker_identity = worker_identity
         .rows
         .into_iter()

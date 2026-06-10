@@ -1,0 +1,9 @@
+[package]
+edition = { workspace = true }
+license = { workspace = true }
+name = "lean-dup-test-support"
+publish = false
+version = { workspace = true }
+
+[lib]
+doctest = false

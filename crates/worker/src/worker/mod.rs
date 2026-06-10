@@ -450,9 +450,8 @@ fn format_worker_diagnostics(diagnostics: &[WorkerDiagnostic]) -> String {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
-    use std::process::Command as ProcessCommand;
     use std::sync::atomic::AtomicBool;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     use super::engine::WorkerEngine;
@@ -488,21 +487,9 @@ mod tests {
         }
     }
 
-    fn ensure_worker_child_built() {
-        static BUILT: OnceLock<()> = OnceLock::new();
-        BUILT.get_or_init(|| {
-            let status = ProcessCommand::new("cargo")
-                .args(["build", "-p", "lean-dup-worker-child", "--locked"])
-                .current_dir(repo_root())
-                .status()
-                .unwrap();
-            assert!(status.success(), "failed to build lean-dup-worker-child");
-        });
-    }
-
     #[test]
     fn public_client_version_returns_typed_version() {
-        ensure_worker_child_built();
+        lean_dup_test_support::ensure_worker_child_built();
         let client = WorkerClient::new();
         let call = client.version(tiny_root()).unwrap();
         let version = call.rows.first().unwrap();
@@ -514,7 +501,7 @@ mod tests {
 
     #[test]
     fn worker_identity_reports_substrate_facts() {
-        ensure_worker_child_built();
+        lean_dup_test_support::ensure_worker_child_built();
         let call = WorkerClient::new().worker_identity(tiny_root()).unwrap();
         let identity = call.rows.first().unwrap();
         assert_eq!(identity.semantic.protocol_version, "lean-dup.worker.v1");
@@ -551,7 +538,7 @@ mod tests {
 
     #[test]
     fn public_client_extract_returns_typed_declarations() {
-        ensure_worker_child_built();
+        lean_dup_test_support::ensure_worker_child_built();
         let client = WorkerClient::new();
         let call = client.extract_batch(tiny_extract_batch()).unwrap();
         assert!(call.rows.iter().any(|row| row.qualified_name == "Tiny.same_left"));
@@ -559,7 +546,7 @@ mod tests {
 
     #[test]
     fn public_client_features_returns_typed_feature_rows() {
-        ensure_worker_child_built();
+        lean_dup_test_support::ensure_worker_child_built();
         let client = WorkerClient::new();
         let declarations = client.extract_batch(tiny_extract_batch()).unwrap();
         let ids = declarations
@@ -584,7 +571,7 @@ mod tests {
 
     #[test]
     fn public_client_probe_returns_typed_probe_results() {
-        ensure_worker_child_built();
+        lean_dup_test_support::ensure_worker_child_built();
         let client = WorkerClient::new();
         let left = "workspace:Tiny.Basic:Tiny.same_left".to_owned();
         let right = "workspace:Tiny.Basic:Tiny.same_right".to_owned();
