@@ -23,6 +23,11 @@ All notable changes to lean-dup are documented here. The format is based on
   a hand-written cache/copy path. The worker command exports and `LeanDup` package behavior are unchanged, but generated
   roots now share the same lock, provenance, generated-toolchain, and manifest-validation mechanics as the other
   packaged Lean capabilities.
+- `lean/lakefile.lean` now requires its Lean dependencies (`lean-semantic-search`, `lean_rs_interop_shims`) from the
+  *published* upstream sources pinned to release tags (`v0.3.0`, `v0.2.2`) via Lake git requires, instead of a sibling
+  `../../lean-rs` checkout and a pre-materialized `LEAN_DUP_SEMANTIC_SEARCH_ROOT`. A clean `lake build LeanDup` now
+  resolves from any checkout, so CI builds `lean/` without vendoring sibling repos. This mirrors the worker `build.rs`
+  path, which already materializes the same crates' Lean sources.
 - MSRV floor raised to Rust 1.91, matching the adopted lean-rs 0.2.0 crates.
 
 ### Added
