@@ -20,7 +20,13 @@ jobs:
   check:
     name: check + fmt + clippy + test
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # A warm rust-cache build finishes in ~15 min, but a cold one — any time
+    # Cargo.lock changes and invalidates the cache — must rebuild the lance /
+    # lancedb / fastembed tree from scratch (~15 min of compile alone) before the
+    # Lean worker tests even start. Since a cancelled (timed-out) run skips the
+    # cache-save step, too tight a limit deadlocks: cold build times out, cache
+    # never warms, next run is cold again. Give cold builds room to complete once.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
