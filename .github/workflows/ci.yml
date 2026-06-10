@@ -27,6 +27,13 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # `crates/vector-index` depends on lance/lancedb; the transitive
+      # `lance-encoding` build script compiles `.proto` schemas and needs a
+      # `protoc` binary on PATH (the vendoring `protoc` feature only covers the
+      # pinned 6.0.1 path, not the newer lance lancedb pulls in). ubuntu-latest
+      # does not ship protoc by default.
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       # Several lean-dup tests shell out to `lake` (the Lean build tool):
       # crates/eval/src/eval/suites.rs builds fixtures, the cli integration
       # suite runs the full audit pipeline against pre-built Lean fixtures.
