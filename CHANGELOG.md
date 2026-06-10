@@ -8,6 +8,9 @@ All notable changes to lean-dup are documented here. The format is based on
 
 ### Changed
 
+- Upgraded the `lean-rs` worker crates (`lean-rs-worker-parent` / `-child`, `-protocol`, `lean-rs-interop-shims`,
+  `lean-toolchain`) to 0.2.2 and bumped the Lean toolchain pin to `leanprover/lean4:v4.31.0-rc2` (header-identical to
+  `-rc1`).
 - The Lean worker now runs entirely through the `lean-rs-worker-parent` pool, loading the `LeanDup` shared-facet
   capability dylib via the new `lean-dup-worker-child` binary, instead of a per-call subprocess JSONL transport. Only
   the child links `libleanshared`; the audit process stays free of the Lean runtime ABI. The `lean-dup.worker.v1` schema

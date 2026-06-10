@@ -86,7 +86,7 @@ keys, feature rows, and the corpus token.
 ## Toolchain and dependency alignment
 
 Adopting the shared Lean package via Lake requires a single toolchain across the dependency tree, so `lean-dup`'s Lean
-toolchain is bumped to `leanprover/lean4:v4.31.0-rc1` to match the shared package (the package's `LeanCompat` owned-IR
+toolchain is bumped to `leanprover/lean4:v4.31.0-rc2` to match the shared package (the package's `LeanCompat` owned-IR
 boundary is what makes the shared extraction version-stable across the bump). The Rust path dependencies require one
 `libsqlite3-sys` (`links = "sqlite3"`), so both workspaces align on rusqlite 0.40.
 

@@ -98,7 +98,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -109,7 +109,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1860,7 +1860,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1932,7 +1932,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4099,9 +4099,9 @@ dependencies = [
 
 [[package]]
 name = "lean-rs"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac794aa7f29e511f953fc764db8a83501e475cb6a2c1f1d445d050a842ac80dd"
+checksum = "0a9e3f3e4341444a69c78495644042c34f071dcb5b705a712a0904fc4d43ef46"
 dependencies = [
  "lean-rs-sys",
  "lean-toolchain",
@@ -4114,18 +4114,18 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-abi"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "697d63e003bd50931c09638ee1119d10b5c97539ccc04b237b61e5b7006f6698"
+checksum = "a554e560179dbd8f9088adef82e436022f62874562d304c5fda914655f7434b9"
 dependencies = [
  "sha2 0.11.0",
 ]
 
 [[package]]
 name = "lean-rs-host"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "353b5990ad76a44456526fe0c999ea7ce76c14be79f53e9f16599a4634ac29ff"
+checksum = "7f298fe19f10610079752809f527bfd8f02c07061c25526c07377bbe3fd38d43"
 dependencies = [
  "lean-rs",
  "lean-toolchain",
@@ -4136,9 +4136,9 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-interop-shims"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28ee3a625eb8140609fee7b8bdb0db7a898033f70422645aa33af291e12c9c60"
+checksum = "1e0f50cbd0d81a0730b1b30845bb1c9480f5850a3d5b3712c6f080d84ee42ce8"
 dependencies = [
  "lean-toolchain",
  "sha2 0.11.0",
@@ -4146,9 +4146,9 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-sys"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "991dcfefedd619aac26a3f8b7c87c48ed85452d413c89411aebac1bb5e9964ba"
+checksum = "97a2c27cf674fb9ea70bb77d02817e8b2402c96e5d79e5f765bed01a1a1dac94"
 dependencies = [
  "lean-rs-abi",
  "sha2 0.11.0",
@@ -4156,9 +4156,9 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-worker-child"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f01c7b1b94bf074841a6c4d293a4ed07518730107e49b55c71c50a1b84d2158"
+checksum = "5afebc4ae9f1a0e78c1d822f203c4800ed6735249f800519dbf2c0f6b3d972f2"
 dependencies = [
  "lean-rs",
  "lean-rs-host",
@@ -4172,9 +4172,9 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-worker-parent"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b27008a420150bb71565d4bdffe045cc8420b0ed09a68d292352830ec39003d"
+checksum = "f05b0bb5fcb52965af83eb9783a8d1d16aa4d82c95d07ec73d9a7da7a480ca8c"
 dependencies = [
  "lean-rs-worker-protocol",
  "lean-toolchain",
@@ -4184,9 +4184,9 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-worker-protocol"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4e83f0ec027953c5db1244a93cd605c45fc3746836d69231d00bc3aa066aef1"
+checksum = "278299738af7105d5b2ab5ef0c7c8250f244181ac465c7c04cdbe1b09788a5db"
 dependencies = [
  "lean-toolchain",
  "serde",
@@ -4255,9 +4255,9 @@ dependencies = [
 
 [[package]]
 name = "lean-toolchain"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f146f52f8155da9d95e9b985d3d9ecfffa7da0f57feb9ef67a538a4d2e4bd93"
+checksum = "963f989131d7d3e917ae3ddf393f2762c4ffcba1871a59dc0794e66399a0755d"
 dependencies = [
  "fs4",
  "lean-rs-abi",
@@ -4753,7 +4753,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5709,7 +5709,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6118,7 +6118,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6320,7 +6320,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7081,7 +7081,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
