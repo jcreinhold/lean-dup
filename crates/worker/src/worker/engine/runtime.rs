@@ -30,6 +30,11 @@ pub(super) const INDEX_EXPORT: &str = "lean_dup_capability_index";
 /// The sibling binary that links `libleanshared` and hosts the capability.
 const WORKER_CHILD: &str = "lean-dup-worker-child";
 
+/// Override for the worker-child path. Set it to an explicit binary when the
+/// worker does not sit beside the `lean-dup` executable — chiefly tests and CI,
+/// which build the worker into `target/debug/` and point this at it.
+const WORKER_CHILD_ENV: &str = "LEAN_DUP_WORKER_CHILD";
+
 /// Owns capability production for the `LeanDup` worker.
 #[derive(Debug)]
 pub(super) struct LeanDupCapabilityRuntime {
@@ -59,7 +64,7 @@ impl LeanDupCapabilityRuntime {
         LeanWorkerCapabilityBuilder::from_built_capability(&built, Vec::<String>::new())
             .map(|builder| {
                 builder
-                    .worker_child(LeanWorkerChild::sibling(WORKER_CHILD))
+                    .worker_child(LeanWorkerChild::sibling(WORKER_CHILD).env_override(WORKER_CHILD_ENV))
                     .json_command_export(VERSION_EXPORT)
                     .streaming_command_export(EXTRACT_EXPORT)
                     .streaming_command_export(FEATURES_EXPORT)

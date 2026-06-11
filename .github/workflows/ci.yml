@@ -20,7 +20,13 @@ jobs:
   check:
     name: check + fmt + clippy + test
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # A warm rust-cache build finishes in ~15 min, but a cold one — any time
+    # Cargo.lock changes and invalidates the cache — must rebuild the lance /
+    # lancedb / fastembed tree from scratch (~15 min of compile alone) before the
+    # Lean worker tests even start. Since a cancelled (timed-out) run skips the
+    # cache-save step, too tight a limit deadlocks: cold build times out, cache
+    # never warms, next run is cold again. Give cold builds room to complete once.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -80,6 +86,15 @@ jobs:
           done
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # The worker child is a separate crate's binary; `cargo test` does not
+      # force-build it for the cli integration tests, so build it once here and
+      # point the parent at it via LEAN_DUP_WORKER_CHILD (exported to GITHUB_ENV
+      # so every later step — tests, doctor, evals — resolves the same binary).
+      - name: Provision worker-child
+        run: |
+          set -euo pipefail
+          cargo build -p lean-dup-worker-child --locked
+          echo "LEAN_DUP_WORKER_CHILD=$PWD/target/debug/lean-dup-worker-child" >> "$GITHUB_ENV"
       - run: cargo test --workspace --locked
       - name: Boundary tests
         run: cargo test -p lean-dup-cli --test boundaries --locked

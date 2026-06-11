@@ -27,11 +27,18 @@ From a checkout:
 
 ```sh
 cargo install --path crates/cli
+cargo install --path crates/worker-child
 lean-dup --version
 ```
 
-The installed `lean-dup` binary is the symbolic auditor. Optional tools such as `lean-dup-vector` are external
-extensions and are not required for the core audit workflow.
+Install **both** binaries. `lean-dup` is the symbolic auditor; it hosts Lean in a separate
+`lean-dup-worker-child` process (the only binary that links `libleanshared`), which it resolves as a
+sibling — so the worker child must live in the same directory as `lean-dup`. `cargo install` places both
+in `~/.cargo/bin/`, satisfying that. Run `lean-dup doctor` to confirm the worker is reachable; if it
+reports the worker child is missing, you skipped the second `cargo install`.
+
+Optional tools such as `lean-dup-vector` are external extensions and are not required for the core audit
+workflow.
 
 For a walkthrough with sample output, the full audit/show loop, and what each field means, see
 [docs/getting-started.md](docs/getting-started.md).

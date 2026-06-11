@@ -12,9 +12,16 @@ use serde_json::Value;
 
 fn worker_cli_lock() -> MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    // The worker child is a separate crate's binary that `cargo test` does not
+    // force-build for this crate's integration tests; provision it before any
+    // test spawns `lean-dup`, or sibling resolution fails with `child_unresolved`.
+    lean_dup_test_support::ensure_worker_child_built();
+    // Recover from a poisoned lock instead of cascading: if one worker test
+    // panics while holding the guard, the rest still report their own outcome
+    // rather than a uniform `PoisonError`.
     LOCK.get_or_init(|| Mutex::new(()))
         .lock()
-        .expect("worker CLI test lock poisoned")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn repo_root() -> PathBuf {
