@@ -108,9 +108,9 @@ semantic-search runtime source root. Release and CI builds should use `cargo bui
 that materialization itself.
 
 The generated root uses the same digest-keyed, locked, provenance-recorded materialization primitive as the packaged
-semantic-search runtime and generic interop shims. `lean-dup` still owns the generated Lakefile and manifest text because
-only it knows the worker package dependencies and export surface; it no longer owns cache population, source copying,
-generated `lean-toolchain` installation, or provenance sidecar mechanics.
+semantic-search runtime and generic interop shims. `lean-dup` still owns the generated Lakefile and manifest text
+because only it knows the worker package dependencies and export surface; it no longer owns cache population, source
+copying, generated `lean-toolchain` installation, or provenance sidecar mechanics.
 
 The generated capability manifest records the semantic-search dylib through the runtime crate's typed dependency
 descriptor and `CargoLeanCapability`'s generic `LeanLibraryDependency` hook, so the dependency is described before the

@@ -25,7 +25,7 @@ Top-level: `schema_version`, `suite`, `pairs`. Each pair row:
 | Field | Contents |
 | --- | --- |
 | `left`, `right` | normalized declaration names |
-| `label_status` | `positive | hard-negative | unlabeled` |
+| `label_status` | `positive \| hard-negative \| unlabeled` |
 | `label` | typed label metadata when adjudicated |
 | `stage_position` | generated? survived ranking? rank when ranked |
 | `final_visibility` | current shown-queue facts |

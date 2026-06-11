@@ -81,8 +81,8 @@ lower-level steps.
 
 The Lean worker lives in `lean/LeanDup/` (`Extract`, `Features`, `Probe`, `Protocol`, `Index`, `Capability`).
 `Capability` exposes five capability command exports loaded by the pool: `version` (json command) and the streaming
-`extract`, `features`, `index`, `probe`. `doctor`-style health is composed Rust-side from `version` plus
-workspace/cache checks; worker substrate facts come from the pool handshake. See
+`extract`, `features`, `index`, `probe`. `doctor`-style health is composed Rust-side from `version` plus workspace/cache
+checks; worker substrate facts come from the pool handshake. See
 `docs/architecture/validation/worker-migration-validation.md`.
 
 Red flags (from `overview.md#design-rules`): table-name leakage outside `index`; worker-command names in
@@ -103,10 +103,10 @@ label like `mathlib` implying proof-grade evidence without provenance.
   semantic versions, include policy, selected roots, relevant deps, the `--max-heartbeats` budget) — never unrelated
   non-Lean files or broad repo dirtiness. Default cache root `~/.cache/lean-dup`, override `LEAN_DUP_CACHE_DIR`.
 - **Heartbeat budget is Lean-owned, skips are non-fatal.** `--max-heartbeats N` (worker default 200000; `0` = unlimited)
-  threads to the worker as an optional additive `lean-dup.worker.v1` payload field. A declaration exceeding the budget is
-  skipped (its rows omitted), never aborting the run; the count is persisted in index metadata and surfaced
-  (`workspace.declarations_skipped_by_budget` in audit JSON, a stderr event). Rust supplies the budget but never inspects
-  elaboration state — the skip strategy lives in `lean/LeanDup` (`forEachDeclarationSkippingSlow`).
+  threads to the worker as an optional additive `lean-dup.worker.v1` payload field. A declaration exceeding the budget
+  is skipped (its rows omitted), never aborting the run; the count is persisted in index metadata and surfaced
+  (`workspace.declarations_skipped_by_budget` in audit JSON, a stderr event). Rust supplies the budget but never
+  inspects elaboration state — the skip strategy lives in `lean/LeanDup` (`forEachDeclarationSkippingSlow`).
 - **Lints are strict.** The workspace denies `unsafe-code` and `rust-2024-compatibility`; clippy runs
   `pedantic`/`nursery` plus restriction lints (`unwrap_used`, `expect_used`, `panic`, `indexing_slicing`,
   `arithmetic_side_effects`, `todo`, `unimplemented` are all `warn` → errors in CI). Prefer `.get()`, checked
