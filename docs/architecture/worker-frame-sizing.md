@@ -1,6 +1,9 @@
 # Worker Frame Sizing (design)
 
-> Status: **design — not yet implemented.** Authored against lean-dup `0.1.0` on lean-rs `0.2.4`. Companion to
+> Status: **Design A implemented** (statement_text bounded at extraction; regression test
+> `extracted_statement_text_is_bounded_for_oversized_types` over the `large-type` fixture). Designs B and C are not
+> adopted; the `statement_digest` follow-up remains future work, tied to [probe-cache-scoping.md](probe-cache-scoping.md).
+> Authored against lean-dup `0.1.0` on lean-rs `0.2.4`. Companion to
 > [worker-protocol.md](worker-protocol.md), which owns the command contract; this doc owns **how large an extraction
 > declaration row may be** — what it should carry, and the transport envelope that catches it when it carries too much.
 > Independent of [probe-cache-scoping.md](probe-cache-scoping.md) — that is verdict-cache lifecycle; the two share no
@@ -109,10 +112,11 @@ for a future payload that is genuinely large *and* required in full; it does not
 
 ## Tests
 
-- Regression (Lean/extraction): a declaration with a very large type emits a `statement_text` of bounded length (today
-  it is unbounded). A focused Lean test over a synthetic monster type, or a Rust extraction test asserting row length ≤
-  bound + slack.
+- Regression (Rust/extraction, **landed**): `extracted_statement_text_is_bounded_for_oversized_types` in
+  `crates/worker/src/worker/mod.rs` extracts the `tests/fixtures/large-type` module through the real worker and asserts
+  `oversizedType`'s `statement_text` is bounded (≤ 4100 chars and ends with the `" ..."` truncation marker) while a sibling
+  `smallType` in the same module is left intact — proving the bound is size-triggered, not blanket truncation.
 - Integration (lean-dup): `index-mathlib` against a fixture whose mathlib-like dependency contains an oversized type
-  completes (today it aborts at the frame cap).
+  completes (before Design A it aborted at the frame cap).
 - When the digest field lands: two declarations whose types share the first `maxStatementChars` but differ later produce
   **different** `statement_digest` (guards the digest caveat).

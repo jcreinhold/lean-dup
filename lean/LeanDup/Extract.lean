@@ -258,14 +258,19 @@ private def definitionBody? : ConstantInfo → Option Expr
   | .defnInfo info => some info.value
   | _ => none
 
-private def maxDefinitionBodyChars : Nat := 4000
+-- Display text fields (`statement_text`, `definition_body_summary`,
+-- `docstring_text`) are bounded to an actionable length. They are display-only —
+-- comparison runs on the feature rows, and the probe re-elaborates by id — so a
+-- declaration whose pretty-printed type runs to megabytes (mathlib has them)
+-- must not be emitted in full: it is unreadable and overruns the worker frame.
+private def maxSemanticTextChars : Nat := 4000
 
 private def boundedSemanticText (text : String) : String :=
   let normalized := text
-  if normalized.length <= maxDefinitionBodyChars then
+  if normalized.length <= maxSemanticTextChars then
     normalized
   else
-    (normalized.take maxDefinitionBodyChars).toString ++ " ..."
+    (normalized.take maxSemanticTextChars).toString ++ " ..."
 
 private def rowPayload (options : Options) (moduleSpec : ModuleSpec) (declName : Name)
     (constInfo : ConstantInfo) (generated : Bool) (range? : Option DeclarationRanges)
@@ -366,7 +371,7 @@ The payload contains display/source facts. Semantic comparison must use the
 feature rows emitted by `LeanDup.Features`.
 -/
 def rowPayloadFromAccepted (options : Options) (decl : AcceptedDeclaration) : MetaM Json := do
-  let typeText := (← ppExpr decl.constInfo.type).pretty
+  let typeText := boundedSemanticText (← ppExpr decl.constInfo.type).pretty
   let docString? ← findDocString? (← getEnv) decl.declName (includeBuiltin := false)
   let definitionBodySummary? ←
     match definitionBody? decl.constInfo with

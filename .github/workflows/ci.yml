@@ -72,6 +72,7 @@ jobs:
             tests/fixtures/tiny/.lake
             tests/fixtures/external/.lake
             tests/fixtures/source-backed/.lake
+            tests/fixtures/large-type/.lake
           key: lake-builds-${{ runner.os }}-${{ steps.lean.outputs.toolchain }}-${{ hashFiles('lean/**/*.lean', 'lean/lakefile.*', 'tests/fixtures/**/*.lean', 'tests/fixtures/**/lakefile.*', '**/lean-toolchain') }}
       - name: Build lean/ and Lean fixtures
         run: |
@@ -81,7 +82,7 @@ jobs:
           # the pool, not a subprocess). This also produces LeanDup.olean, which
           # the audit pipeline imports, so cargo tests find it.
           ( cd lean && lake build LeanDup )
-          for fixture in tests/fixtures/tiny tests/fixtures/external tests/fixtures/source-backed; do
+          for fixture in tests/fixtures/tiny tests/fixtures/external tests/fixtures/source-backed tests/fixtures/large-type; do
             ( cd "$fixture" && lake build )
           done
       - run: cargo fmt --all -- --check

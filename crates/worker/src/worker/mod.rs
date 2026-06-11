@@ -487,6 +487,24 @@ mod tests {
         }
     }
 
+    fn large_type_root() -> PathBuf {
+        repo_root().join("tests/fixtures/large-type")
+    }
+
+    fn large_type_extract_batch() -> ExtractBatch {
+        ExtractBatch {
+            workspace_root: large_type_root(),
+            modules: vec![ModuleDescriptor {
+                module: "LargeType.Basic".to_owned(),
+                origin: "workspace".to_owned(),
+                source_root: None,
+            }],
+            include_private: true,
+            include_generated: false,
+            max_heartbeats: None,
+        }
+    }
+
     #[test]
     fn public_client_version_returns_typed_version() {
         lean_dup_test_support::ensure_worker_child_built();
@@ -542,6 +560,45 @@ mod tests {
         let client = WorkerClient::new();
         let call = client.extract_batch(tiny_extract_batch()).unwrap();
         assert!(call.rows.iter().any(|row| row.qualified_name == "Tiny.same_left"));
+    }
+
+    #[test]
+    fn extracted_statement_text_is_bounded_for_oversized_types() {
+        // Regression for the `index-mathlib` frame-too-large failure
+        // (docs/architecture/worker-frame-sizing.md): a declaration whose type
+        // pretty-prints to many KB must reach the parent as a *bounded*
+        // `statement_text`, not the full pretty-printed `Expr`. The fixture's
+        // `oversizedType` has a ~23 KB pretty-printed type; bounding keeps its row
+        // well under the 1 MiB frame cap. `smallType` shares the module and must be
+        // left intact, proving the bound is size-triggered, not blanket truncation.
+        lean_dup_test_support::ensure_worker_child_built();
+        let client = WorkerClient::new();
+        let call = client.extract_batch(large_type_extract_batch()).unwrap();
+
+        let oversized = call
+            .rows
+            .iter()
+            .find(|row| row.qualified_name == "LargeType.oversizedType")
+            .expect("oversizedType extracted");
+        let len = oversized.statement_text.chars().count();
+        // Bound is 4000 chars of type + " ..." marker, plus the short
+        // "axiom oversizedType : " display prefix; assert it landed under a small
+        // slack over that, and that truncation actually fired (the marker is present).
+        assert!(len <= 4100, "oversized statement_text not bounded: {len} chars");
+        assert!(
+            oversized.statement_text.ends_with(" ..."),
+            "oversized statement_text was not truncated"
+        );
+
+        let small = call
+            .rows
+            .iter()
+            .find(|row| row.qualified_name == "LargeType.smallType")
+            .expect("smallType extracted");
+        assert!(
+            !small.statement_text.ends_with(" ..."),
+            "small statement_text was truncated but should be intact"
+        );
     }
 
     #[test]
