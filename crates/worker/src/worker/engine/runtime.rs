@@ -35,6 +35,18 @@ const WORKER_CHILD: &str = "lean-dup-worker-child";
 /// which build the worker into `target/debug/` and point this at it.
 const WORKER_CHILD_ENV: &str = "LEAN_DUP_WORKER_CHILD";
 
+/// Override for the negotiated worker frame cap (bytes). The parent clamps the
+/// value to the protocol's `[MIN_FRAME_BYTES, MAX_FRAME_BYTES_HARD_CAP]` window.
+const MAX_FRAME_BYTES_ENV: &str = "LEAN_DUP_MAX_FRAME_BYTES";
+
+/// Default negotiated frame cap: headroom above the protocol's 1 MiB default.
+/// The per-request module manifest is the dominant frame, and `modules_payload`
+/// already hoists its repeated constants so a mathlib-scale request is well under
+/// 1 MiB — this margin covers far larger corpora without re-breaking, while
+/// staying finite (never the 256 MiB hard cap) so the parent's largest single
+/// `read_frame` allocation stays bounded.
+const DEFAULT_MAX_FRAME_BYTES: u32 = 16 * 1024 * 1024;
+
 /// Owns capability production for the `LeanDup` worker.
 #[derive(Debug)]
 pub(super) struct LeanDupCapabilityRuntime {
@@ -61,6 +73,10 @@ impl LeanDupCapabilityRuntime {
         timeout: Duration,
     ) -> Result<LeanWorkerCapabilityBuilder, WorkerError> {
         let built = LeanBuiltCapability::manifest_path(self.manifest_path);
+        let max_frame_bytes = std::env::var(MAX_FRAME_BYTES_ENV)
+            .ok()
+            .and_then(|raw| raw.trim().parse::<u32>().ok())
+            .unwrap_or(DEFAULT_MAX_FRAME_BYTES);
         LeanWorkerCapabilityBuilder::from_built_capability(&built, Vec::<String>::new())
             .map(|builder| {
                 builder
@@ -72,6 +88,7 @@ impl LeanDupCapabilityRuntime {
                     .streaming_command_export(INDEX_EXPORT)
                     .request_timeout(timeout)
                     .import_workspace_root(workspace_root)
+                    .max_frame_bytes(max_frame_bytes)
             })
             .map_err(map_parent_error)
     }

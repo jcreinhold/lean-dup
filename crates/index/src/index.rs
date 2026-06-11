@@ -27,7 +27,13 @@ pub const INDEX_SCHEMA_VERSION: &str = "lean-dup.index.sqlite.v3";
 pub const INDEX_DIAGNOSTIC_SCHEMA_VERSION: &str = "lean-dup.index.v3";
 const INDEX_PROVENANCE_VERSION: &str = "lean-dup.index.provenance.v1";
 const MATHLIB_DECLARATION_CHUNK_SIZE: usize = 32;
-const MAX_MATHLIB_INDEX_THREADS: usize = 2;
+/// Upper bound on concurrent Lean extraction tasks for a mathlib index. The
+/// worker phase is ~99% of an index build and parallelizes well — each task
+/// elaborates a disjoint chunk over the *shared, read-only* imported environment,
+/// so added threads cost one chunk's working set, not another copy of the (multi-GB)
+/// mathlib environment. The cap stays small to keep peak RSS bounded on developer
+/// machines; raise it only with a measured memory budget.
+const MAX_MATHLIB_INDEX_THREADS: usize = 4;
 
 /// Upper bound on postings fetched per key from the shared corpus. The index
 /// returns every match for a key; retrieval applies its own selectivity
@@ -1165,6 +1171,11 @@ fn mathlib_index_threads() -> usize {
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|jobs| *jobs > 0)
+        .or_else(|| {
+            std::thread::available_parallelism()
+                .ok()
+                .map(std::num::NonZeroUsize::get)
+        })
         .map(|jobs| jobs.min(MAX_MATHLIB_INDEX_THREADS))
         .unwrap_or(1)
 }

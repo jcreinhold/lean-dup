@@ -471,8 +471,16 @@ def Request.parse (json : Json) : Except ProtocolError Request := do
 
 private def parseModuleDescriptor
     (json : Json)
-    (request : Request) : Except ProtocolError ModuleDescriptor := do
+    (request : Request)
+    (defaultOrigin : String)
+    (defaultSourceRoot? : Option String) : Except ProtocolError ModuleDescriptor := do
   match json with
+  | Json.str moduleName =>
+      -- Bare-string entry: inherit the request-level hoisted `origin`/`source_root`.
+      if moduleName.isEmpty then
+        throw <| invalidRequest (some request.requestId) (some request.command) "module name must be nonempty"
+      else
+        pure { module := moduleName, origin := defaultOrigin, sourceRoot? := defaultSourceRoot? }
   | Json.obj _ =>
       let moduleName ←
         match json.getObjValAs? String "module" with
@@ -486,27 +494,38 @@ private def parseModuleDescriptor
       let origin ←
         match json.getObjValAs? String "origin" with
         | .ok origin =>
-            if origin.isEmpty then pure "workspace" else pure origin
-        | .error _ => pure "workspace"
+            if origin.isEmpty then pure defaultOrigin else pure origin
+        | .error _ => pure defaultOrigin
       let sourceRoot? ←
         match optionalJsonField json "source_root" with
-        | none | some Json.null => pure none
+        | none | some Json.null => pure defaultSourceRoot?
         | some (Json.str value) =>
-            if value.isEmpty then pure none else pure (some value)
+            if value.isEmpty then pure defaultSourceRoot? else pure (some value)
         | some _ =>
             throw <| invalidRequest (some request.requestId) (some request.command) "`source_root` must be a string or null"
       pure { module := moduleName, origin := origin, sourceRoot? := sourceRoot? }
   | _ =>
-      throw <| invalidRequest (some request.requestId) (some request.command) "module descriptors must be JSON objects"
+      throw <| invalidRequest (some request.requestId) (some request.command) "module descriptors must be a module name or JSON object"
 
-/-- Parse optional command payload modules from a request. -/
+/-- Parse optional command payload modules from a request. The request-level
+`modules_origin` / `modules_source_root` (hoisted by the caller to avoid
+repeating constants per module) supply the defaults for bare-string entries and
+for object entries that omit them. -/
 def Request.modules (request : Request) : Except ProtocolError (Array ModuleDescriptor) := do
+  let defaultOrigin :=
+    match request.payload.getObjValAs? String "modules_origin" with
+    | .ok origin => if origin.isEmpty then "workspace" else origin
+    | .error _ => "workspace"
+  let defaultSourceRoot? :=
+    match optionalJsonField request.payload "modules_source_root" with
+    | some (Json.str value) => if value.isEmpty then none else some value
+    | _ => none
   match optionalJsonField request.payload "modules" with
   | none => pure #[]
   | some (Json.arr values) =>
       let mut modules := #[]
       for value in values do
-        modules := modules.push (← parseModuleDescriptor value request)
+        modules := modules.push (← parseModuleDescriptor value request defaultOrigin defaultSourceRoot?)
       pure modules
   | some _ =>
       throw <| invalidRequest (some request.requestId) (some request.command) "`modules` must be an array"

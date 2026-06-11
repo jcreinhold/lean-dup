@@ -39,15 +39,27 @@ open Lean
 
 private def parseModules (json : Json) : Array LeanDup.Extract.ModuleSpec := Id.run do
   let mut out := #[]
+  -- The caller hoists the per-request `origin` and `source_root` to the top level
+  -- (see `modules_payload`); bare-string module entries inherit them. Per-entry
+  -- objects may still override, so legacy object payloads parse unchanged.
+  let defaultOrigin := (json.getObjValAs? String "modules_origin").toOption.getD "workspace"
+  let defaultSourceRoot? := (json.getObjValAs? String "modules_source_root").toOption
   match json.getObjVal? "modules" with
   | .ok (.arr entries) =>
       for entry in entries do
-        match entry.getObjValAs? String "module" with
-        | .ok moduleName =>
-            let origin := (entry.getObjValAs? String "origin").toOption.getD "workspace"
-            let sourceRoot? := (entry.getObjValAs? String "source_root").toOption
-            out := out.push { module := moduleName, origin := origin, sourceRoot? := sourceRoot? }
-        | .error _ => pure ()
+        match entry with
+        | .str moduleName =>
+            out := out.push { module := moduleName, origin := defaultOrigin, sourceRoot? := defaultSourceRoot? }
+        | _ =>
+            match entry.getObjValAs? String "module" with
+            | .ok moduleName =>
+                let origin := (entry.getObjValAs? String "origin").toOption.getD defaultOrigin
+                let sourceRoot? :=
+                  match (entry.getObjValAs? String "source_root").toOption with
+                  | some root => some root
+                  | none => defaultSourceRoot?
+                out := out.push { module := moduleName, origin := origin, sourceRoot? := sourceRoot? }
+            | .error _ => pure ()
   | _ => pure ()
   return out
 
