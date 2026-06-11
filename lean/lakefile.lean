@@ -10,10 +10,10 @@ package lean_dup_worker where
 -- materializes these same crates' Lean sources before building the capability.
 --
 -- Shared neutral feature extraction (canonical fingerprints, role features) lives
--- in the lean-semantic-search package. The tag's toolchain (rc1) is ABI-identical
--- to this package's (rc2), so Lake compiles it cleanly under the root toolchain.
+-- in the lean-semantic-search package. The tag's toolchain (rc2) matches this
+-- package's, so Lake compiles it cleanly under the root toolchain.
 require «lean-semantic-search» from git
-  "https://github.com/jcreinhold/lean-semantic-search.git" @ "v0.3.0" / "lean"
+  "https://github.com/jcreinhold/lean-semantic-search.git" @ "v0.3.1" / "lean"
 
 -- Generic Lean/Rust worker-streaming helpers (callback-envelope mechanics) used by
 -- the lean-rs-worker-child capability path: LeanDup is built as a shared capability

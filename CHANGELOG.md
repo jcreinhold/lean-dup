@@ -6,6 +6,8 @@ All notable changes to lean-dup are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-11
+
 ### Changed
 
 - Upgraded the `lean-rs` worker crates (`lean-rs-worker-parent` / `-child`, `-protocol`, `lean-rs-interop-shims`,
@@ -24,10 +26,21 @@ All notable changes to lean-dup are documented here. The format is based on
   roots now share the same lock, provenance, generated-toolchain, and manifest-validation mechanics as the other
   packaged Lean capabilities.
 - `lean/lakefile.lean` now requires its Lean dependencies (`lean-semantic-search`, `lean_rs_interop_shims`) from the
-  *published* upstream sources pinned to release tags (`v0.3.0`, `v0.2.2`) via Lake git requires, instead of a sibling
+  *published* upstream sources pinned to release tags (`v0.3.1`, `v0.2.2`) via Lake git requires, instead of a sibling
   `../../lean-rs` checkout and a pre-materialized `LEAN_DUP_SEMANTIC_SEARCH_ROOT`. A clean `lake build LeanDup` now
   resolves from any checkout, so CI builds `lean/` without vendoring sibling repos. This mirrors the worker `build.rs`
   path, which already materializes the same crates' Lean sources.
+- Bumped the `lean-semantic-search-*` runtime crates (and the matching `lean/lakefile.lean` Lake git require) to 0.3.1,
+  which deduplicates role features in O(n) via a hash set instead of the previous per-insert linear scan. The emitted
+  feature rows are byte-identical, so `features.roles.v3` and the index cache key are unchanged — a pure upstream
+  performance fix.
+- `index-mathlib` no longer overruns the worker frame limit on large workspaces. The parent→child index request now
+  hoists the uniform `origin`/`source_root` out of the per-module list and streams bare module names (≈1.29 MiB → 0.45
+  MiB for an 8k-module mathlib) instead of repeating identical metadata on every entry; parsers still accept the
+  per-object form. Extraction also parallelizes across a bounded thread pool by default (one disjoint module chunk per
+  task over the shared read-only environment), cutting a full mathlib index ~2.7× (474 s → 176 s at 4 threads) for ~12%
+  more resident memory. Tunable via `LEAN_DUP_MAX_FRAME_BYTES` and the mathlib index thread cap. See
+  `docs/architecture/worker-frame-sizing.md`.
 - MSRV floor raised to Rust 1.91, matching the adopted lean-rs 0.2.0 crates.
 
 ### Added

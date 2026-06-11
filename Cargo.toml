@@ -23,7 +23,7 @@ edition = "2024"
 # whose workspace pins rust-version = "1.91".
 license = "MIT OR Apache-2.0"
 rust-version = "1.91"
-version = "0.1.0"
+version = "0.2.0"
 
 [workspace.dependencies]
 arrow-array = "58"
@@ -38,16 +38,16 @@ futures = "0.3"
 hf-hub = { version = "0.5", default-features = false, features = ["rustls-tls", "ureq"] }
 indicatif = "0.18"
 lancedb = "0.30"
-lean-dup-diagnostics = { path = "crates/diagnostics", version = "0.1.0" }
-lean-dup-embedding = { path = "crates/embedding", version = "0.1.0" }
-lean-dup-eval = { path = "crates/eval", version = "0.1.0" }
-lean-dup-index = { path = "crates/index", version = "0.1.0" }
-lean-dup-project = { path = "crates/project", version = "0.1.0" }
-lean-dup-report = { path = "crates/report", version = "0.1.0" }
-lean-dup-search = { path = "crates/search", version = "0.1.0" }
-lean-dup-test-support = { path = "crates/test-support", version = "0.1.0" }
-lean-dup-vector-index = { path = "crates/vector-index", version = "0.1.0" }
-lean-dup-worker = { path = "crates/worker", version = "0.1.0" }
+lean-dup-diagnostics = { path = "crates/diagnostics", version = "0.2.0" }
+lean-dup-embedding = { path = "crates/embedding", version = "0.2.0" }
+lean-dup-eval = { path = "crates/eval", version = "0.2.0" }
+lean-dup-index = { path = "crates/index", version = "0.2.0" }
+lean-dup-project = { path = "crates/project", version = "0.2.0" }
+lean-dup-report = { path = "crates/report", version = "0.2.0" }
+lean-dup-search = { path = "crates/search", version = "0.2.0" }
+lean-dup-test-support = { path = "crates/test-support", version = "0.2.0" }
+lean-dup-vector-index = { path = "crates/vector-index", version = "0.2.0" }
+lean-dup-worker = { path = "crates/worker", version = "0.2.0" }
 # lean-rs worker stack (published crates.io releases). The parent crate carries
 # no libleanshared linkage; only the worker-child binary links the Lean runtime.
 lean-rs-interop-shims = { version = "0.2" }
