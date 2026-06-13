@@ -7,7 +7,7 @@ assets.
 
 ## Requirements
 
-Lean toolchain `leanprover/lean4:v4.30.0` (other 4.x versions are untested); Rust 1.85+ (`edition = "2024"`); a Lake
+Lean toolchain `leanprover/lean4:v4.31.0-rc2` (other 4.x versions are untested); Rust 1.91+ (`edition = "2024"`); a Lake
 workspace whose `lake build` already succeeds, with `.olean` files present for the modules to be audited.
 
 ## Build
