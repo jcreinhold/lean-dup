@@ -43,8 +43,8 @@ jobs:
       # Several lean-dup tests shell out to `lake` (the Lean build tool):
       # crates/eval/src/eval/suites.rs builds fixtures, the cli integration
       # suite runs the full audit pipeline against pre-built Lean fixtures.
-      # Install elan + the toolchain pinned by lean/lean-toolchain (all four
-      # lean-toolchain files in the repo agree on the same version), then
+      # Install elan + the toolchain pinned by lean/lean-toolchain (every
+      # lean-toolchain file in the repo agrees on the same version), then
       # pre-build each fixture so the Rust tests find the .olean artifacts.
       - name: Read pinned Lean toolchain
         id: lean
