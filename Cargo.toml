@@ -49,7 +49,7 @@ lean-dup-index = { path = "crates/index", version = "0.2.2" }
 lean-dup-project = { path = "crates/project", version = "0.2.2" }
 lean-dup-report = { path = "crates/report", version = "0.2.2" }
 lean-dup-search = { path = "crates/search", version = "0.2.2" }
-lean-dup-test-support = { path = "crates/test-support", version = "0.2.2" }
+lean-dup-test-support = { path = "crates/test-support" }
 lean-dup-vector-index = { path = "crates/vector-index", version = "0.2.2" }
 lean-dup-worker = { path = "crates/worker", version = "0.2.2" }
 # lean-rs worker stack (published crates.io releases). The parent crate carries
