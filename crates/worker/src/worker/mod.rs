@@ -431,6 +431,13 @@ pub enum WorkerError {
 
     #[error("could not build Lean worker; status {status}: {diagnostic}")]
     BuildFailed { status: i32, diagnostic: String },
+
+    /// No usable per-toolchain worker is installed for the audited workspace's
+    /// pinned toolchain. The message is already actionable — it names the
+    /// `lean-dup install-worker --toolchain <id>` command that produces one — so
+    /// callers surface it verbatim rather than wrapping it.
+    #[error("{message}")]
+    NotProvisioned { message: String },
 }
 
 fn format_worker_diagnostics(diagnostics: &[WorkerDiagnostic]) -> String {
@@ -507,7 +514,7 @@ mod tests {
 
     #[test]
     fn public_client_version_returns_typed_version() {
-        lean_dup_test_support::ensure_worker_child_built();
+        lean_dup_test_support::ensure_worker_provisioned();
         let client = WorkerClient::new();
         let call = client.version(tiny_root()).unwrap();
         let version = call.rows.first().unwrap();
@@ -519,7 +526,7 @@ mod tests {
 
     #[test]
     fn worker_identity_reports_substrate_facts() {
-        lean_dup_test_support::ensure_worker_child_built();
+        lean_dup_test_support::ensure_worker_provisioned();
         let call = WorkerClient::new().worker_identity(tiny_root()).unwrap();
         let identity = call.rows.first().unwrap();
         assert_eq!(identity.semantic.protocol_version, "lean-dup.worker.v1");
@@ -556,7 +563,7 @@ mod tests {
 
     #[test]
     fn public_client_extract_returns_typed_declarations() {
-        lean_dup_test_support::ensure_worker_child_built();
+        lean_dup_test_support::ensure_worker_provisioned();
         let client = WorkerClient::new();
         let call = client.extract_batch(tiny_extract_batch()).unwrap();
         assert!(call.rows.iter().any(|row| row.qualified_name == "Tiny.same_left"));
@@ -571,7 +578,7 @@ mod tests {
         // `oversizedType` has a ~23 KB pretty-printed type; bounding keeps its row
         // well under the 1 MiB frame cap. `smallType` shares the module and must be
         // left intact, proving the bound is size-triggered, not blanket truncation.
-        lean_dup_test_support::ensure_worker_child_built();
+        lean_dup_test_support::ensure_worker_provisioned();
         let client = WorkerClient::new();
         let call = client.extract_batch(large_type_extract_batch()).unwrap();
 
@@ -603,7 +610,7 @@ mod tests {
 
     #[test]
     fn public_client_features_returns_typed_feature_rows() {
-        lean_dup_test_support::ensure_worker_child_built();
+        lean_dup_test_support::ensure_worker_provisioned();
         let client = WorkerClient::new();
         let declarations = client.extract_batch(tiny_extract_batch()).unwrap();
         let ids = declarations
@@ -628,7 +635,7 @@ mod tests {
 
     #[test]
     fn public_client_probe_returns_typed_probe_results() {
-        lean_dup_test_support::ensure_worker_child_built();
+        lean_dup_test_support::ensure_worker_provisioned();
         let client = WorkerClient::new();
         let left = "workspace:Tiny.Basic:Tiny.same_left".to_owned();
         let right = "workspace:Tiny.Basic:Tiny.same_right".to_owned();

@@ -2,6 +2,7 @@ mod cli;
 mod commands;
 mod error;
 mod extensions;
+mod install_worker;
 mod perf;
 mod release;
 mod render;
@@ -59,6 +60,10 @@ where
                 1
             }
         };
+    }
+
+    if let Some(cli::Command::InstallWorker(args)) = cli.command.as_ref() {
+        return install_worker::run(args);
     }
 
     if let Some(cli::Command::External(external)) = cli.command.as_ref() {

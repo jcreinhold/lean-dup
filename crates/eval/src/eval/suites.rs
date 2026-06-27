@@ -1377,7 +1377,7 @@ fn manual_next_command(request: &EvalRequest, module_selector: &str) -> String {
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "<manual-workspace>".to_owned());
     let mut command = format!(
-        "cargo run -p lean-dup-cli -- eval --suite {} --workspace {} --manual-module {} --format json --output target/eval/{}.json",
+        "cargo run -p lean-dup -- eval --suite {} --workspace {} --manual-module {} --format json --output target/eval/{}.json",
         request.suite.as_str(),
         workspace,
         module_selector,
@@ -1915,7 +1915,7 @@ mod tests {
         assert!(
             prerequisites
                 .next_command
-                .contains("cargo run -p lean-dup-cli -- eval --suite manual-mathlib")
+                .contains("cargo run -p lean-dup -- eval --suite manual-mathlib")
         );
         assert!(
             prerequisites

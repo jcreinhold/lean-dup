@@ -1,4 +1,8 @@
 [package]
+categories = ["development-tools"]
+description = "Lake workspace discovery and mathlib contract resolution for lean-dup."
+keywords = ["lean", "lean4", "duplication", "audit"]
+repository = "https://github.com/jcreinhold/lean-dup"
 edition = { workspace = true }
 license = { workspace = true }
 name = "lean-dup-project"

@@ -87,23 +87,27 @@ jobs:
           done
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      # The worker child is a separate crate's binary; `cargo test` does not
-      # force-build it for the cli integration tests, so build it once here and
-      # point the parent at it via LEAN_DUP_WORKER_CHILD (exported to GITHUB_ENV
-      # so every later step — tests, doctor, evals — resolves the same binary).
-      - name: Provision worker-child
+      # `cargo install lean-dup` ships the parent Lean-free; the toolchain-specific
+      # worker (worker-child + LeanDup capability) is built on the user's machine
+      # by `install-worker`. Provision it here into a repo-local workers dir and
+      # export LEAN_DUP_WORKERS_DIR so every later step — tests, doctor, evals —
+      # resolves the same install. This also exercises the real install path,
+      # including its post-build smoke test, in CI.
+      - name: Provision worker
         run: |
           set -euo pipefail
-          cargo build -p lean-dup-worker-child --locked
-          echo "LEAN_DUP_WORKER_CHILD=$PWD/target/debug/lean-dup-worker-child" >> "$GITHUB_ENV"
+          echo "LEAN_DUP_WORKERS_DIR=$PWD/target/lean-dup-workers" >> "$GITHUB_ENV"
+          LEAN_DUP_WORKERS_DIR="$PWD/target/lean-dup-workers" \
+            cargo run -p lean-dup --locked -- install-worker \
+              --source-dir . --toolchain "${{ steps.lean.outputs.toolchain }}"
       - run: cargo test --workspace --locked
       - name: Boundary tests
-        run: cargo test -p lean-dup-cli --test boundaries --locked
+        run: cargo test -p lean-dup --test boundaries --locked
       - name: Release diagnostics
         run: |
           set -euo pipefail
-          cargo run -p lean-dup-cli --locked -- --version
-          cargo run -p lean-dup-cli --locked -- doctor \
+          cargo run -p lean-dup --locked -- --version
+          cargo run -p lean-dup --locked -- doctor \
             --workspace tests/fixtures/tiny --module Tiny --format json \
             > target/doctor-ci.json
           jq -e '.report_schema_version == "lean-dup.report.v3"' target/doctor-ci.json
@@ -112,10 +116,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p target/eval
-          cargo run -p lean-dup-cli --locked -- eval \
+          cargo run -p lean-dup --locked -- eval \
             --suite default --format json --output target/eval/default.json \
             > target/eval/default.stdout
-          cargo run -p lean-dup-cli --locked -- eval \
+          cargo run -p lean-dup --locked -- eval \
             --suite hard-negatives --format json --output target/eval/hard-negatives.json \
             > target/eval/hard-negatives.stdout
           jq -e '.status == "ok"' target/eval/default.json
@@ -124,7 +128,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p target/report-contract
-          cargo run -p lean-dup-cli --locked -- audit \
+          cargo run -p lean-dup --locked -- audit \
             --workspace tests/fixtures/tiny --module Tiny \
             --no-semantic-probes --format json \
             > target/report-contract/ordinary-audit.json

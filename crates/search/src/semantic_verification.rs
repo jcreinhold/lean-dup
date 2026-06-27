@@ -1064,7 +1064,7 @@ fn recoverable_probe_error(error: &WorkerError) -> bool {
         }
         WorkerError::Timeout { .. } | WorkerError::NonZeroExit { .. } => true,
         WorkerError::Protocol { .. } | WorkerError::Cancelled | WorkerError::InvalidJsonLine { .. } => false,
-        WorkerError::Io { .. } | WorkerError::BuildFailed { .. } => false,
+        WorkerError::Io { .. } | WorkerError::BuildFailed { .. } | WorkerError::NotProvisioned { .. } => false,
     }
 }
 

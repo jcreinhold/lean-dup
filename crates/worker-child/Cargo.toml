@@ -1,4 +1,8 @@
 [package]
+categories = ["development-tools"]
+description = "Lean-linking worker-child host for lean-dup; loads the LeanDup capability through the lean-rs worker pool."
+keywords = ["lean", "lean4", "duplication", "audit"]
+repository = "https://github.com/jcreinhold/lean-dup"
 build = "build.rs"
 edition = { workspace = true }
 license = { workspace = true }

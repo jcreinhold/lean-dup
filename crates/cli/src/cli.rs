@@ -72,6 +72,9 @@ pub enum Command {
     Diff(DiffArgs),
     /// List, inspect, or delete saved baselines (see `audit --save-baseline`).
     Baseline(BaselineArgs),
+    /// Build the per-toolchain Lean worker on this machine (run once per toolchain you audit).
+    #[command(name = "install-worker")]
+    InstallWorker(InstallWorkerArgs),
     #[command(hide = true)]
     Perf(PerfArgs),
     #[command(external_subcommand)]
@@ -88,6 +91,7 @@ pub(crate) const VISIBLE_BUILT_IN_COMMANDS: &[&str] = &[
     "show",
     "diff",
     "baseline",
+    "install-worker",
 ];
 
 pub(crate) const ALL_BUILT_IN_COMMANDS: &[&str] = &[
@@ -100,6 +104,7 @@ pub(crate) const ALL_BUILT_IN_COMMANDS: &[&str] = &[
     "show",
     "diff",
     "baseline",
+    "install-worker",
     "perf",
 ];
 
@@ -385,6 +390,30 @@ pub struct EvalArgs {
 
     #[arg(long, hide = true)]
     pub write_scorer_ablations: bool,
+}
+
+#[derive(Debug, Clone, clap::Args)]
+#[command(after_help = "\
+Examples:
+  lean-dup install-worker               Build the worker for the current project's toolchain
+  lean-dup install-worker --toolchain v4.32.0-rc1
+                                        Build the worker for a specific toolchain
+  lean-dup install-worker --force       Rebuild even if a current worker is installed
+")]
+pub struct InstallWorkerArgs {
+    /// Toolchain to build for (e.g. `v4.32.0-rc1` or `leanprover/lean4:v4.32.0-rc1`).
+    /// Defaults to the current directory's `lean-toolchain`, or lean-dup's dev pin.
+    #[arg(long)]
+    pub toolchain: Option<String>,
+
+    /// Rebuild even if a current, smoke-passing worker is already installed.
+    #[arg(long)]
+    pub force: bool,
+
+    /// Build the worker-child from this checkout instead of the published crate.
+    /// Defaults to lean-dup's own checkout when run from one, else crates.io.
+    #[arg(long = "source-dir")]
+    pub source_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, clap::Args)]

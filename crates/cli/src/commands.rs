@@ -98,6 +98,11 @@ pub fn run(cli: Cli) -> Result<Outcome> {
             render_options.verbose = common.verbose;
             (Report::Baseline(baseline(args, &mut reporter)?), format, None)
         }
+        Command::InstallWorker(_) => {
+            return Err(AppError::Cli {
+                message: "install-worker dispatch must happen before built-in command execution".to_owned(),
+            });
+        }
         Command::External(_) => {
             return Err(AppError::Cli {
                 message: "external command dispatch must happen before built-in command execution".to_owned(),
@@ -114,16 +119,24 @@ pub fn run(cli: Cli) -> Result<Outcome> {
     })
 }
 
-/// When the worker fails because its child binary cannot be located, replace the
-/// raw bootstrap error with an actionable hint; other worker failures pass
-/// through unchanged. The substring is the stable marker lean-rs emits for an
-/// unresolved worker child.
+/// Surface a worker bootstrap failure as an actionable CLI error.
+///
+/// [`WorkerError::NotProvisioned`] already carries the exact `lean-dup
+/// install-worker --toolchain <id>` command, so it passes through verbatim. The
+/// legacy "could not resolve worker child" marker (lean-rs failing to locate the
+/// child) is mapped to the same install command. Other worker failures pass
+/// through unchanged.
 fn worker_error_with_install_hint(error: lean_dup_worker::WorkerError) -> AppError {
+    if matches!(error, lean_dup_worker::WorkerError::NotProvisioned { .. }) {
+        return AppError::Cli {
+            message: error.to_string(),
+        };
+    }
     if error.to_string().contains("could not resolve worker child") {
         return AppError::Cli {
             message: format!(
-                "{error}\nhint: the `lean-dup-worker-child` binary must sit beside `lean-dup`; \
-                 install it with `cargo install --path crates/worker-child`"
+                "{error}\nhint: no per-toolchain worker is installed; \
+                 run `lean-dup install-worker` to build one for your project's toolchain"
             ),
         };
     }

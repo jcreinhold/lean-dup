@@ -15,7 +15,7 @@ fn worker_cli_lock() -> MutexGuard<'static, ()> {
     // The worker child is a separate crate's binary that `cargo test` does not
     // force-build for this crate's integration tests; provision it before any
     // test spawns `lean-dup`, or sibling resolution fails with `child_unresolved`.
-    lean_dup_test_support::ensure_worker_child_built();
+    lean_dup_test_support::ensure_worker_provisioned();
     // Recover from a poisoned lock instead of cascading: if one worker test
     // panics while holding the guard, the rest still report their own outcome
     // rather than a uniform `PoisonError`.

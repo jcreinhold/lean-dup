@@ -64,7 +64,8 @@ The Cargo minor and the Lake tag describe the same upstream release — keep the
 CI's comment is the contract: every `lean-toolchain` file in the repo holds the same version. There are six:
 
 - `lean-toolchain` (root)
-- `lean/lean-toolchain` (authoritative — CI and the worker `build.rs` read this one)
+- `lean/lean-toolchain` (authoritative — CI and `install-worker` read this one; it is the toolchain a no-`--toolchain`
+  worker build targets)
 - `tests/fixtures/tiny/lean-toolchain`
 - `tests/fixtures/external/lean-toolchain`
 - `tests/fixtures/source-backed/lean-toolchain`
@@ -72,6 +73,27 @@ CI's comment is the contract: every `lean-toolchain` file in the repo holds the 
 
 A stale fixture pin splits the build and produces confusing `lake`/loader errors, so set them all in one pass. (Confirm
 the set with `find . -name lean-toolchain -not -path '*/.lake/*' -not -path '*/target/*'` in case fixtures were added.)
+
+There is also **one Rust constant** that must equal the `lean/lean-toolchain` pin: `PINNED_TOOLCHAIN` in
+`crates/worker/src/toolchain.rs` (the default toolchain when no project `lean-toolchain` is found, and the install-dir
+label fallback). Update its value, and update the same literal in the `ToolchainId::pinned()` fallback a few lines
+below it. The test `ToolchainId::pinned().elan_label() == PINNED_TOOLCHAIN` in that file keeps them honest. (lean-dup no
+longer has a hardcoded `lean.h` digest to bump — `install-worker` hashes the header at build time and records it in the
+worker's `worker.json` sidecar.)
+
+### 3a. Resync the vendored capability Lean source
+
+`install-worker` builds the `LeanDup` capability from a **byte-identical vendored copy** of the dev project that ships
+inside the published crate: `crates/capability-source/lean/`. The editable source under `lean/LeanDup*` is the source of
+truth; mirror it after any Lean change a toolchain bump pulls in:
+
+```sh
+rsync -a --delete lean/LeanDup/ crates/capability-source/lean/LeanDup/
+cp lean/LeanDup.lean crates/capability-source/lean/LeanDup.lean
+```
+
+The drift test `vendored_lean_source_matches_dev_project` (in `crates/capability-source/src/lib.rs`) fails the build if
+the copy diverges, so a forgotten resync is caught by `cargo test`, not at a user's `install-worker`.
 
 ### 4. Update the Rust floor only if upstream raised it
 
@@ -89,10 +111,17 @@ artifacts present first.
 ( cd lean && lake build LeanDup )
 # Build each fixture so the Rust tests find its .olean files
 for f in tiny external source-backed large-type; do ( cd tests/fixtures/$f && lake build ); done
+# Provision the worker for the new pin (builds worker-child + capability dylib +
+# runs the smoke test) into a repo-local dir, mirroring ci.yml. The test suite
+# also provisions on first run, but doing it explicitly surfaces build errors early.
+LEAN_DUP_WORKERS_DIR="$PWD/target/lean-dup-workers" \
+  cargo run -p lean-dup --locked -- install-worker --source-dir . --toolchain "$(tr -d '[:space:]' < lean/lean-toolchain)"
 # Full workspace suite (CLAUDE.md "Test" section)
-cargo build -p lean-dup-worker-child --locked
-cargo test --workspace --locked
+LEAN_DUP_WORKERS_DIR="$PWD/target/lean-dup-workers" cargo test --workspace --locked
 ```
+
+There is no longer a `crates/worker/build.rs` — the capability is built by `install-worker` at provision time, not at
+`cargo build` time, so a plain `cargo build` (and `cargo install lean-dup`) is Lean-free.
 
 Also run the lint gate, since CI treats warnings as errors:
 

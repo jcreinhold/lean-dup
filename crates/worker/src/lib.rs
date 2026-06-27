@@ -6,6 +6,7 @@
 //! mechanics. Public row, progress, and diagnostic DTOs are stable worker
 //! capability facts after transport details have already been hidden.
 
+pub mod toolchain;
 mod worker;
 
 pub use worker::{

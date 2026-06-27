@@ -1,9 +1,9 @@
 # Crate Factoring
 
-Eleven Rust crates, each owning one kind of hidden knowledge. The split is functional: a crate exists to localize a
-class of change (Lean protocol mechanics, Lake project resolution, persisted storage, search and review policy,
-embedding model acquisition/runtime policy, vector-corpus persistence, detachable vector experiments, report projection,
-quality measurement, terminal I/O), not to mirror one old source file.
+Twelve Rust crates, each owning one kind of hidden knowledge. The split is functional: a crate exists to localize a
+class of change (Lean protocol mechanics, on-machine capability build, Lake project resolution, persisted storage,
+search and review policy, embedding model acquisition/runtime policy, vector-corpus persistence, detachable vector
+experiments, report projection, quality measurement, terminal I/O), not to mirror one old source file.
 
 For the pipeline the crates implement, see [end-to-end-architecture.md](end-to-end-architecture.md).
 
@@ -11,7 +11,8 @@ For the pipeline the crates implement, see [end-to-end-architecture.md](end-to-e
 
 | Crate | Owns | May not depend on |
 | --- | --- | --- |
-| `lean-dup-worker` | Lean worker protocol, pool capability transport (`lean-rs-worker-parent` + `lean-dup-worker-child`), worker version/substrate/build policy, timeouts. | any other `lean-dup` crate |
+| `lean-dup-worker` | Lean worker protocol, pool capability transport (`lean-rs-worker-parent` + `lean-dup-worker-child`), per-workspace toolchain resolution + install-dir/sidecar policy, worker version/substrate policy, timeouts. | any other `lean-dup` crate |
+| `lean-dup-capability-source` | Vendored `LeanDup` Lean source + the runtime `build_capability_into` that builds the capability dylib/manifest on the user's machine (formerly `crates/worker/build.rs`). | any other `lean-dup` crate |
 | `lean-dup-diagnostics` | Progress/profile events, runtime perf collection, generic file/JSON helpers. | any other `lean-dup` crate |
 | `lean-dup-project` | Lake workspace discovery, module roots, mathlib source/execution roots, toolchain facts. | index, search, eval, cli |
 | `lean-dup-index` | SQLite indexes, cache keys, provenance metadata, latest pointers, cache diagnostics, cleanup. | search, eval, cli |
@@ -21,18 +22,23 @@ For the pipeline the crates implement, see [end-to-end-architecture.md](end-to-e
 | `lean-dup-vector-search` | Hidden semantic/vector experiment workflow, vector validation artifacts, vector scorer variants, progress/cost accounting. | lower crates may not depend on it |
 | `lean-dup-report` | Stable JSON DTOs, explanations, text rendering, report-owned cache/show/diff/eval projections, wording. | cli |
 | `lean-dup-eval` | Labels, suites, stage metrics, quality gates, hidden perf workload artifacts. | cli |
-| `lean-dup-cli` | clap parsing, command dispatch, stdout/stderr routing, output file writes, binary compatibility. | top layer; depends on the others |
+| `lean-dup` (crate dir `crates/cli`) | clap parsing, command dispatch, `install-worker`, stdout/stderr routing, output file writes, binary compatibility. | top layer; depends on the others |
 
-Package and directory names omit `-rs`. The binary is `lean-dup` until a user-facing rename is accepted.
+Package and directory names omit `-rs`. The published CLI package is `lean-dup` (crate directory `crates/cli`); it
+installs the `lean-dup` binary and is the only crate depending on `lean-dup-capability-source`.
 
 ## Public API per crate
 
 Each crate root is the supported public facade. Submodules and internals stay private.
 
 - **`lean-dup-worker`**: `WorkerClient`, request/result DTOs (`WorkerVersion`, `WorkerIdentity`, `WorkerSubstrateFacts`,
-  rows/batches), version/substrate/build policy. The pool capability transport, the private engine seam
-  (`WorkerEngine`/`PoolEngine`/`LeanDupCapabilityRuntime`), capability symbol names, lease/session mechanics, the
+  rows/batches), version/substrate policy, and the `toolchain` module (install-dir resolution, `WorkerSidecar`,
+  `resolve_installed_worker`, `ToolchainId`, provisioning errors). The pool capability transport, the private engine
+  seam (`WorkerEngine`/`PoolEngine`/`LeanDupCapabilityRuntime`), capability symbol names, lease/session mechanics, the
   `lean-dup-worker-child` ABI, and timeouts are private.
+- **`lean-dup-capability-source`**: `build_capability_into`, `BuiltCapability`, the five capability export-name
+  constants, and `BuildError`. The vendored Lean source layout, generated lakefile/manifest, and source-digest hashing
+  are private; a drift test keeps the vendored copy byte-identical to `lean/`.
 - **`lean-dup-diagnostics`**: progress/profile events, runtime measurement helpers. No semantic dependencies.
 - **`lean-dup-project`**: `WorkspaceRequest`, `ResolvedWorkspace`, `SourceFile`, `resolve`, `ProjectMathlib`, mathlib
   resolution entry points. Lake path rules and `.olean` discovery sit on `ResolvedWorkspace`.
@@ -59,7 +65,8 @@ Each crate root is the supported public facade. Submodules and internals stay pr
 - **`lean-dup-report`**: report DTOs, projection functions, explanation facts, `render_text`.
 - **`lean-dup-eval`**: `EvalSuite`, `EvalRequest`, `EvalOutput`, stage metrics, quality denominators. Text rendering
   belongs to report; runtime/memory measurement belongs to diagnostics.
-- **`lean-dup-cli`**: clap argument types, command dispatch, stdout/stderr/file I/O, final error aggregation.
+- **`lean-dup`** (crate dir `crates/cli`): clap argument types, command dispatch, `install-worker`, stdout/stderr/file
+  I/O, final error aggregation.
 
 ## Removed flags
 

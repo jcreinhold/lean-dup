@@ -27,14 +27,29 @@ the elaborated environment, not source text.
 
 ## Install
 
-Build from source. There are no pre-built binaries or package-manager releases today.
-
 ```sh
-cargo build --release -p lean-dup-cli
-(cd lean && lake build)
+cargo install lean-dup
 ```
 
-The first command produces `target/release/lean-dup`. The second builds the Lean worker the binary will spawn.
+`cargo install lean-dup` builds the auditor as pure Rust — no Lean toolchain is needed on the build path, because the
+parent binary does not link `libleanshared`. The Lean worker that reads your project's `.olean` files is built on your
+machine, once per toolchain you audit:
+
+```sh
+# Run inside your Lake project (uses its lean-toolchain), or pass --toolchain <id>.
+lean-dup install-worker
+```
+
+`install-worker` needs the matching elan toolchain (`elan toolchain install <id>`) and a Rust toolchain; it builds the
+worker into `<data_local>/lean-dup/workers/<toolchain-id>/` and runs a smoke test. Audits resolve the worker from the
+audited project's `lean-toolchain` pin, so a project on a different toolchain just needs its own `install-worker` run.
+
+To work from a checkout instead:
+
+```sh
+cargo build --release -p lean-dup
+target/release/lean-dup install-worker --source-dir .
+```
 
 ## Quick start: audit the bundled tiny fixture
 
@@ -250,10 +265,13 @@ hundred MB. The shared cache under `~/.cache/lean-dup` makes subsequent runs fas
 
 ## Troubleshooting
 
-- **`target/release/lean-dup: No such file`**: `cargo build --release -p lean-dup-cli` did not finish, or you are
-  running from a directory other than the repo root.
-- **Worker fails to start, or schema mismatch in stderr**: the Lean worker was not built or is stale. Run
-  `(cd lean && lake build)`.
+- **`target/release/lean-dup: No such file`**: `cargo build --release -p lean-dup` did not finish, or you are running
+  from a directory other than the repo root.
+- **"worker not installed" / "run lean-dup install-worker"**: no worker is built for the audited project's toolchain.
+  Run `lean-dup install-worker` (it prints the exact `--toolchain <id>` if the pin differs from the current
+  directory's).
+- **Worker fails to start, or schema mismatch in stderr**: the installed worker is stale (e.g. after a toolchain bump).
+  Rebuild it with `lean-dup install-worker --force`.
 - **"missing olean" or import failures**: the modules you asked for are not compiled. Run `lake build` in the audited
   workspace first.
 - **First mathlib run hangs for many minutes**: expected. The worker is importing mathlib and building the index.

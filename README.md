@@ -10,33 +10,39 @@ assets.
 Lean toolchain `leanprover/lean4:v4.32.0-rc1` (other 4.x versions are untested); Rust 1.91+ (`edition = "2024"`); a Lake
 workspace whose `lake build` already succeeds, with `.olean` files present for the modules to be audited.
 
-## Build
-
-```sh
-cargo build --release -p lean-dup-cli
-cargo build --release -p lean-dup-worker
-```
-
-The Cargo worker build materializes the `LeanSemanticSearch` Lean package from `lean-semantic-search-runtime` and builds
-a private generated `LeanDup` Lake root. A direct `lake -d lean build` is only a Lean-developer check; set
-`LEAN_DUP_SEMANTIC_SEARCH_ROOT` to a materialized semantic-search runtime source root first.
-
 ## Install
 
-From a checkout:
+```sh
+cargo install lean-dup
+```
+
+`cargo install lean-dup` ships the auditor as **pure Rust** — the parent binary does not link `libleanshared`, so no
+Lean toolchain is needed on the build path. The Lean worker that reads your project's `.olean` files is built on your
+machine, once per toolchain you audit:
 
 ```sh
-cargo install --path crates/cli
-cargo install --path crates/worker-child
+# Run inside your Lake project (uses its lean-toolchain), or pass --toolchain <id>.
+lean-dup install-worker
 lean-dup --version
 ```
 
-Install **both** binaries. `lean-dup` is the symbolic auditor; it hosts Lean in a separate `lean-dup-worker-child`
-process (the only binary that links `libleanshared`), which it resolves as a sibling — so the worker child must live in
-the same directory as `lean-dup`. `cargo install` places both in `~/.cargo/bin/`, satisfying that. Run `lean-dup doctor`
-to confirm the worker is reachable; if it reports the worker child is missing, you skipped the second `cargo install`.
+`install-worker` builds the toolchain-specific worker (the `lean-dup-worker-child` binary plus the `LeanDup` capability
+dylib) into `<data_local>/lean-dup/workers/<toolchain-id>/`, runs a smoke test that loads it through the real dlopen
+chain, and records a provenance sidecar. Audits resolve the worker from the audited project's `lean-toolchain` pin; if
+one is not installed, `lean-dup` prints the exact `install-worker --toolchain <id>` command to run. Run `lean-dup
+doctor` to confirm the worker is reachable. Building a worker requires the matching elan toolchain (`elan toolchain
+install <id>`) and a Rust toolchain.
 
 Optional tools such as `lean-dup-vector` are external extensions and are not required for the core audit workflow.
+
+### From a checkout
+
+```sh
+cargo build --release -p lean-dup
+target/release/lean-dup install-worker --source-dir .
+```
+
+`--source-dir .` builds the worker-child from the checkout instead of crates.io.
 
 For a walkthrough with sample output, the full audit/show loop, and what each field means, see
 [docs/getting-started.md](docs/getting-started.md).
@@ -68,7 +74,7 @@ rest of the corpus instead of aborting on one pathological declaration. The skip
 (or set `0` for unlimited) to trade runtime for including those declarations. Because the budget changes which
 declarations are indexed, it participates in the cache key.
 
-For local development, swap `target/release/lean-dup` for `cargo run -p lean-dup-cli --`. Other commands: `doctor`
+For local development, swap `target/release/lean-dup` for `cargo run -p lean-dup --`. Other commands: `doctor`
 (workspace, worker, Lake, cache health), `show --group <id>` (one ranked group), `diff` (saved baselines), `eval`
 (quality suites).
 

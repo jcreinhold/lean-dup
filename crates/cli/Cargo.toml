@@ -1,10 +1,18 @@
 [package]
+categories = ["command-line-utilities", "development-tools"]
 description = "Read-only duplicate auditor for Lean 4 Lake workspaces"
 edition = { workspace = true }
+keywords = ["audit", "duplication", "lake", "lean", "lean4"]
 license = { workspace = true }
-name = "lean-dup-cli"
-readme = "../../README.md"
+name = "lean-dup"
+readme = "README.md"
+repository = { workspace = true }
 version = { workspace = true }
+
+[lib]
+doctest = false
+name = "lean_dup"
+path = "src/lib.rs"
 
 [[bin]]
 name = "lean-dup"
@@ -12,6 +20,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { workspace = true }
+lean-dup-capability-source = { workspace = true }
 lean-dup-diagnostics = { workspace = true }
 lean-dup-eval = { workspace = true }
 lean-dup-index = { workspace = true }
@@ -21,6 +30,7 @@ lean-dup-search = { workspace = true }
 lean-dup-worker = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tempfile = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
@@ -28,8 +38,4 @@ assert_cmd = { workspace = true }
 lean-dup-test-support = { workspace = true }
 predicates = { workspace = true }
 rusqlite = { workspace = true }
-tempfile = { workspace = true }
 toml = { workspace = true }
-
-[lib]
-doctest = false

@@ -1,4 +1,8 @@
 [package]
+categories = ["development-tools"]
+description = "Duplicate-audit retrieval, semantic verification, and ranking for lean-dup."
+keywords = ["lean", "lean4", "duplication", "audit"]
+repository = "https://github.com/jcreinhold/lean-dup"
 edition = { workspace = true }
 license = { workspace = true }
 name = "lean-dup-search"

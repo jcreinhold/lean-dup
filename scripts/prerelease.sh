@@ -79,6 +79,11 @@ require_cmd lake "install via elan + leanprover/lean4"
 export RUSTFLAGS="${RUSTFLAGS:--D warnings}"
 export CARGO_TERM_COLOR="${CARGO_TERM_COLOR:-always}"
 
+# Provision the per-toolchain worker into a repo-local dir, mirroring ci.yml, so
+# the test/doctor/eval gates resolve a deterministic install instead of the
+# developer's real `~/.local/share/lean-dup` data dir.
+export LEAN_DUP_WORKERS_DIR="${LEAN_DUP_WORKERS_DIR:-$REPO_ROOT/target/lean-dup-workers}"
+
 # -- toolchain check --------------------------------------------------------
 
 TOOLCHAIN="$(tr -d '[:space:]' <lean/lean-toolchain)"
@@ -127,6 +132,17 @@ build_lake() {
 }
 run_gate "lake build (lean/ + fixtures)" build_lake
 
+# -- Worker provisioning (prerequisite for the audit/doctor/eval gates) -----
+
+# `cargo install lean-dup` ships the parent Lean-free; the toolchain-specific
+# worker is built on the user's machine by install-worker. Provision it once
+# into LEAN_DUP_WORKERS_DIR so the gates below resolve it.
+provision_worker() {
+	cargo run -p lean-dup --locked -- install-worker \
+		--source-dir . --toolchain "$TOOLCHAIN"
+}
+run_gate "provision worker (install-worker)" provision_worker
+
 # -- Rust gates -------------------------------------------------------------
 
 run_gate "cargo fmt --all -- --check" \
@@ -135,18 +151,36 @@ run_gate "cargo fmt --all -- --check" \
 run_gate "cargo clippy --workspace --all-targets --locked -- -D warnings" \
 	cargo clippy --workspace --all-targets --locked -- -D warnings
 
+# Release link invariant: `cargo install lean-dup` must be pure Rust, so the
+# parent CLI must never link libleanshared (only the worker-child does).
+gate_link_invariant() {
+	cargo build --release -p lean-dup --locked
+	local bin="target/release/lean-dup" linked=""
+	if command -v otool >/dev/null 2>&1; then
+		linked="$(otool -L "$bin" | grep -i libleanshared || true)"
+	elif command -v ldd >/dev/null 2>&1; then
+		linked="$(ldd "$bin" | grep -i libleanshared || true)"
+	fi
+	if [[ -n "$linked" ]]; then
+		log_err "parent CLI links libleanshared:"
+		printf '%s\n' "$linked" >&2
+		return 1
+	fi
+}
+run_gate "parent CLI ⊥ libleanshared" gate_link_invariant
+
 run_gate "cargo test --workspace --locked" \
 	cargo test --workspace --locked
 
-run_gate "boundaries (cargo test -p lean-dup-cli --test boundaries --locked)" \
-	cargo test -p lean-dup-cli --test boundaries --locked
+run_gate "boundaries (cargo test -p lean-dup --test boundaries --locked)" \
+	cargo test -p lean-dup --test boundaries --locked
 
 # -- Release diagnostics: schema + protocol contracts -----------------------
 
 gate_diagnostics() {
 	mkdir -p target
-	cargo run -p lean-dup-cli --locked -- --version
-	cargo run -p lean-dup-cli --locked -- doctor \
+	cargo run -p lean-dup --locked -- --version
+	cargo run -p lean-dup --locked -- doctor \
 		--workspace tests/fixtures/tiny --module Tiny --format json \
 		>target/doctor-ci.json
 	jq -e '.report_schema_version == "lean-dup.report.v3"' target/doctor-ci.json >/dev/null
@@ -158,10 +192,10 @@ run_gate "release diagnostics (report.v3 / worker.v1)" gate_diagnostics
 
 gate_evals() {
 	mkdir -p target/eval
-	cargo run -p lean-dup-cli --locked -- eval \
+	cargo run -p lean-dup --locked -- eval \
 		--suite default --format json --output target/eval/default.json \
 		>target/eval/default.stdout
-	cargo run -p lean-dup-cli --locked -- eval \
+	cargo run -p lean-dup --locked -- eval \
 		--suite hard-negatives --format json --output target/eval/hard-negatives.json \
 		>target/eval/hard-negatives.stdout
 	jq -e '.status == "ok"' target/eval/default.json >/dev/null
@@ -170,7 +204,7 @@ gate_evals() {
 
 gate_report_contract() {
 	mkdir -p target/report-contract
-	cargo run -p lean-dup-cli --locked -- audit \
+	cargo run -p lean-dup --locked -- audit \
 		--workspace tests/fixtures/tiny --module Tiny \
 		--no-semantic-probes --format json \
 		>target/report-contract/ordinary-audit.json

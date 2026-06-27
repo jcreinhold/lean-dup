@@ -5,5 +5,9 @@ name = "lean-dup-test-support"
 publish = false
 version = { workspace = true }
 
+[dependencies]
+lean-dup-capability-source = { workspace = true }
+lean-dup-worker = { workspace = true }
+
 [lib]
 doctest = false

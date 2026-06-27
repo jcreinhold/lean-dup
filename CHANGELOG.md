@@ -6,6 +6,34 @@ All notable changes to lean-dup are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-26
+
+### Added
+
+- **`cargo install lean-dup`.** The CLI package is renamed `lean-dup-cli` → `lean-dup` and is published to crates.io
+  along with its library crates. The parent installs as pure Rust — it does not link `libleanshared` — so a user can
+  `cargo install lean-dup` with no Lean toolchain on the build path.
+- **`lean-dup install-worker`.** A new command builds the toolchain-specific worker (the `lean-dup-worker-child` binary
+  plus the `LeanDup` capability dylib and its dependency dylibs) on the user's machine, into
+  `<data_local>/lean-dup/workers/<toolchain-id>/`. It defaults to the current project's `lean-toolchain` (override with
+  `--toolchain`), runs a post-build smoke test that loads the capability through the real dlopen chain, and records a
+  `worker.json` provenance sidecar (header digest, host version, smoke outcome). Flags: `--toolchain`, `--force`,
+  `--source-dir`.
+- **`lean-dup-capability-source` crate.** Packages the `LeanDup` Lean source (`lean/LeanDup*`) so it survives a
+  crates.io unpack, and exposes the runtime capability build lifted out of the old `crates/worker/build.rs`. A drift
+  test keeps the vendored copy byte-identical to the editable `lean/` dev project.
+
+### Changed
+
+- The worker is now resolved per audited workspace: the parent reads the project's `lean-toolchain` and loads the
+  matching installed worker, or fails with the exact `lean-dup install-worker --toolchain <id>` command to run. Audits
+  on a toolchain with no installed worker print an actionable hint instead of an opaque bootstrap error.
+- `crates/worker/build.rs` is removed. `cargo install lean-dup` no longer builds Lean at crate-compile time; the
+  capability + worker-child are built per-toolchain by `install-worker`. The `LEAN_DUP_WORKER_CHILD` dev override is
+  replaced by `LEAN_DUP_WORKERS_DIR`, which points the parent at an install dir (CI and `scripts/prerelease.sh` use it).
+- Added a tag-triggered `release.yml` that gates on the parent ⊥ `libleanshared` link invariant and publishes every
+  crate to crates.io in dependency order (idempotent: versions already published are skipped).
+
 ## [0.2.1] - 2026-06-26
 
 ### Changed

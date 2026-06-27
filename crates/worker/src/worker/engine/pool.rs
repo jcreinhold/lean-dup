@@ -43,7 +43,7 @@ impl PoolEngine {
     pub(super) fn new() -> Self {
         Self {
             pool: Mutex::new(LeanWorkerPool::new(LeanWorkerPoolConfig::new(1))),
-            runtime: LeanDupCapabilityRuntime::from_build_manifest(),
+            runtime: LeanDupCapabilityRuntime::installed(),
         }
     }
 

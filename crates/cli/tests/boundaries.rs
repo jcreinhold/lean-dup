@@ -61,7 +61,7 @@ fn only_operator_crates_depend_on_clap() {
             .iter()
             .any(|dependency| dependency == "clap");
         assert!(
-            !has_clap || matches!(name.as_str(), "lean-dup-cli" | "lean-dup-vector-search"),
+            !has_clap || matches!(name.as_str(), "lean-dup" | "lean-dup-vector-search"),
             "{name} must not depend on clap"
         );
     }
@@ -71,10 +71,10 @@ fn only_operator_crates_depend_on_clap() {
 fn dependency_direction_keeps_lower_crates_out_of_report_and_cli() {
     for (name, manifest) in crate_manifests() {
         let dependencies = dependency_names(&manifest);
-        if name != "lean-dup-cli" {
+        if name != "lean-dup" {
             assert!(
-                !dependencies.iter().any(|dependency| dependency == "lean-dup-cli"),
-                "{name} must not depend on lean-dup-cli"
+                !dependencies.iter().any(|dependency| dependency == "lean-dup"),
+                "{name} must not depend on lean-dup"
             );
         }
         if matches!(
@@ -129,7 +129,7 @@ fn dependency_direction_keeps_lower_crates_out_of_report_and_cli() {
         }
         if matches!(
             name.as_str(),
-            "lean-dup-search" | "lean-dup-eval" | "lean-dup-report" | "lean-dup-cli"
+            "lean-dup-search" | "lean-dup-eval" | "lean-dup-report" | "lean-dup"
         ) {
             for forbidden in ["lean-dup-embedding", "lean-dup-vector-index", "lean-dup-vector-search"] {
                 assert!(

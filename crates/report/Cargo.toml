@@ -1,4 +1,8 @@
 [package]
+categories = ["development-tools"]
+description = "Stable text/JSON report contract for lean-dup duplicate-audit findings."
+keywords = ["lean", "lean4", "duplication", "audit"]
+repository = "https://github.com/jcreinhold/lean-dup"
 edition = { workspace = true }
 license = { workspace = true }
 name = "lean-dup-report"
