@@ -174,10 +174,35 @@ jobs:
               echo "✓ $crate@$version already on crates.io — skipping"
               return 0
             fi
-            echo "→ publishing $crate@$version"
-            # --no-verify: this Lean-free job cannot build the worker-child (links
-            # libleanshared) or run Lake. The verify gate already built per-member.
-            cargo publish -p "$crate" --no-verify
+            # crates.io rate-limits NEW crates (a small burst, then ~1 per 10
+            # minutes). A first release creates many new crates, so 429s are
+            # expected mid-sequence; wait out the limit and retry rather than
+            # aborting a half-finished publish. --no-verify: this Lean-free job
+            # cannot build the worker-child (links libleanshared) or run Lake; the
+            # verify gate already built per-member.
+            attempt=0
+            while :; do
+              attempt=$((attempt + 1))
+              echo "→ publishing $crate@$version (attempt $attempt)"
+              if cargo publish -p "$crate" --no-verify 2>&1 | tee /tmp/pub.out; then
+                break
+              fi
+              if grep -qiE "already (exists|uploaded)|is already uploaded" /tmp/pub.out; then
+                echo "  $crate@$version already on crates.io (race) — continuing"
+                break
+              fi
+              if grep -qiE "429|too many requests" /tmp/pub.out; then
+                if [ "$attempt" -ge 9 ]; then
+                  echo "::error::$crate still rate-limited after $attempt attempts"
+                  exit 1
+                fi
+                echo "  rate-limited (429); waiting 660s before retry…"
+                sleep 660
+                continue
+              fi
+              echo "::error::failed to publish $crate@$version"
+              exit 1
+            done
             # crates.io needs a moment to index a new crate before a dependent
             # crate referencing it can resolve.
             sleep 15
@@ -196,11 +221,15 @@ jobs:
           publish_one lean-dup-report
           publish_one lean-dup
 
+      # The release marker is the `v<version>` tag. Derive the version from the
+      # workspace (not the trigger ref) so a resumed `workflow_dispatch` run —
+      # used to finish a publish interrupted by crates.io rate limits — still
+      # attaches the GitHub Release to the existing tag.
       - name: Extract CHANGELOG section for this release
-        if: inputs.dry_run != true && github.event_name == 'push'
+        if: inputs.dry_run != true
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${{ steps.ver.outputs.version }}"
           awk -v ver="$version" '
             $0 ~ "^## \\[" ver "\\]" { capture = 1; next }
             capture && /^## \[/ { exit }
@@ -215,9 +244,10 @@ jobs:
           echo "--- End release body ---"
 
       - name: Create GitHub Release
-        if: inputs.dry_run != true && github.event_name == 'push'
+        if: inputs.dry_run != true
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: v${{ steps.ver.outputs.version }}
           body_path: release-body.md
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          make_latest: ${{ contains(github.ref_name, '-') && 'false' || 'true' }}
+          prerelease: ${{ contains(steps.ver.outputs.version, '-') }}
+          make_latest: ${{ contains(steps.ver.outputs.version, '-') && 'false' || 'true' }}
