@@ -50,6 +50,7 @@ impl EmbeddingModelSpec {
 /// embedding crate keeps model ids, runtime mappings, and file details private.
 pub fn model_spec_for_profile(profile_id: &str, revision: Option<String>) -> Result<EmbeddingModelSpec> {
     let profile = resolve_profile_id(profile_id)?;
+    tracing::debug!(profile_id, model = profile.model_id, "resolved embedding model spec");
     Ok(EmbeddingModelSpec {
         id: profile.model_id.to_owned(),
         revision,

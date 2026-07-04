@@ -22,6 +22,7 @@ pub fn render_text(report: &Report) -> String {
 }
 
 pub fn render_text_with(report: &Report, options: RenderOptions) -> String {
+    tracing::trace!("rendering report as text");
     match report {
         Report::Doctor(report) => render_doctor(report, options),
         Report::CacheCleanup(report) => render_cache_cleanup(report, options),

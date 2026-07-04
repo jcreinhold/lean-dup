@@ -4,6 +4,7 @@ use std::time::Duration;
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use tracing::{debug, info, instrument};
 
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_index::ComparisonEvidencePolicy;
@@ -259,6 +260,7 @@ pub fn candidate_sets_for_review(
         .collect()
 }
 
+#[instrument(skip_all, fields(budget = input.settings.budget, chunk_size = input.settings.chunk_size))]
 pub fn verify_candidate_probes(
     input: SemanticVerificationInput<'_>,
     reporter: &mut Reporter,
@@ -304,14 +306,29 @@ pub fn verify_candidate_probes(
             missing.push(planned_probe);
         }
     }
+    debug!(
+        cached_hits = diagnostics.cached_hits,
+        missing = missing.len(),
+        "probe plan resolved against cache"
+    );
     if missing.is_empty() {
         return Ok(ProbeVerification { evidence, diagnostics });
     }
 
+    let total_missing = missing.len() as u64;
+    let mut probed = 0_u64;
     let worker = WorkerClient::with_timeout(PROBE_TIMEOUT);
     for chunk in missing.chunks(input.settings.chunk_size) {
         run_probe_chunk(chunk, &input, &worker, reporter, &mut evidence, &mut diagnostics)?;
+        probed = probed.saturating_add(chunk.len() as u64);
+        reporter.event(
+            "semantic.probe.chunk",
+            Some(probed),
+            Some(total_missing),
+            format!("probed {probed}/{total_missing} declaration pairs"),
+        );
     }
+    info!(probed = total_missing, "semantic verification complete");
     Ok(ProbeVerification { evidence, diagnostics })
 }
 

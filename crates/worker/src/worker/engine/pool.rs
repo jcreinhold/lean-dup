@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use tracing::debug;
 
 use lean_rs_worker_parent::{
     LeanWorkerCancellationToken, LeanWorkerDiagnosticEvent, LeanWorkerDiagnosticSink, LeanWorkerJsonCommand,
@@ -113,6 +114,7 @@ impl PoolEngine {
         if cancelled.load(Ordering::Relaxed) {
             return Err(WorkerError::Cancelled);
         }
+        debug!(command = command_name, "dispatching streaming worker command");
         let token = LeanWorkerCancellationToken::new();
         let bridge = CancellationBridge::spawn(cancelled, token.clone());
         let builder = self.runtime.builder(workspace_root, timeout)?;
@@ -130,9 +132,16 @@ impl PoolEngine {
             return Err(WorkerError::Cancelled);
         }
         let skipped = summary.metadata.as_ref().map_or(0, |metadata| metadata.skipped);
+        if skipped > 0 {
+            debug!(
+                command = command_name,
+                skipped, "worker skipped declarations under budget"
+            );
+        }
         if let Some(metadata) = summary.metadata
             && !metadata.ok
         {
+            tracing::warn!(command = command_name, "worker capability reported failure");
             return Err(WorkerError::WorkerDiagnostic {
                 diagnostics: vec![WorkerDiagnostic {
                     code: format!("{command_name}.failed"),

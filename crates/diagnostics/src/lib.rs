@@ -5,7 +5,9 @@
 //! rendering. It owns diagnostic plumbing, not user-facing report contracts.
 
 mod error;
+mod logging;
 pub mod perf;
 pub mod progress;
 
 pub use error::{Error, Result, read, read_to_string};
+pub use logging::install_tracing;

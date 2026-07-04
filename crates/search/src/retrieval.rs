@@ -231,6 +231,11 @@ pub struct HeapTruncation {
 /// it does not perform ranking, probing, reporting, or replacement-hint policy.
 #[allow(dead_code)]
 pub fn retrieve_candidates(workspace: &[HydratedDeclaration], indexes: &[OpenedIndex]) -> Result<RetrievalOutput> {
+    tracing::debug!(
+        workspace_declarations = workspace.len(),
+        external_indexes = indexes.len(),
+        "retrieving candidates"
+    );
     perf::record_count(
         CostClass::RetrievalRanking,
         "retrieval.workspace_declarations",

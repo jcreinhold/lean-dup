@@ -85,6 +85,7 @@ pub fn build_capability_into(
     toolchain_label: &str,
     lean_sysroot: &Path,
 ) -> Result<BuiltCapability, BuildError> {
+    tracing::info!(toolchain = toolchain_label, "building LeanDup capability");
     let source_root = PathBuf::from(LEAN_DUP_SOURCE_ROOT);
     let deps_root = install_dir.join("deps");
     let semantic_cache_root = deps_root.join("semantic-search-runtime");

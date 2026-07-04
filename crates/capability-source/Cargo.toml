@@ -16,6 +16,7 @@ lean-semantic-search-runtime = { workspace = true }
 lean-toolchain = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+tracing = { workspace = true }
 
 [lib]
 doctest = false

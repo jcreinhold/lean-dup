@@ -5,6 +5,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use rustc_hash::FxHashMap as HashMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tracing::{debug, info, instrument};
 use walkdir::WalkDir;
 
 use lean_dup_diagnostics::perf::{self, CostClass};
@@ -456,6 +457,7 @@ impl IndexStore {
         Self { cache_root }
     }
 
+    #[instrument(skip_all, fields(label = %request.label, kind = ?request.kind))]
     pub fn build_or_reuse(
         &self,
         request: IndexBuildRequest,
@@ -478,6 +480,7 @@ impl IndexStore {
         if index_path.exists() && !request.force && sqlite_cache_is_current(&index_path, &expected.cache_key_json)? {
             let declaration_count = declaration_count(&index_path)?;
             let declarations_skipped_by_budget = skipped_by_budget(&index_path)?;
+            info!(declaration_count, "reused cached index");
             self.write_latest(&request.label, &index_dir)?;
             let mut diagnostics = diagnostics_to_strings(version_call.diagnostics);
             report_skipped_declarations(reporter, &mut diagnostics, declarations_skipped_by_budget);
@@ -499,6 +502,7 @@ impl IndexStore {
         }
 
         let mut diagnostics = diagnostics_to_strings(version_call.diagnostics);
+        debug!(force = request.force, "cache miss; building fresh index");
         if request.kind == IndexBuildKind::ProjectMathlib {
             let build = write_batched_sqlite_index(
                 &index_path,
@@ -1051,6 +1055,7 @@ struct StreamingIndexWriter {
     written: usize,
 }
 
+#[instrument(skip_all, fields(label = %request.label))]
 fn write_batched_sqlite_index(
     index_path: &Path,
     cache_key_json: &str,
@@ -1075,6 +1080,7 @@ fn write_batched_sqlite_index(
 
     let modules = modules_for(request);
     let total_modules = modules.len();
+    debug!(total_modules, "streaming batched mathlib index");
     let index_threads = mathlib_index_threads();
     let store_builder =
         StoreBuilder::create(corpus_path(index_path), corpus_token(cache_key_json)).map_err(store_error)?;

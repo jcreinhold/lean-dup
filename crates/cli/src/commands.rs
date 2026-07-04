@@ -43,6 +43,7 @@ pub fn run(cli: Cli) -> Result<Outcome> {
     let command = cli.command.ok_or_else(|| AppError::Cli {
         message: "missing command; run `lean-dup --help`".to_owned(),
     })?;
+    tracing::debug!(progress, profile = cli.profile, "dispatching command");
     let mut render_options = RenderOptions::default();
     let (report, output_format, output_path) = match command {
         Command::Doctor(args) => {

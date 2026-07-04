@@ -25,6 +25,11 @@ where
     O: Write + Send,
     E: Write + Send,
 {
+    // Install the stderr tracing subscriber before anything else so every path
+    // — `--version`, `install-worker`, external subcommands — is covered. Quiet
+    // by default (warn); `RUST_LOG` opts into detail. Idempotent across calls.
+    lean_dup_diagnostics::install_tracing("warn");
+
     let cli = match cli::Cli::try_parse_from(args) {
         Ok(cli) => cli,
         Err(error) => {

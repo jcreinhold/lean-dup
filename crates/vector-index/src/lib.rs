@@ -203,6 +203,7 @@ pub struct VectorCorpusQueryOutput {
 pub fn prepare_vector_corpus(request: VectorCorpusPrepareRequest) -> Result<PreparedVectorCorpus> {
     validate_provenance(&request.provenance)?;
     validate_declarations(&request.provenance, &request.declarations)?;
+    tracing::debug!(declarations = request.declarations.len(), "preparing vector corpus");
     let build = lancedb_backend::build_vector_corpus(VectorCorpusBuildRequest {
         cache_root: request.cache_root.clone(),
         provenance: request.provenance.clone(),

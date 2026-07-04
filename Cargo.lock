@@ -3951,6 +3951,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "toml",
+ "tracing",
 ]
 
 [[package]]
@@ -3963,6 +3964,7 @@ dependencies = [
  "lean-toolchain",
  "serde_json",
  "sha2 0.11.0",
+ "tracing",
 ]
 
 [[package]]
@@ -3973,6 +3975,8 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -3987,6 +3991,7 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]
@@ -4003,6 +4008,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]
@@ -4022,6 +4028,7 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
  "thiserror",
+ "tracing",
  "walkdir",
 ]
 
@@ -4034,6 +4041,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "toml",
+ "tracing",
  "walkdir",
 ]
 
@@ -4049,6 +4057,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]
@@ -4068,6 +4077,7 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]
@@ -4093,6 +4103,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4114,6 +4125,7 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
  "thiserror",
+ "tracing",
  "walkdir",
 ]
 
@@ -4130,6 +4142,7 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]
@@ -4138,6 +4151,7 @@ version = "0.2.2"
 dependencies = [
  "lean-rs-worker-child",
  "lean-toolchain",
+ "tracing",
 ]
 
 [[package]]

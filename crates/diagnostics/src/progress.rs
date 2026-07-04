@@ -1,8 +1,31 @@
 use std::io::{IsTerminal, Write, stderr};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use serde::Serialize;
+
+/// The process-wide `MultiProgress` that owns every live bar.
+///
+/// Routing all bars through one `MultiProgress` is what lets the tracing log
+/// writer suspend them cleanly (see [`crate::logging`]): a shared handle draws
+/// to stderr at a bounded rate, and `suspend` clears the bars while a log line
+/// prints, then redraws them below it. The draw target is chosen once from the
+/// stderr TTY state — hidden off a terminal, where a per-phase summary line is
+/// printed instead.
+pub(crate) fn global_multi() -> MultiProgress {
+    static MULTI: OnceLock<MultiProgress> = OnceLock::new();
+    MULTI
+        .get_or_init(|| {
+            let target = if stderr().is_terminal() {
+                ProgressDrawTarget::stderr_with_hz(8)
+            } else {
+                ProgressDrawTarget::hidden()
+            };
+            MultiProgress::with_draw_target(target)
+        })
+        .clone()
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ProgressEvent {
@@ -129,7 +152,7 @@ impl Reporter {
                 prev.bar.finish_and_clear();
             }
             self.live = Some(LivePhase {
-                bar: new_phase_bar(key, event, self.tty),
+                bar: new_phase_bar(key, event),
                 key,
             });
             if !self.tty {
@@ -165,18 +188,15 @@ impl Drop for Reporter {
     }
 }
 
-fn new_phase_bar(key: &'static str, event: &ProgressEvent, tty: bool) -> ProgressBar {
+fn new_phase_bar(key: &'static str, event: &ProgressEvent) -> ProgressBar {
     let bar = if let Some(total) = event.total {
         ProgressBar::new(total)
     } else {
         ProgressBar::new_spinner()
     };
-    let target = if tty {
-        ProgressDrawTarget::stderr_with_hz(8)
-    } else {
-        ProgressDrawTarget::hidden()
-    };
-    bar.set_draw_target(target);
+    // Adding to the shared `MultiProgress` gives the bar its stderr draw target
+    // (or a hidden one off a TTY) and makes it suspendable around log lines.
+    let bar = global_multi().add(bar);
     bar.set_prefix(key);
     bar.set_style(if event.total.is_some() {
         bar_style()

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tracing::{debug, info, instrument, warn};
 
 use lean_dup_diagnostics::perf::{self, CostClass};
 use lean_dup_diagnostics::progress::Reporter;
@@ -450,7 +451,16 @@ struct CompareIndexes {
 }
 
 /// Run the complete audit workflow.
+#[instrument(
+    skip_all,
+    fields(
+        workspace = %request.workspace.display(),
+        compare_mathlib = request.compare_mathlib,
+        semantic_probes = request.semantic_probes,
+    )
+)]
 pub fn run_audit(request: AuditRequest, reporter: &mut Reporter) -> Result<AuditOutput> {
+    info!("starting audit");
     Ok(project_audit_output(run_audit_workflow(request, reporter)?))
 }
 
@@ -480,11 +490,22 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
         )
     })?;
     let declarations_skipped_by_budget = local_summary.declarations_skipped_by_budget;
+    if declarations_skipped_by_budget > 0 {
+        warn!(
+            declarations_skipped_by_budget,
+            "declarations skipped by the heartbeat budget; their rows are omitted from the audit"
+        );
+    }
     let local_index = store.resolve(IndexReference::Label(local_label))?;
     let local_handles = local_index.all_handles()?;
     let workspace_rows = local_index.hydrate(&local_handles)?;
+    debug!(workspace_declarations = workspace_rows.len(), "hydrated local index");
     let compare = open_compare_indexes(&request, &store, &foundation.workspace, reporter)?;
     let retrieval_output = reporter.measure("retrieval", |_| retrieve_candidates(&workspace_rows, &compare.indexes))?;
+    info!(
+        candidate_sets = retrieval_output.candidate_sets.len(),
+        "retrieval complete"
+    );
     let review_candidate_sets = perf::measure(CostClass::RetrievalRanking, "ranking.candidate_shaping", || {
         candidate_sets_for_review(
             &retrieval_output.candidate_sets,

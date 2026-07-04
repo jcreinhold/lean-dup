@@ -4,6 +4,7 @@ use std::process::Command;
 use std::time::Instant;
 
 use serde::Serialize;
+use tracing::{info, instrument};
 
 use lean_dup_diagnostics::perf;
 use lean_dup_diagnostics::progress::Reporter;
@@ -253,7 +254,9 @@ struct SuiteIndexRequest<'a> {
     kind: IndexBuildKind,
 }
 
+#[instrument(skip_all, fields(suite = request.suite.as_str()))]
 pub fn run(request: EvalRequest, reporter: &mut Reporter) -> Result<EvalOutput> {
+    info!("starting evaluation suite");
     if request.suite == EvalSuite::ProductionGate {
         return run_production_gate(request, reporter);
     }
@@ -928,14 +931,16 @@ fn scorer_ablation_variants(
     reporter: &mut Reporter,
 ) -> Vec<ScorerAblationVariantReport> {
     let mut variants = Vec::new();
-    for variant in SearchScoringVariant::all() {
+    let all_variants = SearchScoringVariant::all();
+    let total_variants = all_variants.len() as u64;
+    for (index, variant) in all_variants.into_iter().enumerate() {
         let started = Instant::now();
         let observation = rescore_observation(base_observation, variant);
         let retrieval_ms = started.elapsed().as_millis();
         reporter.event(
             "eval",
-            None,
-            None,
+            Some((index as u64).saturating_add(1)),
+            Some(total_variants),
             format!(
                 "scorer ablation {} observed {} pairs",
                 variant.label(),

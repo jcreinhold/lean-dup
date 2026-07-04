@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
+use tracing::info;
 
 use lean_dup_diagnostics::progress::Reporter;
 
@@ -75,6 +76,10 @@ pub fn resolve_for_workspace(
         },
         reporter,
     )?;
+    info!(
+        source_files = source.source_files.len(),
+        "resolved pinned mathlib source"
+    );
     reporter.event(
         "mathlib.resolve",
         Some(source.source_files.len() as u64),

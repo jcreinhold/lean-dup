@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
+use tracing::{debug, instrument};
 use walkdir::WalkDir;
 
 use lean_dup_diagnostics::progress::Reporter;
@@ -81,6 +82,7 @@ impl ResolvedWorkspace {
     }
 }
 
+#[instrument(skip_all, fields(root = %request.requested_root.display()))]
 pub fn resolve(request: WorkspaceRequest, reporter: &mut Reporter) -> Result<ResolvedWorkspace> {
     reporter.event(
         "workspace",
@@ -98,6 +100,11 @@ pub fn resolve(request: WorkspaceRequest, reporter: &mut Reporter) -> Result<Res
         None => discovered_roots.clone(),
     };
     let source_files = enumerate_sources(&root, &selected_roots)?;
+    debug!(
+        selected_roots = selected_roots.len(),
+        source_files = source_files.len(),
+        "resolved workspace"
+    );
     if source_files.is_empty() {
         return Err(Error::NoSourceFiles {
             root,

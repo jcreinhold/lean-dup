@@ -11,6 +11,7 @@ version = { workspace = true }
 
 [dependencies]
 lean-rs-worker-child = { workspace = true }
+tracing = { workspace = true }
 
 [build-dependencies]
 lean-toolchain = { workspace = true }

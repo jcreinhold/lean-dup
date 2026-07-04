@@ -92,7 +92,9 @@ enum CliAcquisitionPolicy {
 }
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    lean_dup_diagnostics::install_tracing("warn");
     let cli = Cli::parse();
+    tracing::debug!("lean-dup-vector starting");
     let mut reporter = Reporter::new_live(cli.progress, cli.profile);
     match cli.command {
         Command::Validate(args) => {
