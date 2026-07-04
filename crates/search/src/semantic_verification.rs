@@ -315,11 +315,34 @@ pub fn verify_candidate_probes(
         return Ok(ProbeVerification { evidence, diagnostics });
     }
 
+    // Import-once contract: derive one stable module set and one pair of
+    // visibility flags from *all* missing pairs and reuse them for every chunk
+    // (and every recursive split). Because each `probe` command then carries an
+    // identical module signature, the Lean capability imports the (Mathlib-scale)
+    // environment once per worker session and reuses it across chunks, instead of
+    // re-importing per chunk — the fix for the probe memory blowup.
+    let stable_modules = probe_modules_for(input.workspace, input.comparison_policy, &missing);
+    let stable_include_private = input.include_private || missing.iter().any(|planned| planned.include_private);
+    let stable_include_generated = input.include_generated || missing.iter().any(|planned| planned.include_generated);
+    let stable = StableProbeInputs {
+        modules: &stable_modules,
+        include_private: stable_include_private,
+        include_generated: stable_include_generated,
+    };
+
     let total_missing = missing.len() as u64;
     let mut probed = 0_u64;
     let worker = WorkerClient::with_timeout(PROBE_TIMEOUT);
     for chunk in missing.chunks(input.settings.chunk_size) {
-        run_probe_chunk(chunk, &input, &worker, reporter, &mut evidence, &mut diagnostics)?;
+        run_probe_chunk(
+            chunk,
+            &stable,
+            &input,
+            &worker,
+            reporter,
+            &mut evidence,
+            &mut diagnostics,
+        )?;
         probed = probed.saturating_add(chunk.len() as u64);
         reporter.event(
             "semantic.probe.chunk",
@@ -692,8 +715,20 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
     }
 }
 
+/// Module set and visibility flags shared by every chunk of one probe run.
+///
+/// Holding these fixed across chunks (and recursive splits) is what lets the Lean
+/// capability reuse a single imported environment instead of re-importing per
+/// chunk; see the import-once note in `verify_candidate_probes`.
+struct StableProbeInputs<'a> {
+    modules: &'a [ModuleDescriptor],
+    include_private: bool,
+    include_generated: bool,
+}
+
 fn run_probe_chunk(
     chunk: &[PlannedProbe],
+    stable: &StableProbeInputs<'_>,
     input: &SemanticVerificationInput<'_>,
     worker: &WorkerClient,
     reporter: &mut Reporter,
@@ -713,12 +748,11 @@ fn run_probe_chunk(
         format!("probing {} candidate pairs", chunk.len()),
     );
     let pairs = chunk.iter().map(|planned| planned.pair.clone()).collect::<Vec<_>>();
-    let modules = probe_modules_for(input.workspace, input.comparison_policy, chunk);
     match worker.probe_batch(ProbeBatch {
         workspace_root: input.workspace.root.clone(),
-        modules,
-        include_private: input.include_private || chunk.iter().any(|planned| planned.include_private),
-        include_generated: input.include_generated || chunk.iter().any(|planned| planned.include_generated),
+        modules: stable.modules.to_vec(),
+        include_private: stable.include_private,
+        include_generated: stable.include_generated,
         pairs,
         max_pairs: Some(chunk.len() as u64),
         max_heartbeats: input.settings.max_heartbeats,
@@ -752,8 +786,24 @@ fn run_probe_chunk(
         Err(error) if recoverable_probe_error(&error) && chunk.len() > 1 => {
             diagnostics.recovered_failures += 1;
             let midpoint = chunk.len() / 2;
-            run_probe_chunk(&chunk[..midpoint], input, worker, reporter, evidence, diagnostics)?;
-            run_probe_chunk(&chunk[midpoint..], input, worker, reporter, evidence, diagnostics)
+            run_probe_chunk(
+                &chunk[..midpoint],
+                stable,
+                input,
+                worker,
+                reporter,
+                evidence,
+                diagnostics,
+            )?;
+            run_probe_chunk(
+                &chunk[midpoint..],
+                stable,
+                input,
+                worker,
+                reporter,
+                evidence,
+                diagnostics,
+            )
         }
         Err(error) if recoverable_probe_error(&error) => {
             diagnostics.recovered_failures += 1;

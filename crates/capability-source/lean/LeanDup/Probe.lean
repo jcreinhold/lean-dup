@@ -495,9 +495,87 @@ private def probeRows
     rows := rows.push row
   pure rows
 
+/-- One cached probe environment: the imported `Environment`, the accepted
+    declarations collected from it, and the signature of the request that built
+    it. -/
+private structure EnvCacheEntry where
+  signature : String
+  env : Environment
+  declarations : Array LeanDup.Extract.AcceptedDeclaration
+
+/-- Single-entry probe-environment cache state. The `Option` field keeps this
+    `Inhabited` without requiring `Environment` to be. -/
+private structure EnvCacheState where
+  entry : Option EnvCacheEntry := none
+  deriving Inhabited
+
+private instance : Nonempty (IO.Ref EnvCacheState) := inferInstanceAs (Nonempty (IO.Ref _))
+
 /--
-Import requested modules once and emit probe-result payloads with worker phase
-statistics for candidate declaration pairs.
+Process-global cache of the most recently imported probe environment.
+
+A probe run splits its candidate pairs into many chunks, each arriving as a
+separate `probe` command. The Rust caller fixes the module set across those
+chunks (see `verify_candidate_probes`), so every command shares one signature.
+Importing the Mathlib-scale environment fresh per chunk retains process-global
+Lean state on each import and drives the worker into OOM; caching one
+environment per signature and reusing it across chunks imports once per session
+instead. Bounded to a single retained environment — a signature change replaces
+the entry rather than accumulating.
+
+The initializer runs when the capability is loaded (the root `LeanDup.Capability`
+module initializes its transitive imports). Fresh `importModules` calls for a
+probe import only the *requested* modules, never `LeanDup.Probe`, so they never
+reset this ref.
+-/
+initialize probeEnvCache : IO.Ref EnvCacheState ← IO.mkRef {}
+
+/-- Signature identifying an imported environment: the sorted module set plus the
+    visibility filters that shape the accepted-declaration set. `maxHeartbeats` is
+    excluded — it bounds per-pair elaboration, not the imported environment or the
+    collected declarations, and is applied fresh on every command. -/
+private def cacheSignature (modules : Array LeanDup.Extract.ModuleSpec)
+    (options : LeanDup.Extract.Options) : String :=
+  let keyOf (spec : LeanDup.Extract.ModuleSpec) : String :=
+    spec.origin ++ "|" ++ spec.module ++ "|" ++ spec.sourceRoot?.getD ""
+  let keys := (modules.map keyOf).qsort (· < ·)
+  let joined := String.intercalate "\n" keys.toList
+  let privKey := if options.includePrivate then "1" else "0"
+  let genKey := if options.includeGenerated then "1" else "0"
+  "priv=" ++ privKey ++ ";gen=" ++ genKey ++ ";mods=" ++ joined
+
+/-- Import the requested modules, collect their accepted declarations, and store
+    both in the process-global cache under `signature`. -/
+private unsafe def importAndCache
+    (signature : String)
+    (modules : Array LeanDup.Extract.ModuleSpec)
+    (options : LeanDup.Extract.Options)
+    (initializeSearchPath : Bool) :
+    IO (Except Error (Environment × Array LeanDup.Extract.AcceptedDeclaration)) := do
+  match ← LeanDup.Extract.importRequestedModules modules initializeSearchPath with
+  | Except.error err => pure <| Except.error (fromExtractError err)
+  | Except.ok env =>
+      let context : LeanDup.Extract.Context := { modules := modules, options := options }
+      let coreContext : Core.Context :=
+        { fileName := "<lean-dup-probe>"
+          fileMap := default
+          options := LeanDup.Extract.elaborationOptions options }
+      try
+        let (declarations, _, _) ←
+          MetaM.toIO (LeanDup.Extract.collectAcceptedDeclarations context) coreContext { env := env } {} {}
+        probeEnvCache.set { entry := some { signature := signature, env := env, declarations := declarations } }
+        pure <| Except.ok (env, declarations)
+      catch error =>
+        pure <|
+          Except.error
+            { kind := .internalError
+              message := s!"probe environment setup failed: {error}"
+              details := none }
+
+/--
+Emit probe-result payloads with worker phase statistics for candidate
+declaration pairs, reusing a cached imported environment when the module
+signature matches the previous command.
 
 Each pair is isolated: a pair-local failure becomes `status = "unavailable"`;
 only malformed requests or import/environment failures abort the command.
@@ -508,15 +586,48 @@ unsafe def runProfiled (payload : Json) (modules : Array LeanDup.Extract.ModuleS
   match parseRequestPairs payload with
   | Except.error err => pure <| Except.error err
   | Except.ok pairs =>
-      let result ←
-        LeanDup.Extract.withAcceptedDeclarationsProfiled payload modules
-          (fun _options declarations => do
-            probeRows pairs declarations)
-          (initializeSearchPath := initializeSearchPath)
-      match result with
+      match LeanDup.Extract.parseOptions payload with
       | Except.error err => pure <| Except.error (fromExtractError err)
-      | Except.ok (rows, stats) =>
-          pure <| Except.ok { rows := rows, stats := { stats with rowCount := rows.size } }
+      | Except.ok options =>
+          if modules.isEmpty then
+            pure <| Except.error (invalidRequest "`modules` must contain at least one module")
+          else
+            let signature := cacheSignature modules options
+            let importStarted ← IO.monoMsNow
+            let cached ← probeEnvCache.get
+            let envResult ←
+              match cached.entry with
+              | some entry =>
+                  if entry.signature == signature then
+                    pure <| Except.ok (entry.env, entry.declarations)
+                  else
+                    importAndCache signature modules options initializeSearchPath
+              | none => importAndCache signature modules options initializeSearchPath
+            match envResult with
+            | Except.error err => pure <| Except.error err
+            | Except.ok (env, declarations) =>
+                let importFinished ← IO.monoMsNow
+                let coreContext : Core.Context :=
+                  { fileName := "<lean-dup-probe>"
+                    fileMap := default
+                    options := LeanDup.Extract.elaborationOptions options }
+                try
+                  let semanticStarted ← IO.monoMsNow
+                  let (rows, _, _) ←
+                    MetaM.toIO (probeRows pairs declarations) coreContext { env := env } {} {}
+                  let semanticFinished ← IO.monoMsNow
+                  let stats : LeanDup.Extract.RunStats :=
+                    { importMs := importFinished - importStarted
+                      semanticMs := semanticFinished - semanticStarted
+                      declarationCount := declarations.size
+                      rowCount := rows.size }
+                  pure <| Except.ok { rows := rows, stats := stats }
+                catch error =>
+                  pure <|
+                    Except.error
+                      { kind := .internalError
+                        message := s!"probe processing failed: {error}"
+                        details := none }
 
 /--
 Import requested modules once and emit probe-result payloads for candidate
