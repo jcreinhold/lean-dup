@@ -515,6 +515,18 @@ impl IndexStore {
             diagnostics.extend(build.diagnostics);
         } else {
             let modules = modules_for(&request);
+            let module_count = modules.len();
+            // These worker calls block until the whole batch elaborates — minutes
+            // for a large workspace — and buffer their per-declaration progress
+            // until they return. Announce the phase up front so the live spinner
+            // is labelled with the work actually underway rather than the prior
+            // (cache) phase, and so it does not look frozen while Lean runs.
+            reporter.event(
+                "worker.lean.index.enumerate",
+                None,
+                None,
+                format!("extracting declarations from {module_count} module(s)"),
+            );
             let declarations = reporter.measure("worker.extract", |_| {
                 worker.extract_batch(ExtractBatch {
                     workspace_root: request.execution_root(),
@@ -526,6 +538,12 @@ impl IndexStore {
             })?;
             record_worker_events(reporter, &declarations.events);
 
+            reporter.event(
+                "worker.lean.semantic",
+                None,
+                None,
+                format!("computing feature keys for {module_count} module(s)"),
+            );
             let features = reporter.measure("worker.features", |_| {
                 worker.features_batch(FeaturesBatch {
                     workspace_root: request.execution_root(),

@@ -152,7 +152,7 @@ impl Reporter {
                 prev.bar.finish_and_clear();
             }
             self.live = Some(LivePhase {
-                bar: new_phase_bar(key, event),
+                bar: new_phase_bar(key, event, self.tty),
                 key,
             });
             if !self.tty {
@@ -188,7 +188,7 @@ impl Drop for Reporter {
     }
 }
 
-fn new_phase_bar(key: &'static str, event: &ProgressEvent) -> ProgressBar {
+fn new_phase_bar(key: &'static str, event: &ProgressEvent, tty: bool) -> ProgressBar {
     let bar = if let Some(total) = event.total {
         ProgressBar::new(total)
     } else {
@@ -204,6 +204,15 @@ fn new_phase_bar(key: &'static str, event: &ProgressEvent) -> ProgressBar {
         spinner_style()
     });
     bar.set_message(event.message.clone());
+    // A determinate bar redraws as its position advances, but an indeterminate
+    // spinner only ticks when the caller reports a new event. A long blocking
+    // phase (a heavy Lean `extract`/`features` call) reports nothing until it
+    // returns, so without a steady tick the spinner freezes and the run looks
+    // hung. On a TTY, animate it so the elapsed timer visibly advances; off a
+    // TTY the bar is hidden and a ticker thread would be pure waste.
+    if tty && event.total.is_none() {
+        bar.enable_steady_tick(Duration::from_millis(120));
+    }
     bar
 }
 
