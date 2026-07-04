@@ -5,9 +5,10 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
+use lean_dup_diagnostics::read_to_string;
+
 use crate::index::{ExpectedIndexEntry, INDEX_SCHEMA_VERSION, IndexProvenance, IndexProvenanceKind, IndexStore};
 use crate::{Error, Result};
-use lean_dup_diagnostics::read_to_string;
 
 /// Cache diagnostics for all known labels under one cache root.
 ///

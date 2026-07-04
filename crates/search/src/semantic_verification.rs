@@ -5,6 +5,12 @@ use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use lean_dup_diagnostics::progress::Reporter;
+use lean_dup_index::ComparisonEvidencePolicy;
+use lean_dup_index::{HydratedDeclaration, OpenedIndex, ProbeCacheEntry};
+use lean_dup_project::ResolvedWorkspace;
+use lean_dup_worker::{ModuleDescriptor, ProbeBatch, ProbePair, ProbeResult, WorkerClient, WorkerError};
+
 use crate::ranking::{ConfidenceTier, RankedReview, ReviewAction, ReviewPriority, ReviewRelation};
 use crate::retrieval::{CandidateSet, CandidateSourceFamily, RetrievedCandidate};
 use crate::semantic_reranking::{
@@ -12,11 +18,6 @@ use crate::semantic_reranking::{
     SearchSemanticObligationYield, SearchSemanticUnavailableReason,
 };
 use crate::{ProbePolicy, ProbeStatusBreakdown, Result};
-use lean_dup_diagnostics::progress::Reporter;
-use lean_dup_index::ComparisonEvidencePolicy;
-use lean_dup_index::{HydratedDeclaration, OpenedIndex, ProbeCacheEntry};
-use lean_dup_project::ResolvedWorkspace;
-use lean_dup_worker::{ModuleDescriptor, ProbeBatch, ProbePair, ProbeResult, WorkerClient, WorkerError};
 
 const PROBE_CACHE_VERSION: &str = "semantic-probe-cache.v3";
 const PROBE_POLICY_VERSION: &str = "semantic-probe-policy.v2";

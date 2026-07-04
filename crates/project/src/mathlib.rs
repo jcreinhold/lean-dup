@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::workspace::{self, ResolvedWorkspace, WorkspaceRequest};
 use lean_dup_diagnostics::progress::Reporter;
 
+use crate::workspace::{self, ResolvedWorkspace, WorkspaceRequest};
 use crate::{Error, Result};
 
 const MATHLIB_PACKAGE_PATH: &[&str] = &[".lake", "packages", "mathlib"];

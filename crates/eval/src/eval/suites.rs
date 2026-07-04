@@ -5,15 +5,6 @@ use std::time::Instant;
 
 use serde::Serialize;
 
-use crate::EvalSuite;
-use crate::eval::labels::{GoldLabelFact, GoldLabels, LabelFactSource, LabelPolarity, TypedGoldLabel, load_builtin};
-use crate::eval::scorer_ablations::{self, ScorerAblationVariantReport};
-use crate::eval::scoring::{
-    CountMetric, EvaluationMetrics, GoldPair, ObservedCandidateLoss, ObservedPair, ObservedRun, RecallAtK,
-    TimingMetrics, score_run,
-};
-use crate::eval::search_dataset;
-use crate::eval::stage_metrics::SemanticVerificationStageMetrics;
 use lean_dup_diagnostics::perf;
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_index::{HydratedDeclaration, IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
@@ -25,6 +16,15 @@ use lean_dup_search::{
 };
 use lean_dup_worker::WorkerClient;
 
+use crate::EvalSuite;
+use crate::eval::labels::{GoldLabelFact, GoldLabels, LabelFactSource, LabelPolarity, TypedGoldLabel, load_builtin};
+use crate::eval::scorer_ablations::{self, ScorerAblationVariantReport};
+use crate::eval::scoring::{
+    CountMetric, EvaluationMetrics, GoldPair, ObservedCandidateLoss, ObservedPair, ObservedRun, RecallAtK,
+    TimingMetrics, score_run,
+};
+use crate::eval::search_dataset;
+use crate::eval::stage_metrics::SemanticVerificationStageMetrics;
 use crate::{Error, Result};
 
 #[derive(Debug, Clone)]

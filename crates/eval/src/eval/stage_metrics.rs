@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use lean_dup_search::{SearchSemanticObligationKind, SearchSemanticObligationYield, SearchSemanticRerankingSummary};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
+
+use lean_dup_search::{SearchSemanticObligationKind, SearchSemanticObligationYield, SearchSemanticRerankingSummary};
 
 use crate::eval::labels::GoldLabels;
 use crate::eval::scoring::{CountMetric, GoldPair, ObservedRun, RecallAtK};

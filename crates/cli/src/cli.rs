@@ -2,9 +2,10 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use serde::{Deserialize, Serialize};
+
 use lean_dup_eval::EvalSuite;
 use lean_dup_search::{AuditVisibilityOptions, ProbePolicy};
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
 #[command(name = "lean-dup")]

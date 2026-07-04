@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use serde::Serialize;
+
 use lean_dup_eval::{CountMetric, GoldPair, ObservedCandidateSource, ObservedPair, ObservedRun, TimingMetrics};
 use lean_dup_search::{SearchObservation, SearchObservedPair};
-use serde::Serialize;
 
 use crate::candidates::{VectorCandidate, VectorCandidateSummary};
 

@@ -3,15 +3,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use lean_dup_index::HydratedDeclaration;
+use lean_dup_index::{ComparisonEvidenceMode, ComparisonEvidencePolicy};
+use lean_dup_worker::SourceSpan;
+
 use crate::retrieval::{CandidateSet, KeyContribution, RetrievedCandidate};
 use crate::review_policy;
 use crate::scorer;
 use crate::semantic_reranking::SearchSemanticObligationFact;
 use crate::semantic_verification::{EvidenceKind, EvidenceStatus, SemanticEvidence};
 use crate::source_refs::{ImportStatus, SourceFacts};
-use lean_dup_index::HydratedDeclaration;
-use lean_dup_index::{ComparisonEvidenceMode, ComparisonEvidencePolicy};
-use lean_dup_worker::SourceSpan;
 
 /// Policy input for turning retrieved candidates into review groups.
 ///

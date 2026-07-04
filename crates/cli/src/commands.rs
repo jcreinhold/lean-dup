@@ -1,10 +1,6 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::cli::{
-    AuditArgs, BaselineAction, BaselineArgs, BaselineCommonArgs, CacheCleanupArgs, Cli, Command, DiffArgs, DoctorArgs,
-    EvalArgs, EvalFormat, IndexArgs, IndexMathlibArgs, OutputFormat, ShowArgs,
-};
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_eval::EvalRequest;
 use lean_dup_index::CleanupPolicy;
@@ -21,6 +17,10 @@ use lean_dup_search::{
 };
 use lean_dup_worker::{WorkerClient, WorkerVersion};
 
+use crate::cli::{
+    AuditArgs, BaselineAction, BaselineArgs, BaselineCommonArgs, CacheCleanupArgs, Cli, Command, DiffArgs, DoctorArgs,
+    EvalArgs, EvalFormat, IndexArgs, IndexMathlibArgs, OutputFormat, ShowArgs,
+};
 use crate::error::{AppError, Result};
 
 #[derive(Debug)]

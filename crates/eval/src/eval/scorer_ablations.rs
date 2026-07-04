@@ -1,8 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use lean_dup_search::{SearchScoringVariant, SearchSemanticObligationYield, SearchSemanticRerankingSummary};
 use serde::Serialize;
+
+use lean_dup_search::{SearchScoringVariant, SearchSemanticObligationYield, SearchSemanticRerankingSummary};
 
 use crate::eval::scoring::EvaluationMetrics;
 use crate::{Error, Result};

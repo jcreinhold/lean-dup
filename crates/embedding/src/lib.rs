@@ -12,12 +12,13 @@ mod fixture_backend;
 mod profiles;
 mod vector_cache;
 
-pub use error::{Error, Result};
 use std::path::PathBuf;
 
 use hf_hub::Cache;
 use profiles::{BGE_SMALL_MODEL_ID, BackendFamily, resolve_profile, resolve_profile_id};
 use serde::{Deserialize, Serialize};
+
+pub use error::{Error, Result};
 
 /// Version of the declaration-document input contract consumed by embeddings.
 pub const EMBEDDING_INPUT_POLICY_VERSION: &str = "lean-dup.embedding-document.v1";

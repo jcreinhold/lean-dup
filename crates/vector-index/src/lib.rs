@@ -10,8 +10,9 @@ mod lancedb_backend;
 
 use std::path::PathBuf;
 
-pub use error::{Result, VectorIndexError};
 use serde::{Deserialize, Serialize};
+
+pub use error::{Result, VectorIndexError};
 
 pub const VECTOR_INDEX_SCHEMA_VERSION: &str = "lean-dup.vector-index.v1";
 

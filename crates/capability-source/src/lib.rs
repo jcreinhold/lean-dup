@@ -20,6 +20,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use sha2::{Digest, Sha256};
+
 use lean_rs_interop_shims::LeanRsInteropShimsSourcePackageRequest;
 use lean_rs_worker_protocol::worker_exports::{json_command_signature, streaming_command_signature};
 use lean_semantic_search_runtime::{
@@ -28,7 +30,6 @@ use lean_semantic_search_runtime::{
 use lean_toolchain::{
     CargoLeanCapability, GeneratedSourceFile, SourcePackageManifestPolicy, SourcePackageMaterializationRequest,
 };
-use sha2::{Digest, Sha256};
 
 /// Packaged `LeanDup` Lean source root, resolved at runtime to the crate's
 /// unpacked location (the registry cache after `cargo install`, or the checkout

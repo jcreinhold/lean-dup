@@ -2,8 +2,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use lean_dup_search::{SearchObservation, SearchObservedPair, SearchPairFeatures, SearchScoringSummary};
 use serde::Serialize;
+
+use lean_dup_search::{SearchObservation, SearchObservedPair, SearchPairFeatures, SearchScoringSummary};
 
 use crate::eval::labels::{GoldLabels, TypedGoldLabel};
 use crate::eval::scoring::GoldPair;

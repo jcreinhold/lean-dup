@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use lean_dup_index::HydratedDeclaration;
 use serde::Serialize;
+
+use lean_dup_index::HydratedDeclaration;
 
 use crate::retrieval::KeyContribution;
 use crate::semantic_reranking::{

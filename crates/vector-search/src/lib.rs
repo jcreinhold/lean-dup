@@ -15,8 +15,9 @@ mod workload;
 
 use std::path::{Path, PathBuf};
 
-use lean_dup_diagnostics::progress::Reporter;
 use serde::{Deserialize, Serialize};
+
+use lean_dup_diagnostics::progress::Reporter;
 
 pub const VECTOR_SEARCH_SCHEMA_VERSION: &str = "lean-dup.vector-search.v3";
 

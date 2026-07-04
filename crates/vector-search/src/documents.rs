@@ -1,7 +1,8 @@
-use lean_dup_embedding::EmbeddingInputPolicy;
-use lean_dup_index::HydratedDeclaration;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+
+use lean_dup_embedding::EmbeddingInputPolicy;
+use lean_dup_index::HydratedDeclaration;
 
 use crate::{Error, Result};
 

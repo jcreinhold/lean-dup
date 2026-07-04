@@ -4,9 +4,10 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use lean_dup_diagnostics::read_to_string;
+
 use crate::ranking::{RankedReview, ReviewAction, ReviewPriority, ReviewRelation};
 use crate::{Error, Result};
-use lean_dup_diagnostics::read_to_string;
 
 const BASELINE_SCHEMA_VERSION: &str = "lean-dup.baseline.v1";
 

@@ -4,10 +4,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use crate::cli::{PerfArgs, PerfWorkload};
-use crate::error::{AppError, Result};
 use lean_dup_diagnostics::perf::{summarize, with_collection};
 use lean_dup_report::{PerfReport, PerfWorkloadReport};
+
+use crate::cli::{PerfArgs, PerfWorkload};
+use crate::error::{AppError, Result};
 
 pub fn run(args: PerfArgs) -> Result<PerfReport> {
     let cache_root = args

@@ -7,12 +7,11 @@
 //! worker wire nor the store schema leaks into the other: the store ingests
 //! contract rows, and hydration rebuilds worker-shaped feature facts.
 
+use lean_dup_worker::FeatureRow as WorkerFeatureRow;
 use lean_dup_worker::{Fingerprints as WorkerFingerprints, RoleFeature as WorkerRoleFeature};
 use lean_semantic_search_contract::{
     DeclarationFeatureRow, Fingerprints as ContractFingerprints, OpaqueFeatureKey, RoleFeature as ContractRoleFeature,
 };
-
-use lean_dup_worker::FeatureRow as WorkerFeatureRow;
 
 /// Translate a worker feature row into the shared store's contract row.
 ///

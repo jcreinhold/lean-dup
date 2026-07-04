@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
+
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_embedding::{
     EmbeddingAcquisitionPolicy, EmbeddingModelSpec, EmbeddingPrepareRequest, prepare_embedding_model,

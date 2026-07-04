@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::index::{IndexProvenanceKind, OpenedIndex, OpenedIndexFacts};
 use lean_dup_project::ResolvedWorkspace;
 use lean_dup_worker::ModuleDescriptor;
+
+use crate::index::{IndexProvenanceKind, OpenedIndex, OpenedIndexFacts};
 
 /// Evidence mode available for one comparison origin in the current audit.
 ///

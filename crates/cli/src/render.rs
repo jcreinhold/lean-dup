@@ -1,10 +1,11 @@
 use std::io::Write;
 
+use lean_dup_diagnostics::perf::{self, CostClass};
+use lean_dup_diagnostics::progress::{Reporter, format_progress_event};
+
 use crate::cli::OutputFormat;
 use crate::commands::Outcome;
 use crate::error::{AppError, Result};
-use lean_dup_diagnostics::perf::{self, CostClass};
-use lean_dup_diagnostics::progress::{Reporter, format_progress_event};
 
 pub fn write_outcome<O: Write, E: Write>(mut outcome: Outcome, stdout: &mut O, stderr: &mut E) -> Result<()> {
     perf::measure_result(CostClass::Reporting, "report.render", || {

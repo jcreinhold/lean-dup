@@ -2,6 +2,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Instant;
 
+use serde::Serialize;
+use sha2::{Digest, Sha256};
+
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_embedding::{
     EmbeddingAcquisitionPolicy, EmbeddingInputFormat, EmbeddingInputRole, EmbeddingModelSpec, EmbeddingPrepareRequest,
@@ -12,8 +15,6 @@ use lean_dup_vector_index::{
     PreparedVectorCorpus, VectorCorpusPrepareRequest, VectorCorpusProvenance, VectorCorpusStatus, VectorDeclaration,
     VectorNearestDeclaration, prepare_vector_corpus,
 };
-use serde::Serialize;
-use sha2::{Digest, Sha256};
 
 use crate::documents::{self, DocumentPolicy, SemanticDocuments};
 use crate::eligibility::{self, EligibilityPolicy, EligibilitySummary};

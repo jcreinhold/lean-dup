@@ -2,8 +2,9 @@ use std::collections::BTreeSet;
 
 use serde::Serialize;
 
-use crate::retrieval::KeyContribution;
 use lean_dup_index::HydratedDeclaration;
+
+use crate::retrieval::KeyContribution;
 
 pub(crate) const REVIEW_POLICY_VERSION: &str = "lean-dup.symbolic-review-policy.v2";
 

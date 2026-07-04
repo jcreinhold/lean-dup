@@ -2,10 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
+
 use lean_dup_eval::{
     CountMetric, EvaluationMetrics, GoldLabelFact, GoldLabels, GoldPair, LabelFactSource, LabelPolarity, TypedGoldLabel,
 };
-use serde::Serialize;
 
 use crate::candidates::VectorCandidateSummary;
 use crate::leak_check;

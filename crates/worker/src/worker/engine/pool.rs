@@ -12,13 +12,14 @@ use std::sync::mpsc::{SyncSender, sync_channel};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
+use serde::de::DeserializeOwned;
+use serde_json::Value;
+
 use lean_rs_worker_parent::{
     LeanWorkerCancellationToken, LeanWorkerDiagnosticEvent, LeanWorkerDiagnosticSink, LeanWorkerJsonCommand,
     LeanWorkerPool, LeanWorkerPoolConfig, LeanWorkerProgressEvent, LeanWorkerProgressSink, LeanWorkerStreamingCommand,
     LeanWorkerTypedDataRow, LeanWorkerTypedDataSink,
 };
-use serde::de::DeserializeOwned;
-use serde_json::Value;
 
 use super::payload::{self, CapabilityStreamSummary, WorkerVersionPayload};
 use super::runtime::{

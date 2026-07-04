@@ -1,5 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use lean_dup_diagnostics::perf::{self, CostClass};
 use lean_dup_diagnostics::progress::Reporter;
@@ -8,14 +11,11 @@ use lean_dup_index::{ComparisonProvenance, ComparisonProvenanceReport};
 use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
 use lean_dup_project::{ResolvedWorkspace, WorkspaceRequest, resolve, resolve_workspace_mathlib};
 use lean_dup_worker::WorkerClient;
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::audit_detail;
 pub use crate::audit_detail::AuditDetailSnapshot;
 use crate::baseline;
 pub use crate::baseline::{BaselineGroup, BaselineSnapshot};
-use std::path::Path;
 
 /// Load the most recent persisted audit snapshot for a workspace fingerprint,
 /// if one is on disk. Used by `show`/`diff` to validate group IDs without

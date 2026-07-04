@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
 use lean_dup_diagnostics::perf::{PerfEvent, PerfSummary};
 use lean_dup_eval::EvalOutput;
 use lean_dup_index::{CacheCleanupReport, CacheDiagnostics, CacheStatus, ComparisonEvidenceMode};
@@ -9,8 +12,6 @@ use lean_dup_search::{
     SearchSemanticObligationFact, SearchSemanticObligationYield, SearchSemanticRerankingSummary, ShowOutput,
     WorkspaceFileCleanupEntry, WorkspaceFileCleanupReport,
 };
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::report_contract::{AuditExplanations, GroupExplanation};
 
