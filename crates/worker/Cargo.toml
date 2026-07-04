@@ -1,11 +1,11 @@
 [package]
 categories = ["development-tools"]
 description = "Lean worker process boundary for lean-dup: per-toolchain capability resolution over the versioned worker protocol."
-keywords = ["lean", "lean4", "duplication", "audit"]
-repository = "https://github.com/jcreinhold/lean-dup"
 edition = { workspace = true }
+keywords = ["audit", "duplication", "lean", "lean4"]
 license = { workspace = true }
 name = "lean-dup-worker"
+repository = "https://github.com/jcreinhold/lean-dup"
 version = { workspace = true }
 
 [dependencies]

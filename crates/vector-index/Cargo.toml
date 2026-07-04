@@ -1,8 +1,8 @@
 [package]
-publish = false
 edition = { workspace = true }
 license = { workspace = true }
 name = "lean-dup-vector-index"
+publish = false
 version = { workspace = true }
 
 [package.metadata.cargo-shear]

@@ -1,11 +1,11 @@
 [package]
 categories = ["development-tools"]
 description = "Progress, profiling, and structured errors for the lean-dup CLI."
-keywords = ["lean", "lean4", "duplication", "audit"]
-repository = "https://github.com/jcreinhold/lean-dup"
 edition = { workspace = true }
+keywords = ["audit", "duplication", "lean", "lean4"]
 license = { workspace = true }
 name = "lean-dup-diagnostics"
+repository = "https://github.com/jcreinhold/lean-dup"
 version = { workspace = true }
 
 [dependencies]

@@ -1,11 +1,11 @@
 [package]
 categories = ["development-tools"]
 description = "SQLite-backed declaration index and cache for the lean-dup duplicate auditor."
-keywords = ["lean", "lean4", "duplication", "audit"]
-repository = "https://github.com/jcreinhold/lean-dup"
 edition = { workspace = true }
+keywords = ["audit", "duplication", "lean", "lean4"]
 license = { workspace = true }
 name = "lean-dup-index"
+repository = "https://github.com/jcreinhold/lean-dup"
 version = { workspace = true }
 
 [dependencies]
