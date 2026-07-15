@@ -397,12 +397,12 @@ pub struct EvalArgs {
 #[command(after_help = "\
 Examples:
   lean-dup install-worker               Build the worker for the current project's toolchain
-  lean-dup install-worker --toolchain v4.32.0-rc1
+  lean-dup install-worker --toolchain v4.32.0
                                         Build the worker for a specific toolchain
   lean-dup install-worker --force       Rebuild even if a current worker is installed
 ")]
 pub struct InstallWorkerArgs {
-    /// Toolchain to build for (e.g. `v4.32.0-rc1` or `leanprover/lean4:v4.32.0-rc1`).
+    /// Toolchain to build for (e.g. `v4.32.0` or `leanprover/lean4:v4.32.0`).
     /// Defaults to the current directory's `lean-toolchain`, or lean-dup's dev pin.
     #[arg(long)]
     pub toolchain: Option<String>,

@@ -11,7 +11,7 @@ only reads source, builds Lean artifacts through Lake, and writes indexes/report
 `target/`.
 
 It is a Rust workspace (`edition = "2024"`, Rust 1.91+) plus a small Lean worker package under `lean/`. The pinned Lean
-toolchain is `leanprover/lean4:v4.32.0-rc1` (other 4.x untested).
+toolchain is `leanprover/lean4:v4.32.0` (other 4.x untested).
 
 ## Commands
 

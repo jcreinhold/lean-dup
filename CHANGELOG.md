@@ -6,6 +6,15 @@ All notable changes to lean-dup are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- Bumped the Lean toolchain pin to `leanprover/lean4:v4.32.0` (the final stable release, ABI-identical to the previous
+  `v4.32.0-rc1` pin) and moved the upstream dependencies in lockstep: the `lean-rs` worker crates
+  (`lean-rs-worker-parent` / `-child`, `-protocol`, `lean-rs-interop-shims`, `lean-toolchain`) to release tag `v0.3.1`
+  and the `lean-semantic-search-*` crates to release tag `v0.4.2`, with the matching `lean/lakefile.lean` Lake git
+  requires updated to `v0.4.2` / `v0.3.1`. The Rust floor stays 1.91 (`rust-version` unchanged) and the full workspace
+  test suite passes with no golden refreshes.
+
 ## [0.2.2] - 2026-06-26
 
 ### Added
