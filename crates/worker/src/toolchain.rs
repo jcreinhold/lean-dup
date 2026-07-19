@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 /// `lean-dup`'s development-pinned toolchain: what `<repo>/lean` builds against
 /// and the default when an audited workspace has no readable `lean-toolchain`.
 /// A drift test asserts it equals `<repo>/lean/lean-toolchain`.
-pub const PINNED_TOOLCHAIN: &str = "leanprover/lean4:v4.32.0";
+pub const PINNED_TOOLCHAIN: &str = "leanprover/lean4:v4.33.0-rc1";
 
 /// File name of the per-toolchain worker-child binary inside an install dir.
 pub const WORKER_FILE_NAME: &str = "lean-dup-worker-child";
@@ -88,7 +88,7 @@ impl ToolchainId {
     /// `unwrap_or_else` keeps the function total without a panic.
     #[must_use]
     pub fn pinned() -> Self {
-        Self::parse(PINNED_TOOLCHAIN).unwrap_or_else(|_| Self("v4.32.0".to_owned()))
+        Self::parse(PINNED_TOOLCHAIN).unwrap_or_else(|_| Self("v4.33.0-rc1".to_owned()))
     }
 
     /// Resolved path to the elan toolchain root
@@ -482,7 +482,7 @@ mod tests {
 
     #[test]
     fn pinned_matches_the_constant() {
-        assert_eq!(ToolchainId::pinned().as_str(), "v4.32.0");
+        assert_eq!(ToolchainId::pinned().as_str(), "v4.33.0-rc1");
         assert_eq!(ToolchainId::pinned().elan_label(), PINNED_TOOLCHAIN);
     }
 
@@ -515,7 +515,7 @@ mod tests {
         let ProvisionError::NotInstalled { install_cmd, .. } = err else {
             panic!("expected NotInstalled, got {err:?}");
         };
-        assert!(install_cmd.contains("install-worker --toolchain v4.32.0"));
+        assert!(install_cmd.contains("install-worker --toolchain v4.33.0-rc1"));
     }
 
     #[test]
