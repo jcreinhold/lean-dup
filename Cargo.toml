@@ -54,11 +54,11 @@ lean-dup-vector-index = { path = "crates/vector-index", version = "0.2.3" }
 lean-dup-worker = { path = "crates/worker", version = "0.2.3" }
 # lean-rs worker stack (published crates.io releases). The parent crate carries
 # no libleanshared linkage; only the worker-child binary links the Lean runtime.
-lean-rs-interop-shims = { version = "0.3" }
-lean-rs-worker-child = { version = "0.3" }
-lean-rs-worker-parent = { version = "0.3" }
-lean-rs-worker-protocol = { version = "0.3" }
-lean-toolchain = { version = "0.3" }
+lean-rs-interop-shims = { version = "0.4" }
+lean-rs-worker-child = { version = "0.4" }
+lean-rs-worker-parent = { version = "0.4" }
+lean-rs-worker-protocol = { version = "0.4" }
+lean-toolchain = { version = "0.4" }
 # Shared semantic-search Rust crates (published crates.io releases). The runtime
 # crate owns the packaged Lean source materialized by the worker build.
 lean-semantic-search-contract = { version = "0.4" }
