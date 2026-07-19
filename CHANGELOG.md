@@ -6,6 +6,8 @@ All notable changes to lean-dup are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-07-19
+
 ### Changed
 
 - Bumped the Lean toolchain pin to `leanprover/lean4:v4.33.0-rc1` and moved the upstream dependencies in lockstep: the

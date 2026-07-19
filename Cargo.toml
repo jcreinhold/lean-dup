@@ -25,7 +25,7 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/jcreinhold/lean-dup"
 rust-version = "1.91"
-version = "0.2.3"
+version = "0.2.4"
 
 [workspace.dependencies]
 arrow-array = "58"
@@ -41,17 +41,17 @@ futures = "0.3"
 hf-hub = { version = "0.5", default-features = false, features = ["rustls-tls", "ureq"] }
 indicatif = "0.18"
 lancedb = "0.30"
-lean-dup-capability-source = { path = "crates/capability-source", version = "0.2.3" }
-lean-dup-diagnostics = { path = "crates/diagnostics", version = "0.2.3" }
-lean-dup-embedding = { path = "crates/embedding", version = "0.2.3" }
-lean-dup-eval = { path = "crates/eval", version = "0.2.3" }
-lean-dup-index = { path = "crates/index", version = "0.2.3" }
-lean-dup-project = { path = "crates/project", version = "0.2.3" }
-lean-dup-report = { path = "crates/report", version = "0.2.3" }
-lean-dup-search = { path = "crates/search", version = "0.2.3" }
+lean-dup-capability-source = { path = "crates/capability-source", version = "0.2.4" }
+lean-dup-diagnostics = { path = "crates/diagnostics", version = "0.2.4" }
+lean-dup-embedding = { path = "crates/embedding", version = "0.2.4" }
+lean-dup-eval = { path = "crates/eval", version = "0.2.4" }
+lean-dup-index = { path = "crates/index", version = "0.2.4" }
+lean-dup-project = { path = "crates/project", version = "0.2.4" }
+lean-dup-report = { path = "crates/report", version = "0.2.4" }
+lean-dup-search = { path = "crates/search", version = "0.2.4" }
 lean-dup-test-support = { path = "crates/test-support" }
-lean-dup-vector-index = { path = "crates/vector-index", version = "0.2.3" }
-lean-dup-worker = { path = "crates/worker", version = "0.2.3" }
+lean-dup-vector-index = { path = "crates/vector-index", version = "0.2.4" }
+lean-dup-worker = { path = "crates/worker", version = "0.2.4" }
 # lean-rs worker stack (published crates.io releases). The parent crate carries
 # no libleanshared linkage; only the worker-child binary links the Lean runtime.
 lean-rs-interop-shims = { version = "0.4" }
