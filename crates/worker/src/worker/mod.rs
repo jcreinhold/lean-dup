@@ -25,7 +25,7 @@ const INDEX_WORKER_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 /// handles, protocol envelopes, transport frames, or child diagnostics as
 /// machine data.
 pub struct WorkerClient {
-    engine: WorkerEngine,
+    engine: Arc<WorkerEngine>,
     timeout: Duration,
     cancelled: Arc<AtomicBool>,
 }
@@ -49,7 +49,7 @@ impl WorkerClient {
     /// Create a worker client with the default timeout policy.
     pub fn new() -> Self {
         Self {
-            engine: WorkerEngine::pool(),
+            engine: Arc::new(WorkerEngine::pool()),
             timeout: DEFAULT_WORKER_TIMEOUT,
             cancelled: Arc::new(AtomicBool::new(false)),
         }
@@ -67,9 +67,26 @@ impl WorkerClient {
     /// Create a worker client with an explicit per-call timeout.
     pub fn with_timeout(timeout: Duration) -> Self {
         Self {
-            engine: WorkerEngine::pool(),
+            engine: Arc::new(WorkerEngine::pool()),
             timeout,
             cancelled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Derive a client with a different per-call timeout that shares this
+    /// client's engine — and therefore its warm worker session and imported
+    /// Lean environment.
+    ///
+    /// Spawning a fresh client per pipeline stage (`WorkerClient::with_timeout`
+    /// at each site) builds a fresh pool and child per stage: every stage
+    /// re-imports the workspace environment, which is the import-per-command
+    /// memory blowup one level up. One audit creates one client and derives the
+    /// per-stage policies it needs through this method instead.
+    pub fn reconfigured(&self, timeout: Duration) -> Self {
+        Self {
+            engine: self.engine.clone(),
+            timeout,
+            cancelled: self.cancelled.clone(),
         }
     }
 
@@ -662,7 +679,7 @@ mod tests {
     fn probe_batch_serializes_extraction_filters() {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let client = WorkerClient {
-            engine: WorkerEngine::fake(requests.clone()),
+            engine: Arc::new(WorkerEngine::fake(requests.clone())),
             timeout: Duration::from_secs(1),
             cancelled: Arc::new(AtomicBool::new(false)),
         };

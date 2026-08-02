@@ -429,9 +429,102 @@ unsafe def importRequestedModules (modules : Array ModuleSpec)
           message := s!"could not import requested modules: {error}"
           details := some <| Json.mkObj [("modules", moduleArrayJson modules)] }
 
+/-- One cached session environment: the imported `Environment`, the accepted
+    declarations collected from it, and the signature of the request that built
+    it. -/
+structure SessionEnvEntry where
+  signature : String
+  env : Environment
+  declarations : Array AcceptedDeclaration
+
+/-- Single-entry session-environment cache state. The `Option` field keeps this
+    `Inhabited` without requiring `Environment` to be. -/
+structure SessionEnvState where
+  entry : Option SessionEnvEntry := none
+  deriving Inhabited
+
+private instance : Nonempty (IO.Ref SessionEnvState) := inferInstanceAs (Nonempty (IO.Ref _))
+
+/--
+Process-global cache of the most recently imported session environment.
+
+Worker commands arrive in bursts that share one module set and one set of
+visibility filters: an audit indexes a workspace and then probes candidate
+pairs in many chunks, each chunk a separate command carrying an identical
+module signature. Importing the Mathlib-scale environment fresh per command
+retains process-global Lean state on each import and drives the worker into
+OOM; caching one environment per signature and reusing it across commands
+imports once per session instead. Bounded to a single retained environment — a
+signature change replaces the entry rather than accumulating.
+
+The initializer runs when the capability is loaded (the root `LeanDup.Capability`
+module initializes its transitive imports). Fresh `importModules` calls for a
+command import only the *requested* modules, never `LeanDup.Extract`, so they
+never reset this ref.
+-/
+initialize sessionEnvCache : IO.Ref SessionEnvState ← IO.mkRef {}
+
+/-- Signature identifying an imported environment: the sorted module set plus the
+    visibility filters that shape the accepted-declaration set. `maxHeartbeats` is
+    excluded — it bounds per-declaration elaboration, not the imported environment
+    or the collected declarations, and is applied fresh on every command. -/
+def sessionSignature (modules : Array ModuleSpec) (options : Options) : String :=
+  let keyOf (spec : ModuleSpec) : String :=
+    spec.origin ++ "|" ++ spec.module ++ "|" ++ spec.sourceRoot?.getD ""
+  let keys := (modules.map keyOf).qsort (· < ·)
+  let joined := String.intercalate "\n" keys.toList
+  let privKey := if options.includePrivate then "1" else "0"
+  let genKey := if options.includeGenerated then "1" else "0"
+  "priv=" ++ privKey ++ ";gen=" ++ genKey ++ ";mods=" ++ joined
+
+/-- Import the requested modules, collect their accepted declarations, and store
+    both in the process-global cache under `signature`. -/
+private unsafe def importAndCacheSession
+    (signature : String)
+    (modules : Array ModuleSpec)
+    (options : Options)
+    (initializeSearchPath : Bool) :
+    IO (Except Error (Environment × Array AcceptedDeclaration)) := do
+  match ← importRequestedModules modules initializeSearchPath with
+  | Except.error err => pure <| Except.error err
+  | Except.ok env =>
+      let context : Context := { modules := modules, options := options }
+      let coreContext : Core.Context :=
+        { fileName := "<lean-dup-session>"
+          fileMap := default
+          options := elaborationOptions options }
+      try
+        let (declarations, _, _) ←
+          MetaM.toIO (collectAcceptedDeclarations context) coreContext { env := env } {} {}
+        sessionEnvCache.set { entry := some { signature := signature, env := env, declarations := declarations } }
+        pure <| Except.ok (env, declarations)
+      catch error =>
+        pure <|
+          Except.error
+            { kind := .internalError
+              message := s!"session environment setup failed: {error}"
+              details := none }
+
+/-- Return the session environment and accepted declarations for `modules` and
+    `options`, reusing the process-global cached environment when the signature
+    matches the previous command and importing only on a miss. -/
+unsafe def sessionEnv (modules : Array ModuleSpec) (options : Options)
+    (initializeSearchPath : Bool := true) :
+    IO (Except Error (Environment × Array AcceptedDeclaration)) := do
+  let signature := sessionSignature modules options
+  let cached ← sessionEnvCache.get
+  match cached.entry with
+  | some entry =>
+      if entry.signature == signature then
+        pure <| Except.ok (entry.env, entry.declarations)
+      else
+        importAndCacheSession signature modules options initializeSearchPath
+  | none => importAndCacheSession signature modules options initializeSearchPath
+
 /--
 Import requested modules and run a Lean action over declarations accepted by the
-same filters used by `extract`.
+same filters used by `extract`, reusing a cached imported environment when the
+module signature matches the previous command.
 
 The action receives Lean environment facts, not protocol rows. Callers must emit
 their own command-specific payloads and must not treat `statement_text` or source
@@ -449,11 +542,10 @@ unsafe def withAcceptedDeclarationsProfiled {α : Type}
   | .error err => pure <| .error err
   | .ok options =>
       let importStarted ← IO.monoMsNow
-      match ← importRequestedModules modules initializeSearchPath with
+      match ← sessionEnv modules options initializeSearchPath with
       | .error err => pure <| .error err
-      | .ok env =>
+      | .ok (env, declarations) =>
           let importFinished ← IO.monoMsNow
-          let context : Context := { modules := modules, options := options }
           let coreContext : Core.Context :=
             { fileName := "<lean-dup-extract>"
               fileMap := default
@@ -463,7 +555,6 @@ unsafe def withAcceptedDeclarationsProfiled {α : Type}
             let (result, _, _) ←
               MetaM.toIO
                 (do
-                  let declarations ← collectAcceptedDeclarations context
                   let result ← operation options declarations
                   pure (result, declarations.size))
                 coreContext

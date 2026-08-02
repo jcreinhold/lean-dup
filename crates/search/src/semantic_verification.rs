@@ -57,6 +57,10 @@ pub struct SemanticVerificationInput<'a> {
     pub include_private: bool,
     pub include_generated: bool,
     pub settings: ProbeSettings,
+    /// Audit-level worker client whose warm session (and imported environment)
+    /// is reused for probe chunks. When absent, verification creates its own
+    /// client — the standalone behavior non-audit callers rely on.
+    pub worker: Option<&'a WorkerClient>,
 }
 
 /// The slice of an opened index that semantic verification needs.
@@ -332,7 +336,12 @@ pub fn verify_candidate_probes(
 
     let total_missing = missing.len() as u64;
     let mut probed = 0_u64;
-    let worker = WorkerClient::with_timeout(PROBE_TIMEOUT);
+    // Reuse the audit's warm worker session when one was threaded through:
+    // a fresh client would spawn a fresh child and re-import the environment.
+    let worker = input.worker.map_or_else(
+        || WorkerClient::with_timeout(PROBE_TIMEOUT),
+        |shared| shared.reconfigured(PROBE_TIMEOUT),
+    );
     for chunk in missing.chunks(input.settings.chunk_size) {
         run_probe_chunk(
             chunk,
@@ -1585,6 +1594,7 @@ mod tests {
             enabled: true,
             include_private: true,
             include_generated: false,
+            worker: None,
             settings: ProbeSettings {
                 policy: ProbePolicy::Broad,
                 budget: 10,
@@ -1640,6 +1650,7 @@ mod tests {
             enabled: true,
             include_private: true,
             include_generated: false,
+            worker: None,
             settings: ProbeSettings {
                 policy: ProbePolicy::Actionable,
                 budget: 10,
@@ -1718,6 +1729,7 @@ mod tests {
             enabled: true,
             include_private: true,
             include_generated: false,
+            worker: None,
             settings: ProbeSettings {
                 policy: ProbePolicy::Actionable,
                 budget: 10,
@@ -1775,6 +1787,7 @@ mod tests {
             enabled: true,
             include_private: false,
             include_generated: false,
+            worker: None,
             settings: ProbeSettings {
                 policy: ProbePolicy::Actionable,
                 budget: 10,
@@ -1822,6 +1835,7 @@ mod tests {
             enabled: true,
             include_private: true,
             include_generated: false,
+            worker: None,
             settings: ProbeSettings {
                 policy: ProbePolicy::Broad,
                 budget: 10,

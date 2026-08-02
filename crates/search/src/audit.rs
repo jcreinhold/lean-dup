@@ -468,6 +468,10 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
     let module_root = request.module_root.clone();
     let foundation = foundation(request.workspace.clone(), module_root.clone(), reporter)?;
     let store = IndexStore::new(foundation.cache.root.clone());
+    // One worker client (one pool, one warm child, one imported environment)
+    // serves every stage of this audit: local index, comparison indexes, and
+    // semantic probes derive their timeout policies from it.
+    let worker = WorkerClient::for_indexing();
     let local_label = "audit-workspace".to_owned();
     let local_module_root = module_root.unwrap_or_else(|| foundation.workspace.selected_roots.join(","));
     let local_summary = reporter.measure("index.local", |reporter| {
@@ -485,7 +489,7 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
                 kind: IndexBuildKind::Local,
                 max_heartbeats: request.max_heartbeats,
             },
-            &WorkerClient::for_indexing(),
+            &worker,
             reporter,
         )
     })?;
@@ -500,7 +504,7 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
     let local_handles = local_index.all_handles()?;
     let workspace_rows = local_index.hydrate(&local_handles)?;
     debug!(workspace_declarations = workspace_rows.len(), "hydrated local index");
-    let compare = open_compare_indexes(&request, &store, &foundation.workspace, reporter)?;
+    let compare = open_compare_indexes(&request, &store, &foundation.workspace, &worker, reporter)?;
     let retrieval_output = reporter.measure("retrieval", |_| retrieve_candidates(&workspace_rows, &compare.indexes))?;
     info!(
         candidate_sets = retrieval_output.candidate_sets.len(),
@@ -541,6 +545,7 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
             enabled: request.semantic_probes,
             include_private: request.include_private,
             include_generated: request.include_generated,
+            worker: Some(&worker),
             settings: ProbeSettings {
                 policy: request.probe_policy,
                 budget: request.probe_budget,
@@ -1292,6 +1297,7 @@ fn open_compare_indexes(
     request: &AuditRequest,
     store: &IndexStore,
     project_workspace: &ResolvedWorkspace,
+    worker: &WorkerClient,
     reporter: &mut Reporter,
 ) -> Result<CompareIndexes> {
     let mut indexes = Vec::new();
@@ -1316,7 +1322,7 @@ fn open_compare_indexes(
                 kind: IndexBuildKind::ProjectMathlib,
                 max_heartbeats: request.max_heartbeats,
             },
-            &WorkerClient::for_indexing(),
+            worker,
             reporter,
         )?;
         indexes.push(store.resolve(IndexReference::Label("mathlib".to_owned()))?);

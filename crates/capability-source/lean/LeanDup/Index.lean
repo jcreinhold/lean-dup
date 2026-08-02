@@ -240,38 +240,18 @@ unsafe def streamIndex
               let chunkSize := Nat.max 1 requestedChunkSize
               let parallelism := Nat.max 1 requestedParallelism
               let abort ← IO.mkRef (none : Option UInt8)
-              match ← LeanDup.Extract.importRequestedModules modules (initializeSearchPath := false) with
+              match ← LeanDup.Extract.sessionEnv modules options (initializeSearchPath := false) with
               | .error err => return .error err.message
-              | .ok env =>
+              | .ok (env, declarations) =>
                   emitFrame handle trampoline abort
                     (LeanRsInterop.Worker.Stream.progress "lean.import" modules.size (some modules.size))
-                  let coreContext : Core.Context :=
-                    { fileName := "<lean-dup-index>"
-                      fileMap := default
-                      options := LeanDup.Extract.elaborationOptions options }
-                  let context : LeanDup.Extract.Context := { modules := modules, options := options }
-                  let collected ←
-                    try
-                      let (declarations, _, _) ←
-                        MetaM.toIO
-                          (LeanDup.Extract.collectAcceptedDeclarations context)
-                          coreContext
-                          { env := env }
-                          {}
-                          {}
-                      pure <| Except.ok declarations
-                    catch error =>
-                      pure <| Except.error s!"mathlib declaration enumeration failed: {error}"
-                  match collected with
+                  emitFrame handle trampoline abort
+                    (LeanRsInterop.Worker.Stream.progress "lean.index.enumerate"
+                      declarations.size (some declarations.size))
+                  emitFrame handle trampoline abort
+                    (LeanRsInterop.Worker.Stream.progress "lean.index.scheduler" 0 (some declarations.size))
+                  match ← emitIndexRanges handle trampoline abort options env declarations chunkSize parallelism with
                   | .error message => return .error message
-                  | .ok declarations =>
-                      emitFrame handle trampoline abort
-                        (LeanRsInterop.Worker.Stream.progress "lean.index.enumerate"
-                          declarations.size (some declarations.size))
-                      emitFrame handle trampoline abort
-                        (LeanRsInterop.Worker.Stream.progress "lean.index.scheduler" 0 (some declarations.size))
-                      match ← emitIndexRanges handle trampoline abort options env declarations chunkSize parallelism with
-                      | .error message => return .error message
-                      | .ok skipped => return .ok ((← abort.get).getD 0, skipped)
+                  | .ok skipped => return .ok ((← abort.get).getD 0, skipped)
 
 end LeanDup.Index
