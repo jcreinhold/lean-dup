@@ -6,6 +6,36 @@ All notable changes to lean-dup are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- **Native Lean worker transport.** The `lean-rs-worker` FFI pool (a dlopen'd `LeanDup` capability dylib behind
+  `lean-rs-worker-parent`/`lean-dup-worker-child`) is replaced by a native Lean 4 executable, `lean-dup-worker`,
+  spawned under `lake env` in the audited workspace and driven over line-framed JSONL (`lean/LeanDup/Server.lean`).
+  Command set, request payloads, row schemas, and stream names are unchanged; only the framing moves. One warm child
+  serves every command of an audit; timeouts and cancellation kill it (the next command respawns, bounded by the
+  Lean-side session cache). `install-worker` now builds the executable per toolchain with that toolchain's own `lake`
+  — no Rust toolchain needed — and the smoke test spawns it and answers `version`. The index cache substrate facts are
+  now Rust-owned transport constants (`2` = JSONL subprocess), so caches re-warm once across the swap. Deleted: the
+  `lean-dup-worker-child` crate, the FFI capability exports (`LeanDup.Capability`), the `lean-rs-*`/`lean-toolchain`
+  dependencies, and the worker-pool machinery.
+- **Import-once everywhere.** The probe-only environment cache (from `8028780`) is generalized into a shared
+  session-environment cache (`LeanDup.Extract.sessionEnv`) used by `extract`, `features`, `probe`, and `index`: one
+  import per module signature per worker session. Previously `extract` and `features` re-imported the full
+  (Mathlib-scale) environment per command, and each audit pipeline stage spawned a fresh worker that re-imported
+  again; one `WorkerClient` engine is now shared across all stages of an audit. Measured on a Mathlib-importing
+  workspace (`KanProofs.Topology` audit): worker physical footprint 4.5 GiB → 0.6 GiB, cold audit 21 s → 16 s,
+  identical findings.
+- **Probe cache scoping (design C).** Semantic probe verdicts moved from the per-`cache_id` index SQLite into a shared
+  store at `<cache_root>/probes/<label>.sqlite`, keyed by the two declarations' content digests plus the transitive
+  import-closure digests of their modules (parsed from `.ilean` headers and Lean sources, no worker round-trip).
+  Editing a file outside both closures no longer discards every cached verdict — measured: adding an unrelated file
+  reused 54/54 probes (0 re-run) where the whole cache previously invalidated. `doctor` reports the shared store;
+  `cache-cleanup` treats it as a managed artifact.
+
+### Removed
+
+- The `lean-rs` worker stack dependency and the FFI capability transport (see above).
+
 ## [0.2.4] - 2026-07-19
 
 ### Changed

@@ -1,8 +1,8 @@
 # Worker protocol v1
 
-The Lean worker answers five command exports loaded as a shared-facet capability into a pooled worker child. This
+The Lean worker answers five commands served by the native `lean-dup-worker` executable over line-framed JSONL. This
 document is the caller-facing contract: schema versions, command guarantees, what Rust may rely on, and what stays
-hidden inside the worker. Rust drives Lean through the `lean-rs-worker-parent` pool, not a subprocess — see
+hidden inside the worker. Rust drives Lean through one warm subprocess per audited workspace — see
 [Transport model](#transport-model) below.
 
 For the pipeline that uses this protocol, see [end-to-end-architecture.md](end-to-end-architecture.md). For the layering
@@ -30,8 +30,8 @@ error events.
 
 **May not rely on:** Lean `Expr` constructors, binder representation, universe representation, or traversal order;
 `statement_text`, pretty-printed types, or display names as semantic inputs; transport field names as encodings of Lean
-syntax; worker batching, import scheduling, capability symbol names, pool lease/session mechanics, or the worker-child
-ABI outside the Rust worker runtime; index storage layout, row ids, transaction order, or report/ranking policy.
+syntax; worker batching, import scheduling, session/process lifecycle, or frame ordering beyond the terminal-frame
+rule; index storage layout, row ids, transaction order, or report/ranking policy.
 
 ## Why opaque ids and JSONL
 
@@ -44,48 +44,58 @@ traversal; Rust owns storage and retrieval; either side can be re-implemented wi
 
 ## Transport model
 
-Rust drives Lean by loading the `LeanDup` shared-facet capability dylib into a pooled worker child through the
-`lean-rs-worker-parent` pool — not by spawning a subprocess per call. Only the `lean-dup-worker-child` binary links
-`libleanshared`; the parent holds a warm worker session per audited workspace (keyed on the import workspace root, so
-all commands reuse one import-once session). The capability is built by `crates/worker/build.rs` and produced behind the
-private `LeanDupCapabilityRuntime` seam in the `lean-dup-worker` crate.
+Rust drives Lean by spawning the native `lean-dup-worker` executable under `lake env` in the audited workspace — one
+warm child per workspace, reused across every command of an audit. Only that executable links `libleanshared`; the
+parent stays free of the Lean runtime ABI. The executable is built per toolchain by `lean-dup install-worker` from the
+packaged Lean source (`lean-dup-capability-source`) and resolved behind the private engine seam in the
+`lean-dup-worker` crate. `lake env` installs the workspace's `.olean` search path; Lean-side, a single-entry session
+environment cache makes all commands share one import per module signature.
 
-The protocol is exposed as exported capability symbols, each taking one UTF-8 JSON request string:
+The wire format is line-framed JSON on stdin/stdout. One request envelope per line:
 
-| Command | Exported symbol | Kind |
-| --- | --- | --- |
-| `version` | `lean_dup_capability_version` | json command (`String → IO String`) |
-| `extract` | `lean_dup_capability_extract` | streaming |
-| `features` | `lean_dup_capability_features` | streaming |
-| `probe` | `lean_dup_capability_probe` | streaming |
-| `index` | `lean_dup_capability_index` | streaming |
+```json
+{"command": "extract", "request": { ... }}
+```
+
+where `request` has exactly the payload shape the command schema defines (modules, filters, pairs, chunk sizes). The
+commands and their kinds:
+
+| Command | Kind |
+| --- | --- |
+| `version` | request/response: one terminal `{"result": ...}` frame |
+| `extract` | streaming |
+| `features` | streaming |
+| `probe` | streaming |
+| `index` | streaming |
+
+Response frames, one JSON object per line:
+
+* `{"stream": <name>, "payload": <row>}` — a typed data row on a caller-named stream (`declarations`, `features`,
+  `probe`); `index` emits on both `declarations` and `features`, routed by stream name;
+* `{"progress": {"phase", "current", "total?"}}` — progress events;
+* `{"diagnostic": {"code", "message"}}` — structured fatal diagnostics;
+* `{"metadata": {"command", "rows", "skipped", "ok", "message?"}}` — the terminal frame of a streaming command
+  (`ok: false` maps to a fatal worker diagnostic);
+* `{"result": <payload>}` — the terminal frame of `version`.
 
 Common request fields are unchanged from the wire schema: `schema_version` (required, `lean-dup.worker.v1`), `command`,
-optional required `capabilities`, and optional `extensions`. The transport no longer carries a Rust-chosen `request_id`:
-correlation is the pool lease, not a field in the payload.
+optional required `capabilities`, and optional `extensions`. There is no `request_id`: one command runs at a time per
+child, so correlation is the line order.
 
-A json command returns exactly one JSON response string. A streaming command emits typed data rows on caller-named
-streams (`declarations`, `features`, `probe`) — the `index` command emits on both `declarations` and `features`, routed
-by stream name — plus out-of-band progress events and structured diagnostic events. The eight logical response *kinds*
-(`version_result`, `declaration_row`, `feature_row`, `probe_result`, `progress`, `complete`, `error`, plus the
-doctor-style health facts below) remain the semantic contract; framing is the worker-child callback ABI, not
-stdin/stdout JSONL.
-
-Two protocol surfaces are **not** capability exports and are composed Rust-side instead:
+Two protocol surfaces are **not** worker commands and are composed Rust-side instead:
 
 - **`doctor`** is not a worker command. The CLI `doctor` subcommand is built from the `version` facts plus Rust-owned
-  workspace and cache checks (olean presence, cache-entry status). The worker never had a Rust caller for a `doctor`
-  command on the audit path, so it is not part of the capability surface.
-- **Worker substrate facts** (the `lean-rs-worker-parent` handshake's transport-framing protocol version and pooled
-  worker runtime version) come from `lease.runtime_metadata()`, not from a Lean export. These are distinct from the
-  `lean-dup.worker.v1` schema string and from the semantic algorithm versions; the index cache key folds them in (see
-  [cache-validity-lifecycle.md](cache-validity-lifecycle.md)) so a worker-substrate change invalidates stale entries.
-  Pool ids, pids, queue counters, and lease keys are deliberately excluded.
+  workspace and cache checks (olean presence, cache-entry status).
+- **Worker substrate facts** (transport-framing protocol version and worker runtime version) are Rust-owned constants:
+  `2` for the JSONL subprocess transport (`1` was the retired `lean-rs-worker` pool) and the `lean-dup-worker` crate
+  version. The index cache key folds them in (see
+  [cache-validity-lifecycle.md](cache-validity-lifecycle.md)) so a transport change invalidates stale entries. Pids,
+  session keys, and queue counters are deliberately excluded.
 
 A fatal failure surfaces as a mapped `WorkerError`: timeouts and cancellation stay recoverable (probe chunk-splitting
-depends on this); child exit, panic, stream-export failure, and worker-reported errors are fatal and discard partial
-output. The protocol does not commit callers to a specific Lean/Rust FFI ABI — only to the request schema, the command
-set, and the response kinds above.
+depends on this) and kill the child — the next command respawns it, and the Lean session cache bounds the cost to one
+re-import. Child exit and worker-reported errors are fatal and discard partial output. The protocol does not commit
+callers to a specific process ABI — only to the request schema, the command set, and the frame kinds above.
 
 ## Failure behavior
 

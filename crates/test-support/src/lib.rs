@@ -27,9 +27,9 @@ pub fn repo_root() -> PathBuf {
 /// can spawn the worker, and return the install directory.
 ///
 /// `cargo install lean-dup` ships the parent Lean-free; the toolchain-specific
-/// artifacts (worker-child binary + `LeanDup` capability dylib) are built on the
-/// user's machine by `lean-dup install-worker`. Tests reproduce that exactly: a
-/// debug worker-child plus the capability, installed under
+/// artifact (the native `lean-dup-worker` executable) is built on the user's
+/// machine by `lean-dup install-worker`. Tests reproduce that exactly: the
+/// executable built from the checkout's `lean/` project, installed under
 /// `<install_root>/<pinned-id>` (or `LEAN_DUP_WORKERS_DIR` when CI sets it). The
 /// default location is what the parent's runtime resolution consults with no
 /// environment override, so both the in-process worker tests and the
@@ -51,27 +51,17 @@ fn provision() -> PathBuf {
     }
     std::fs::create_dir_all(&dir).expect("create worker install dir");
 
-    let built_child = build_worker_child();
-    let installed_child = dir.join(WORKER_FILE_NAME);
-    std::fs::copy(&built_child, &installed_child).expect("copy worker-child into install dir");
-
     let lean_sysroot = id
         .elan_dir()
         .expect("elan toolchain for the pinned toolchain must be installed");
-    let built = lean_dup_capability_source::build_capability_into(&dir, &id.elan_label(), &lean_sysroot)
-        .expect("build LeanDup capability");
+    let built_exe = build_worker_exe(&lean_sysroot);
+    let installed_exe = dir.join(WORKER_FILE_NAME);
+    std::fs::copy(&built_exe, &installed_exe).expect("copy lean-dup-worker into install dir");
 
     let header = hash_lean_header(&lean_sysroot).expect("hash toolchain lean.h");
-    WorkerSidecar::new(
-        &id,
-        header,
-        &lean_sysroot,
-        &built.manifest_path,
-        &built.dylib_path,
-        SmokeOutcome::Passed,
-    )
-    .write(&dir)
-    .expect("write worker sidecar");
+    WorkerSidecar::new(&id, header, &lean_sysroot, SmokeOutcome::Passed)
+        .write(&dir)
+        .expect("write worker sidecar");
     dir
 }
 
@@ -98,12 +88,20 @@ fn worker_is_current(dir: &Path, id: &ToolchainId) -> bool {
 /// test` does not force-build a cross-crate binary that a test only spawns at
 /// runtime, so without this the worker bootstrap fails. Capped at `--jobs 2` so
 /// parallel test binaries do not each launch a full rustc swarm.
-fn build_worker_child() -> PathBuf {
-    let status = Command::new(env!("CARGO"))
-        .args(["build", "-p", "lean-dup-worker-child", "--locked", "--jobs", "2"])
-        .current_dir(repo_root())
+/// Build the native worker executable from the checkout's `lean/` project with
+/// the pinned toolchain's own Lake (its dependencies are already fetched).
+fn build_worker_exe(lean_sysroot: &Path) -> PathBuf {
+    let lean_project = repo_root().join("lean");
+    let lake = lean_sysroot.join("bin").join("lake");
+    let status = Command::new(lake)
+        .args(["build", "lean-dup-worker"])
+        .current_dir(&lean_project)
         .status()
-        .expect("spawn cargo build for lean-dup-worker-child");
-    assert!(status.success(), "failed to build lean-dup-worker-child");
-    repo_root().join("target").join("debug").join(WORKER_FILE_NAME)
+        .expect("spawn lake build for lean-dup-worker");
+    assert!(status.success(), "failed to build lean-dup-worker");
+    lean_project
+        .join(".lake")
+        .join("build")
+        .join("bin")
+        .join(WORKER_FILE_NAME)
 }

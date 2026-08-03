@@ -31,8 +31,8 @@ use serde::{Deserialize, Serialize};
 /// A drift test asserts it equals `<repo>/lean/lean-toolchain`.
 pub const PINNED_TOOLCHAIN: &str = "leanprover/lean4:v4.33.0-rc1";
 
-/// File name of the per-toolchain worker-child binary inside an install dir.
-pub const WORKER_FILE_NAME: &str = "lean-dup-worker-child";
+/// File name of the per-toolchain worker executable inside an install dir.
+pub const WORKER_FILE_NAME: &str = "lean-dup-worker";
 
 /// Developer/CI override pointing the parent at an install dir outside the
 /// standard `<data_local>/lean-dup/workers` layout.
@@ -174,11 +174,11 @@ fn install_cmd(id: &ToolchainId) -> String {
 /// The resolved, ready-to-spawn worker artifacts for one toolchain.
 #[derive(Clone, Debug)]
 pub struct InstalledWorker {
-    /// The `lean-dup-worker-child` binary that links `libleanshared`.
-    pub worker_child: PathBuf,
-    /// The `LeanDup` capability artifact manifest the parent loads.
-    pub capability_manifest: PathBuf,
-    /// The Lean sysroot the child is spawned with (`LEAN_SYSROOT`).
+    /// The native `lean-dup-worker` executable the parent spawns under
+    /// `lake env` in the audited workspace.
+    pub worker_exe: PathBuf,
+    /// The Lean sysroot the worker was built against (diagnostics only: the
+    /// executable finds its own toolchain through `lake env`).
     pub lean_sysroot: PathBuf,
 }
 
@@ -201,14 +201,14 @@ pub fn resolve_installed_worker(workspace_root: &Path) -> Result<InstalledWorker
 /// Resolution core over a concrete install dir, factored out so tests drive the
 /// not-installed/stale/unusable verdicts without mutating the environment.
 fn resolve_in(install_dir: &Path, id: &ToolchainId) -> Result<InstalledWorker, ProvisionError> {
-    let worker_child = install_dir.join(WORKER_FILE_NAME);
+    let worker_exe = install_dir.join(WORKER_FILE_NAME);
     let Some(sidecar) = WorkerSidecar::load(install_dir) else {
         return Err(ProvisionError::NotInstalled {
             toolchain: id.clone(),
             install_cmd: install_cmd(id),
         });
     };
-    if !worker_child.is_file() {
+    if !worker_exe.is_file() {
         return Err(ProvisionError::NotInstalled {
             toolchain: id.clone(),
             install_cmd: install_cmd(id),
@@ -235,8 +235,7 @@ fn resolve_in(install_dir: &Path, id: &ToolchainId) -> Result<InstalledWorker, P
         });
     }
     Ok(InstalledWorker {
-        worker_child,
-        capability_manifest: PathBuf::from(&sidecar.capability_manifest),
+        worker_exe,
         lean_sysroot,
     })
 }
@@ -262,15 +261,14 @@ pub fn hash_lean_header(lean_sysroot: &Path) -> io::Result<String> {
 }
 
 /// Outcome of `install-worker`'s post-build runtime smoke test, recorded in the
-/// sidecar. A header-digest match does not imply ABI compatibility — the
-/// toolchain's `libleanshared` can still crash the worker — so the recorded run
-/// result is the sound "can it actually load" signal.
+/// sidecar: spawn the executable and run the `version` command over the real
+/// JSONL transport.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(tag = "result", rename_all = "lowercase")]
 pub enum SmokeOutcome {
-    /// The built worker loaded the capability and answered `version`.
+    /// The built worker answered `version` over JSONL.
     Passed,
-    /// The worker built but crashed/failed at load. `detail` is the failure
+    /// The worker built but crashed/failed at spawn. `detail` is the failure
     /// (e.g. `signal: 11 (SIGSEGV)`).
     Failed { detail: String },
 }
@@ -284,19 +282,14 @@ pub struct WorkerSidecar {
     toolchain: String,
     /// SHA-256 of the `lean.h` the worker was built against.
     header_digest: String,
-    /// `lean_toolchain::LEAN_VERSION` the host was built against.
+    /// Toolchain id the worker was built against.
     built_against_lean_version: String,
     /// `lean-dup` version (`CARGO_PKG_VERSION`) that built this worker. `""`
     /// (serde default) for a sidecar predating the field.
     #[serde(default)]
     built_by_host_version: String,
-    /// Absolute Lean sysroot the worker-child is spawned with.
+    /// Absolute Lean sysroot the worker was built against.
     lean_sysroot: String,
-    /// Absolute path to the `LeanDup` capability artifact manifest.
-    capability_manifest: String,
-    /// Absolute path to the built `LeanDup` capability dylib (recorded for
-    /// diagnostics; the manifest already points at it).
-    capability_dylib: String,
     /// Post-build runtime smoke outcome. `None` for a sidecar predating it.
     #[serde(default)]
     smoke: Option<SmokeOutcome>,
@@ -309,18 +302,14 @@ impl WorkerSidecar {
         id: &ToolchainId,
         header_digest: String,
         lean_sysroot: &Path,
-        capability_manifest: &Path,
-        capability_dylib: &Path,
         smoke: SmokeOutcome,
     ) -> Self {
         Self {
             toolchain: id.as_str().to_owned(),
             header_digest,
-            built_against_lean_version: lean_toolchain::LEAN_VERSION.to_owned(),
+            built_against_lean_version: id.as_str().to_owned(),
             built_by_host_version: env!("CARGO_PKG_VERSION").to_owned(),
             lean_sysroot: lean_sysroot.display().to_string(),
-            capability_manifest: capability_manifest.display().to_string(),
-            capability_dylib: capability_dylib.display().to_string(),
             smoke: Some(smoke),
         }
     }
@@ -452,14 +441,7 @@ mod tests {
     use super::*;
 
     fn sidecar(id: &ToolchainId, digest: &str, sysroot: &Path, smoke: SmokeOutcome) -> WorkerSidecar {
-        WorkerSidecar::new(
-            id,
-            digest.to_owned(),
-            sysroot,
-            &sysroot.join("manifest.json"),
-            &sysroot.join("LeanDup.dylib"),
-            smoke,
-        )
+        WorkerSidecar::new(id, digest.to_owned(), sysroot, smoke)
     }
 
     #[test]
@@ -551,8 +533,7 @@ mod tests {
             .write(tmp.path())
             .unwrap();
         let installed = resolve_in(tmp.path(), &id).expect("resolves");
-        assert_eq!(installed.worker_child, tmp.path().join(WORKER_FILE_NAME));
-        assert_eq!(installed.capability_manifest, tmp.path().join("manifest.json"));
+        assert_eq!(installed.worker_exe, tmp.path().join(WORKER_FILE_NAME));
         assert_eq!(installed.lean_sysroot, tmp.path());
     }
 }

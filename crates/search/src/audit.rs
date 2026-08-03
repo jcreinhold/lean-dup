@@ -535,11 +535,12 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
             comparison_policy: &compare.provenance.policy,
         })
     });
+    let probe_store = lean_dup_index::ProbeStore::open(&foundation.cache.root, "audit-workspace")?;
     let verification = verify_candidate_probes(
         SemanticVerificationInput {
             candidate_sets: &review_candidate_sets,
             cheap_review: &cheap_review,
-            local_index: VerificationIndex::new(&local_index),
+            local_index: VerificationIndex::with_probe_store(&local_index, &probe_store),
             workspace: &foundation.workspace,
             comparison_policy: &compare.provenance.policy,
             enabled: request.semantic_probes,

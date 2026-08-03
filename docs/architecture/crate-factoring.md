@@ -11,8 +11,8 @@ For the pipeline the crates implement, see [end-to-end-architecture.md](end-to-e
 
 | Crate | Owns | May not depend on |
 | --- | --- | --- |
-| `lean-dup-worker` | Lean worker protocol, pool capability transport (`lean-rs-worker-parent` + `lean-dup-worker-child`), per-workspace toolchain resolution + install-dir/sidecar policy, worker version/substrate policy, timeouts. | any other `lean-dup` crate |
-| `lean-dup-capability-source` | Vendored `LeanDup` Lean source + the runtime `build_capability_into` that builds the capability dylib/manifest on the user's machine (formerly `crates/worker/build.rs`). | any other `lean-dup` crate |
+| `lean-dup-worker` | Lean worker protocol, native JSONL subprocess transport (the `lean-dup-worker` executable under `lake env`), per-workspace toolchain resolution + install-dir/sidecar policy, worker version/substrate policy, timeouts. | any other `lean-dup` crate |
+| `lean-dup-capability-source` | Vendored `LeanDup` Lean source + the runtime `build_worker_into` that builds the `lean-dup-worker` executable with the target toolchain's own Lake on the user's machine. | any other `lean-dup` crate |
 | `lean-dup-diagnostics` | Progress/profile events, runtime perf collection, generic file/JSON helpers. | any other `lean-dup` crate |
 | `lean-dup-project` | Lake workspace discovery, module roots, mathlib source/execution roots, toolchain facts. | index, search, eval, cli |
 | `lean-dup-index` | SQLite indexes, cache keys, provenance metadata, latest pointers, cache diagnostics, cleanup. | search, eval, cli |
@@ -33,10 +33,9 @@ Each crate root is the supported public facade. Submodules and internals stay pr
 
 - **`lean-dup-worker`**: `WorkerClient`, request/result DTOs (`WorkerVersion`, `WorkerIdentity`, `WorkerSubstrateFacts`,
   rows/batches), version/substrate policy, and the `toolchain` module (install-dir resolution, `WorkerSidecar`,
-  `resolve_installed_worker`, `ToolchainId`, provisioning errors). The pool capability transport, the private engine
-  seam (`WorkerEngine`/`PoolEngine`/`LeanDupCapabilityRuntime`), capability symbol names, lease/session mechanics, the
-  `lean-dup-worker-child` ABI, and timeouts are private.
-- **`lean-dup-capability-source`**: `build_capability_into`, `BuiltCapability`, the five capability export-name
+  `resolve_installed_worker`, `ToolchainId`, provisioning errors). The JSONL subprocess transport, the private engine
+  seam (`WorkerEngine`/`SubprocessEngine`), session/process lifecycle, frame decoding, and timeouts are private.
+- **`lean-dup-capability-source`**: `build_worker_into`, `BuiltWorker`, the vendored Lean source layout
   constants, and `BuildError`. The vendored Lean source layout, generated lakefile/manifest, and source-digest hashing
   are private; a drift test keeps the vendored copy byte-identical to `lean/`.
 - **`lean-dup-diagnostics`**: progress/profile events, runtime measurement helpers. No semantic dependencies.

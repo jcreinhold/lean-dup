@@ -1,43 +1,25 @@
 import Lean
 import LeanDup.Extract
 import LeanDup.Features
-import LeanRsInterop.Worker.Stream
+import LeanDup.Frames
 
 /-!
-`LeanDup.Index` owns the capability-mode streaming index: it imports the
-requested modules once and emits both declaration rows and feature rows from
-that single import, with bounded parallel chunking and heartbeat-limit
-splitting.
+`LeanDup.Index` owns the streaming index command: it imports the requested
+modules once (reusing the shared session environment on a signature match) and
+emits both declaration rows and feature rows from that single import, with
+bounded parallel chunking and heartbeat-limit splitting.
 
-This is the `lean-rs-worker` capability analogue of the former subprocess
-`handleIndexStreaming` dispatch in `LeanDup.Worker`. The semantic row payloads
-(`Extract.rowPayloadFromAccepted`, `Features.featureRows`) are unchanged and
-byte-identical to the subprocess worker; only the transport differs: rows,
-progress, and diagnostics are pushed through the
-`LeanRsInterop.Worker.Stream` callback trampoline rather than written as JSONL
-to stdout.
-
-Rows are labelled with the stream names `"declarations"` and `"features"` so the
-Rust pool engine can route each payload to its typed sink. Like the other
-capability exports, this never calls `initSearchPath`: the host worker session
-has already installed the audited workspace's import search path.
+The semantic row payloads (`Extract.rowPayloadFromAccepted`,
+`Features.featureRows`) are transport-independent; rows, progress, and
+diagnostics are pushed through a caller-supplied `emit` callback as JSONL
+frames (`LeanDup.Frames`). Rows are labelled with the stream names
+`"declarations"` and `"features"` so the Rust parent can route each payload to
+its typed sink.
 -/
 namespace LeanDup.Index
 
 open Lean
 open Lean.Meta
-
-/-- Emit one stream frame through the callback trampoline, recording a nonzero
-    cancellation status so the scheduler can stop early. -/
-private def emitFrame
-    (handle trampoline : USize)
-    (abort : IO.Ref (Option UInt8))
-    (frame : String) : IO Unit := do
-  if (← abort.get).isSome then
-    return
-  let status ← LeanRsInterop.Callback.String.call handle trampoline frame
-  if status != 0 then
-    abort.set (some status)
 
 /-- The same heartbeat-limit detection the subprocess scheduler used to decide
     whether a failing chunk should be split rather than aborting the index. -/
@@ -112,15 +94,14 @@ private unsafe def computeIndexRange
   | .error err => pure <| .error err
 
 private unsafe def spawnIndexRange
-    (handle trampoline : USize)
-    (abort : IO.Ref (Option UInt8))
+    (emit : String -> IO Unit)
     (options : LeanDup.Extract.Options)
     (env : Environment)
     (declarations : Array LeanDup.Extract.AcceptedDeclaration)
     (serial : Nat)
     (start stop : Nat) : IO IndexChunkTask := do
-  emitFrame handle trampoline abort
-    (LeanRsInterop.Worker.Stream.progress "lean.index.chunk.start" start (some declarations.size))
+  emit
+    (LeanDup.Frames.progress "lean.index.chunk.start" start (some declarations.size))
   IO.asTask do
     let chunkStarted ← IO.monoMsNow
     let result ← computeIndexRange options env declarations start stop
@@ -136,23 +117,21 @@ private def chunkErrorMessage
   | none => s!"mathlib index chunk failed: {err.message}"
 
 private unsafe def emitIndexChunkResult
-    (handle trampoline : USize)
-    (abort : IO.Ref (Option UInt8))
+    (emit : String -> IO Unit)
     (declarations : Array LeanDup.Extract.AcceptedDeclaration)
     (result : IndexChunkResult) : IO Unit := do
   for payload in result.declarationRows do
-    emitFrame handle trampoline abort (LeanRsInterop.Worker.Stream.row "declarations" payload.compress)
+    emit (LeanDup.Frames.row "declarations" payload.compress)
   for payload in result.featureRows do
-    emitFrame handle trampoline abort (LeanRsInterop.Worker.Stream.row "features" payload.compress)
-  emitFrame handle trampoline abort
-    (LeanRsInterop.Worker.Stream.progress "lean.index.chunk" result.stop (some declarations.size))
+    emit (LeanDup.Frames.row "features" payload.compress)
+  emit
+    (LeanDup.Frames.progress "lean.index.chunk" result.stop (some declarations.size))
 
 /-- Schedule the accepted declarations into bounded parallel chunks, emitting
     declaration and feature rows as each chunk completes and splitting any
     heartbeat-limited chunk rather than failing the whole index. -/
 private unsafe def emitIndexRanges
-    (handle trampoline : USize)
-    (abort : IO.Ref (Option UInt8))
+    (emit : String -> IO Unit)
     (options : LeanDup.Extract.Options)
     (env : Environment)
     (declarations : Array LeanDup.Extract.AcceptedDeclaration)
@@ -170,15 +149,15 @@ private unsafe def emitIndexRanges
   let mut failed : Option String := none
   let mut skippedTotal := 0
 
-  while failed.isNone && (← abort.get).isNone && active.length < maxActive && !pending.isEmpty do
+  while failed.isNone && active.length < maxActive && !pending.isEmpty do
     match pending with
     | [] => pure ()
     | (rangeStart, rangeStop) :: rest =>
         pending := rest
-        let task ← spawnIndexRange handle trampoline abort options env declarations serial rangeStart rangeStop
+        let task ← spawnIndexRange emit options env declarations serial rangeStart rangeStop
         active := active.concat task
         serial := serial + 1
-  while failed.isNone && (← abort.get).isNone && !active.isEmpty do
+  while failed.isNone && !active.isEmpty do
     match active with
     | [] => pure ()
     | task :: rest =>
@@ -189,21 +168,21 @@ private unsafe def emitIndexRanges
             failed := some s!"mathlib index task failed: {ioErr}"
         | .ok (_serial, _rangeStart, _rangeStop, _elapsedMs, .ok result) =>
             skippedTotal := skippedTotal + result.skipped
-            emitIndexChunkResult handle trampoline abort declarations result
+            emitIndexChunkResult emit declarations result
         | .ok (_serial, rangeStart, rangeStop, _elapsedMs, .error err) =>
             if heartbeatLike err.message && rangeStop - rangeStart > 1 then
-              emitFrame handle trampoline abort
-                (LeanRsInterop.Worker.Stream.progress "lean.index.chunk.split" rangeStart (some declarations.size))
+              emit
+                (LeanDup.Frames.progress "lean.index.chunk.split" rangeStart (some declarations.size))
               let mid := rangeStart + (rangeStop - rangeStart) / 2
               pending := (rangeStart, mid) :: (mid, rangeStop) :: pending
             else
               failed := some (chunkErrorMessage declarations rangeStart err)
-        while failed.isNone && (← abort.get).isNone && active.length < maxActive && !pending.isEmpty do
+        while failed.isNone && active.length < maxActive && !pending.isEmpty do
           match pending with
           | [] => pure ()
           | (rangeStart, rangeStop) :: rest =>
               pending := rest
-              let task ← spawnIndexRange handle trampoline abort options env declarations serial rangeStart rangeStop
+              let task ← spawnIndexRange emit options env declarations serial rangeStart rangeStop
               active := active.concat task
               serial := serial + 1
 
@@ -214,18 +193,19 @@ private unsafe def emitIndexRanges
   | none => pure <| .ok skippedTotal
 
 /--
-Import the requested modules once and stream declaration and feature rows from
-that single import through the worker callback trampoline.
+Import the requested modules once (reusing the shared session environment on a
+signature match) and stream declaration and feature rows from that single
+import through `emit`.
 
 Returns `.error message` for a request, import, enumeration, or chunk failure
-(the caller frames it as a terminal diagnostic), or `.ok status` where `status`
-is `0` for a clean run or the nonzero cancellation byte reported by the host
-when it asked the stream to stop.
+(the caller frames it as a terminal diagnostic), or `.ok skipped` with the
+count of declarations skipped under the heartbeat budget. Cancellation is the
+caller's concern: the native server is killed by its parent.
 -/
 unsafe def streamIndex
-    (handle trampoline : USize)
+    (emit : String → IO Unit)
     (json : Json)
-    (modules : Array LeanDup.Extract.ModuleSpec) : IO (Except String (UInt8 × Nat)) := do
+    (modules : Array LeanDup.Extract.ModuleSpec) : IO (Except String Nat) := do
   if modules.isEmpty then
     return .error "`modules` must contain at least one module"
   match LeanDup.Extract.parseOptions json with
@@ -239,19 +219,18 @@ unsafe def streamIndex
           | .ok requestedParallelism =>
               let chunkSize := Nat.max 1 requestedChunkSize
               let parallelism := Nat.max 1 requestedParallelism
-              let abort ← IO.mkRef (none : Option UInt8)
-              match ← LeanDup.Extract.sessionEnv modules options (initializeSearchPath := false) with
+              match ← LeanDup.Extract.sessionEnv modules options (initializeSearchPath := true) with
               | .error err => return .error err.message
               | .ok (env, declarations) =>
-                  emitFrame handle trampoline abort
-                    (LeanRsInterop.Worker.Stream.progress "lean.import" modules.size (some modules.size))
-                  emitFrame handle trampoline abort
-                    (LeanRsInterop.Worker.Stream.progress "lean.index.enumerate"
+                  emit
+                    (LeanDup.Frames.progress "lean.import" modules.size (some modules.size))
+                  emit
+                    (LeanDup.Frames.progress "lean.index.enumerate"
                       declarations.size (some declarations.size))
-                  emitFrame handle trampoline abort
-                    (LeanRsInterop.Worker.Stream.progress "lean.index.scheduler" 0 (some declarations.size))
-                  match ← emitIndexRanges handle trampoline abort options env declarations chunkSize parallelism with
+                  emit
+                    (LeanDup.Frames.progress "lean.index.scheduler" 0 (some declarations.size))
+                  match ← emitIndexRanges emit options env declarations chunkSize parallelism with
                   | .error message => return .error message
-                  | .ok skipped => return .ok ((← abort.get).getD 0, skipped)
+                  | .ok skipped => return .ok skipped
 
 end LeanDup.Index

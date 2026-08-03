@@ -14,14 +14,11 @@ members = [
   "crates/vector-index",
   "crates/vector-search",
   "crates/worker",
-  "crates/worker-child",
 ]
 resolver = "3"
 
 [workspace.package]
 edition = "2024"
-# Floor raised from 1.85 to 1.91 by adopting the lean-rs 0.2.0 pool worker crates,
-# whose workspace pins rust-version = "1.91".
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/jcreinhold/lean-dup"
 rust-version = "1.91"
@@ -52,13 +49,6 @@ lean-dup-search = { path = "crates/search", version = "0.2.4" }
 lean-dup-test-support = { path = "crates/test-support" }
 lean-dup-vector-index = { path = "crates/vector-index", version = "0.2.4" }
 lean-dup-worker = { path = "crates/worker", version = "0.2.4" }
-# lean-rs worker stack (published crates.io releases). The parent crate carries
-# no libleanshared linkage; only the worker-child binary links the Lean runtime.
-lean-rs-interop-shims = { version = "0.4" }
-lean-rs-worker-child = { version = "0.4" }
-lean-rs-worker-parent = { version = "0.4" }
-lean-rs-worker-protocol = { version = "0.4" }
-lean-toolchain = { version = "0.4" }
 # Shared semantic-search Rust crates (published crates.io releases). The runtime
 # crate owns the packaged Lean source materialized by the worker build.
 lean-semantic-search-contract = { version = "0.4" }

@@ -230,10 +230,10 @@ impl WorkerVersion {
 /// queue counters are deliberately excluded.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WorkerSubstrateFacts {
-    /// The `lean-rs-worker` transport framing protocol version (not the
-    /// `lean-dup.worker.v1` schema string).
+    /// The worker transport framing protocol version (`1` = the retired
+    /// `lean-rs-worker` pool, `2` = the native JSONL subprocess).
     pub protocol_version: u16,
-    /// The pooled worker runtime version reported at handshake.
+    /// The `lean-dup-worker` crate version that owns the transport.
     pub worker_version: String,
 }
 

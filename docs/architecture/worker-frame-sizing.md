@@ -1,6 +1,10 @@
 # Worker Frame Sizing (design)
 
-> Status: **implemented.** The `index-mathlib` frame overrun is fixed by hoisting the repeated per-module constants out
+> Status: **implemented; transport superseded.** The `lean-rs-worker` FFI pool this doc's frame-cap negotiation refers
+> to has been replaced by the native JSONL subprocess transport (no frame-size negotiation: lines are unbounded
+> length-prefixed JSON). The payload-hoisting fix (`modules_payload`) remains load-bearing for request size. The
+> remainder of this document is retained for historical context. The `index-mathlib` frame overrun is fixed by hoisting
+> the repeated per-module constants out
 > of the request manifest (`modules_payload` + the `Capability.lean` / `Protocol.lean` parsers), with the negotiated
 > frame cap raised to a finite 16 MiB default as headroom. A separate, earlier change bounds `statement_text` at
 > extraction — valid display-row hardening, but **not** the mathlib fix (see "A correction" below). Authored against

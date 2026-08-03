@@ -212,6 +212,16 @@ fn render_doctor(report: &DoctorReport, options: RenderOptions) -> String {
         format_bytes(report.cache.total_disk_bytes),
         reclaimable_summary,
     ));
+    if !report.cache.probe_stores.is_empty() {
+        let probe_rows: u64 = report.cache.probe_stores.iter().map(|store| store.rows).sum();
+        let probe_bytes: u64 = report.cache.probe_stores.iter().map(|store| store.disk_bytes).sum();
+        lines.push(format!(
+            "probe stores: {} shared, {} cached verdicts, {} on disk",
+            report.cache.probe_stores.len(),
+            probe_rows,
+            format_bytes(probe_bytes),
+        ));
+    }
     lines.push(format!(
         "release: {} ({}, {})    index schema: {}",
         report.release.version,
@@ -1106,6 +1116,7 @@ mod doctor_render_tests {
             cache_root: PathBuf::from("/tmp/cache"),
             cache_fingerprint: "rust-cli-cache.v1:abc".to_owned(),
             cache: CacheDiagnosticsReport {
+                probe_stores: Vec::new(),
                 cache_root: PathBuf::from("/tmp/cache"),
                 total_disk_bytes,
                 labels,

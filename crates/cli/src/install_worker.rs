@@ -1,24 +1,19 @@
 //! `lean-dup install-worker` — build the toolchain-specific worker on this
 //! machine.
 //!
-//! `cargo install lean-dup` ships the parent Lean-free. The artifacts that link
-//! Lean — the `lean-dup-worker-child` binary and the `LeanDup` capability dylib
-//! plus its dependency dylibs — are built here, into
+//! `cargo install lean-dup` ships the parent Lean-free. The artifact that links
+//! Lean — the native `lean-dup-worker` executable — is built here, into
 //! `<install_root>/<toolchain-id>/`, and resolved at audit time from the audited
-//! project's `lean-toolchain` pin. One toolchain is built per invocation: the one
-//! named by `--toolchain`, or the current directory's `lean-toolchain`, or
+//! project's `lean-toolchain` pin. One toolchain is built per invocation: the
+//! one named by `--toolchain`, or the current directory's `lean-toolchain`, or
 //! lean-dup's development pin.
 //!
-//! The build has two halves. The worker-child comes from `cargo` — a local
-//! checkout (`cargo build -p lean-dup-worker-child`) when this binary was built
-//! from one, otherwise the published crate (`cargo install
-//! lean-dup-worker-child`), in both cases with `LEAN_SYSROOT` pointed at the
-//! target toolchain's elan dir so it links that toolchain's `libleanshared`. The
-//! capability comes from `lean-dup-capability-source`, whose packaged Lean source
-//! survives a crates.io unpack. After both build, a post-build smoke test spawns
-//! the worker and runs the `version` export through the real dlopen chain — a
-//! matching header digest does not imply ABI compatibility, so this is the sound
-//! "can it actually load" signal — and the outcome is recorded in the sidecar.
+//! The build is one `lake build lean-dup-worker` with the target toolchain's own
+//! Lake, either in a checkout's `lean/` project (`--source-dir`) or from the
+//! packaged Lean source in `lean-dup-capability-source` (which survives a
+//! crates.io unpack). After the build, a smoke test spawns the executable and
+//! runs the `version` command over the real JSONL transport, and the outcome is
+//! recorded in the sidecar.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -58,42 +53,29 @@ fn install(args: &InstallWorkerArgs) -> Result<PathBuf, String> {
         return Ok(dest);
     }
 
-    // The elan toolchain has to exist before the worker-child and capability can
-    // link against it; surface the actionable `elan toolchain install` hint up
-    // front rather than after a failed build.
+    // The elan toolchain has to exist before the worker can build against it;
+    // surface the actionable `elan toolchain install` hint up front rather than
+    // after a failed build.
     let lean_sysroot = id.elan_dir().map_err(|error| error.to_string())?;
 
-    let staged = build_worker_child(args, &id, &lean_sysroot)?;
+    eprintln!("==> building lean-dup-worker executable for {id}");
+    let built_exe = build_worker_exe(args, &id, &lean_sysroot)?;
     std::fs::create_dir_all(&dest).map_err(|error| format!("create install dir {}: {error}", dest.display()))?;
-    let installed_child = dest.join(WORKER_FILE_NAME);
-    move_into_place(&staged.binary, &installed_child)?;
-
-    eprintln!("==> building LeanDup capability for {id}");
-    let built = lean_dup_capability_source::build_capability_into(&dest, &id.elan_label(), &lean_sysroot)
-        .map_err(|error| format!("build LeanDup capability: {error}"))?;
+    let installed_exe = dest.join(WORKER_FILE_NAME);
+    move_into_place(&built_exe, &installed_exe)?;
 
     let header_digest = hash_lean_header(&lean_sysroot).map_err(|error| format!("hash toolchain lean.h: {error}"))?;
 
-    // Write the sidecar optimistically so the smoke test's resolution finds the
-    // freshly built artifacts; the smoke outcome is then recorded for real below.
-    write_sidecar(&dest, &id, &header_digest, &lean_sysroot, &built, SmokeOutcome::Passed)?;
-
-    eprintln!("==> smoke test: load the capability and run `version` for {id}");
+    eprintln!("==> smoke test: spawn the worker and run `version` for {id}");
     if let Err(detail) = smoke_test(&id) {
-        write_sidecar(
-            &dest,
-            &id,
-            &header_digest,
-            &lean_sysroot,
-            &built,
-            SmokeOutcome::Failed { detail: detail.clone() },
-        )?;
+        write_sidecar(&dest, &id, &header_digest, &lean_sysroot, SmokeOutcome::Failed { detail: detail.clone() })?;
         return Err(format!(
-            "worker for {id} built but FAILED its smoke test ({detail}); this toolchain's libleanshared is \
-             likely ABI-incompatible with lean-dup's lean-rs build. The worker is recorded as unusable and will \
-             not be served — audit a project on a toolchain lean-dup supports, or rebuild against a different pin"
+            "worker for {id} built but FAILED its smoke test ({detail}); the worker is recorded as unusable and \
+             will not be served — audit a project on a toolchain lean-dup supports, or rebuild against a \
+             different pin"
         ));
     }
+    write_sidecar(&dest, &id, &header_digest, &lean_sysroot, SmokeOutcome::Passed)?;
 
     eprintln!("==> installed worker for {id} at {}", dest.display());
     Ok(dest)
@@ -128,89 +110,42 @@ fn worker_is_current(dest: &Path, id: &ToolchainId) -> bool {
     sidecar.header_matches(&current)
 }
 
-/// A freshly built worker-child binary, plus the temp dir that owns it for the
-/// registry build (kept alive until the binary is relocated).
-struct StagedWorker {
-    binary: PathBuf,
-    _tmp: Option<tempfile::TempDir>,
-}
-
-/// Build `lean-dup-worker-child` for `id`. A `--source-dir` or an in-checkout
-/// build uses `cargo build`; a registry-installed parent uses `cargo install` of
-/// the published worker-child at this binary's exact version (they share the
-/// workspace version and are ABI-coupled in lockstep). `LEAN_SYSROOT` pins the
-/// link target toolchain.
-fn build_worker_child(args: &InstallWorkerArgs, id: &ToolchainId, lean_sysroot: &Path) -> Result<StagedWorker, String> {
-    if let Some(workspace) = workspace_source(args) {
-        eprintln!("==> building {WORKER_FILE_NAME} for {id} (workspace source)");
-        let status = Command::new("cargo")
-            .args(["build", "--release", "-p", WORKER_FILE_NAME, "--locked"])
-            .current_dir(&workspace)
-            .env("LEAN_SYSROOT", lean_sysroot)
-            .status()
-            .map_err(|error| format!("spawn cargo build: {error}"))?;
-        if !status.success() {
+/// Build the `lean-dup-worker` executable for `id` and return its path.
+///
+/// `--source-dir` builds the checkout's `lean/` project in place (its
+/// dependencies are already fetched); otherwise the packaged Lean source in
+/// `lean-dup-capability-source` is materialized under the install dir and built
+/// there, so a registry-installed parent needs no checkout and no network. Both
+/// paths run the target toolchain's own `lake`.
+fn build_worker_exe(args: &InstallWorkerArgs, id: &ToolchainId, lean_sysroot: &Path) -> Result<PathBuf, String> {
+    if let Some(source_dir) = &args.source_dir {
+        let lean_project = source_dir.join("lean");
+        if !lean_project.join("lakefile.lean").is_file() {
             return Err(format!(
-                "cargo build -p {WORKER_FILE_NAME} (toolchain {id}) failed with status {status}"
+                "--source-dir {} does not look like a lean-dup checkout (no lean/lakefile.lean)",
+                source_dir.display()
             ));
         }
-        let binary = workspace.join("target").join("release").join(WORKER_FILE_NAME);
-        if !binary.is_file() {
-            return Err(format!("expected worker binary at {} but found none", binary.display()));
+        eprintln!("==> building {WORKER_FILE_NAME} for {id} (checkout source)");
+        let lake = lean_sysroot.join("bin").join("lake");
+        let status = Command::new(&lake)
+            .args(["build", "lean-dup-worker"])
+            .current_dir(&lean_project)
+            .status()
+            .map_err(|error| format!("spawn lake build: {error}"))?;
+        if !status.success() {
+            return Err(format!("lake build lean-dup-worker (toolchain {id}) failed with status {status}"));
         }
-        return Ok(StagedWorker { binary, _tmp: None });
+        let exe = lean_project.join(".lake").join("build").join("bin").join(WORKER_FILE_NAME);
+        if !exe.is_file() {
+            return Err(format!("expected worker executable at {} but found none", exe.display()));
+        }
+        return Ok(exe);
     }
 
-    let version = env!("CARGO_PKG_VERSION");
-    eprintln!("==> installing {WORKER_FILE_NAME} {version} for {id} (crates.io)");
-    let tmp = tempfile::tempdir().map_err(|error| format!("create temp dir: {error}"))?;
-    let status = Command::new("cargo")
-        .args(["install", WORKER_FILE_NAME, "--version"])
-        .arg(format!("={version}"))
-        .args(["--root"])
-        .arg(tmp.path())
-        .arg("--locked")
-        .env("LEAN_SYSROOT", lean_sysroot)
-        .status()
-        .map_err(|error| format!("spawn cargo install: {error}"))?;
-    if !status.success() {
-        return Err(format!(
-            "cargo install {WORKER_FILE_NAME}@={version} (toolchain {id}) failed with status {status}; \
-             a Rust toolchain and network access are required"
-        ));
-    }
-    let binary = tmp.path().join("bin").join(WORKER_FILE_NAME);
-    if !binary.is_file() {
-        return Err(format!(
-            "cargo install did not produce a worker binary at {}",
-            binary.display()
-        ));
-    }
-    Ok(StagedWorker {
-        binary,
-        _tmp: Some(tmp),
-    })
-}
-
-/// The checkout to build the worker-child from: `--source-dir` if given, else
-/// this binary's own workspace when it was built from a checkout (the
-/// worker-child crate sits beside it), else `None` (registry build).
-fn workspace_source(args: &InstallWorkerArgs) -> Option<PathBuf> {
-    if let Some(dir) = &args.source_dir {
-        return Some(dir.clone());
-    }
-    // `CARGO_MANIFEST_DIR` is `<repo>/crates/cli` for a checkout build; for a
-    // registry-installed binary it points into `~/.cargo/registry/...` with no
-    // worker-child crate beside it. Probe for that crate specifically.
-    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .map(Path::to_path_buf)?;
-    repo.join("crates")
-        .join("worker-child")
-        .join("Cargo.toml")
-        .is_file()
-        .then_some(repo)
+    let built = lean_dup_capability_source::build_worker_into(&install_dir(id), &id.elan_label(), lean_sysroot)
+        .map_err(|error| format!("build lean-dup-worker: {error}"))?;
+    Ok(built.exe_path)
 }
 
 /// Relocate `from` to `to`, replacing any existing file. Falls back to copy when
@@ -222,7 +157,7 @@ fn move_into_place(from: &Path, to: &Path) -> Result<(), String> {
     if std::fs::rename(from, to).is_ok() {
         return Ok(());
     }
-    std::fs::copy(from, to).map_err(|error| format!("copy worker binary to {}: {error}", to.display()))?;
+    std::fs::copy(from, to).map_err(|error| format!("copy worker executable to {}: {error}", to.display()))?;
     Ok(())
 }
 
@@ -231,25 +166,17 @@ fn write_sidecar(
     id: &ToolchainId,
     header_digest: &str,
     lean_sysroot: &Path,
-    built: &lean_dup_capability_source::BuiltCapability,
     smoke: SmokeOutcome,
 ) -> Result<(), String> {
-    WorkerSidecar::new(
-        id,
-        header_digest.to_owned(),
-        lean_sysroot,
-        &built.manifest_path,
-        &built.dylib_path,
-        smoke,
-    )
-    .write(dest)
-    .map_err(|error| format!("write worker sidecar: {error}"))
+    WorkerSidecar::new(id, header_digest.to_owned(), lean_sysroot, smoke)
+        .write(dest)
+        .map_err(|error| format!("write worker sidecar: {error}"))
 }
 
-/// Spawn the just-built worker and run the `version` export through the real
-/// dlopen chain. A temp workspace pins the toolchain so resolution selects the
-/// install dir we just wrote; the `version` export ignores its request payload,
-/// so no `.olean` files are needed — loading the capability is the test.
+/// Spawn the just-built worker and run the `version` command over the real
+/// JSONL transport. A temp workspace pins the toolchain so resolution selects
+/// the install dir we just wrote; `version` needs no `.olean` files — spawning
+/// and answering is the test.
 fn smoke_test(id: &ToolchainId) -> Result<(), String> {
     let workspace = tempfile::tempdir().map_err(|error| format!("create smoke workspace: {error}"))?;
     std::fs::write(

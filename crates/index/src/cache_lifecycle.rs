@@ -20,6 +20,16 @@ pub struct CacheDiagnostics {
     pub cache_root: PathBuf,
     pub total_disk_bytes: u64,
     pub labels: Vec<CacheLabelDiagnostics>,
+    pub probe_stores: Vec<ProbeStoreDiagnostics>,
+}
+
+/// Size facts for one shared probe-verdict store (`<cache_root>/probes/<label>.sqlite`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ProbeStoreDiagnostics {
+    pub label: String,
+    pub path: PathBuf,
+    pub rows: u64,
+    pub disk_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -131,12 +141,49 @@ pub fn diagnose_cache(
     for (label, label_dir) in labels {
         reports.push(diagnose_label(&label, label_dir, &expected_by_dir, store)?);
     }
-    let total_disk_bytes = reports.iter().map(|label| label.disk_bytes).sum();
+    let probe_stores = diagnose_probe_stores(&cache_root);
+    let total_disk_bytes = reports.iter().map(|label| label.disk_bytes).sum::<u64>()
+        + probe_stores.iter().map(|store| store.disk_bytes).sum::<u64>();
     Ok(CacheDiagnostics {
         cache_root,
         total_disk_bytes,
         labels: reports,
+        probe_stores,
     })
+}
+
+/// Shared probe stores are managed artifacts (not orphans): report their size
+/// alongside the per-label index facts. Unreadable stores are skipped — doctor
+/// reports what it can see, it does not repair.
+fn diagnose_probe_stores(cache_root: &Path) -> Vec<ProbeStoreDiagnostics> {
+    let probes_dir = cache_root.join("probes");
+    let Ok(entries) = std::fs::read_dir(&probes_dir) else {
+        return Vec::new();
+    };
+    let mut stores = Vec::new();
+    for entry in entries.filter_map(std::result::Result::ok) {
+        let path = entry.path();
+        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        if path.extension().and_then(|ext| ext.to_str()) != Some("sqlite") {
+            continue;
+        }
+        let Ok(store) = crate::probe_store::ProbeStore::open(cache_root, stem) else {
+            continue;
+        };
+        let Ok(facts) = store.facts() else {
+            continue;
+        };
+        stores.push(ProbeStoreDiagnostics {
+            label: stem.to_owned(),
+            path,
+            rows: facts.rows,
+            disk_bytes: facts.bytes,
+        });
+    }
+    stores.sort_by(|left, right| left.label.cmp(&right.label));
+    stores
 }
 
 pub fn cleanup_cache(

@@ -1,6 +1,6 @@
 [package]
 categories = ["development-tools"]
-description = "Lean worker process boundary for lean-dup: per-toolchain capability resolution over the versioned worker protocol."
+description = "Lean worker process boundary for lean-dup: per-toolchain native worker resolution over the versioned worker protocol."
 edition = { workspace = true }
 keywords = ["audit", "duplication", "lean", "lean4"]
 license = { workspace = true }
@@ -10,8 +10,6 @@ version = { workspace = true }
 
 [dependencies]
 dirs = { workspace = true }
-lean-rs-worker-parent = { workspace = true }
-lean-toolchain = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

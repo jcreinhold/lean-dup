@@ -1,8 +1,8 @@
 [package]
 categories = ["development-tools"]
-description = "Packaged LeanDup capability Lean source and the per-toolchain build that produces its shared-facet dylib for lean-dup."
+description = "Packaged lean-dup-worker Lean source and the per-toolchain build that produces the native worker executable for lean-dup."
 edition = { workspace = true }
-include = ["Cargo.toml", "lean/LeanDup.lean", "lean/LeanDup/**/*.lean", "src/**/*.rs"]
+include = ["Cargo.toml", "lean/lakefile.lean", "lean/Main.lean", "lean/LeanDup.lean", "lean/LeanDup/**/*.lean", "src/**/*.rs"]
 keywords = ["audit", "duplication", "lean", "lean4"]
 license = { workspace = true }
 name = "lean-dup-capability-source"
@@ -10,10 +10,7 @@ repository = { workspace = true }
 version = { workspace = true }
 
 [dependencies]
-lean-rs-interop-shims = { workspace = true }
-lean-rs-worker-protocol = { workspace = true }
 lean-semantic-search-runtime = { workspace = true }
-lean-toolchain = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 tracing = { workspace = true }

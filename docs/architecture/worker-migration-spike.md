@@ -1,10 +1,9 @@
 # Worker Migration Slice -- Capability `extract`
 
-> **Status: superseded.** This slice converted only `extract`. The full cut-over (all five commands, subprocess
-> substrate deleted, substrate facts in the cache key) is complete — see
-> [validation/worker-migration-validation.md](validation/worker-migration-validation.md). This document is retained for
-> historical context; statements below about commands "still on the subprocess path" or the surviving
-> `lean_exe lean_dup_worker` target no longer hold.
+**Status: superseded twice.** This slice converted only `extract` from the original subprocess JSONL worker to the FFI
+> capability. The FFI capability itself has since been retired: the current transport is again a native subprocess
+> (`lean-dup-worker` executable, `lake env`, JSONL), now with the Lean-side session-environment cache that the
+> capability era was created to achieve. This document is retained for historical context.
 
 This document records the migration gate that follows the Phase 0 spike
 ([guide](../../../prompts/guides/lean-dup-lean-rs-worker-migration-guide.md)). The slice converts one command,

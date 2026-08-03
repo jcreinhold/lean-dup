@@ -6,6 +6,8 @@
 
 mod cache;
 mod cache_lifecycle;
+mod import_graph;
+mod probe_store;
 mod error;
 mod external_provenance;
 mod feature_dto;
@@ -14,9 +16,12 @@ mod index;
 pub use cache::{CACHE_KEY_VERSION, CacheFacts, cache_root, resolve_cache, workspace_fingerprint};
 pub use cache_lifecycle::{
     CacheCleanupEntry, CacheCleanupReport, CacheDiagnostics, CacheEntryDiagnostics, CacheEntryStatus,
-    CacheLabelDiagnostics, CacheLatestDiagnostics, CacheLatestStatus, CleanupPolicy, cleanup_cache, diagnose_cache,
+    CacheLabelDiagnostics, CacheLatestDiagnostics, CacheLatestStatus, CleanupPolicy, ProbeStoreDiagnostics,
+    cleanup_cache, diagnose_cache,
 };
 pub use error::{Error, Result};
+pub use import_graph::ModuleClosureResolver;
+pub use probe_store::{ProbeStore, ProbeStoreFacts};
 pub use external_provenance::{
     ComparisonEvidenceMode, ComparisonEvidencePolicy, ComparisonProvenance, ComparisonProvenanceReport,
     resolve as resolve_comparison_provenance,

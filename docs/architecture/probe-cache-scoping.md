@@ -1,6 +1,6 @@
 # Probe Cache Scoping (design)
 
-> Status: **design — not yet implemented.** Authored against lean-dup `0.1.0` (`lean-dup.index.v3`). Companion to
+> Status: **implemented** (post-`0.2.4`). Companion to
 > [cache-validity-lifecycle.md](cache-validity-lifecycle.md), which owns the *index* lifecycle; this doc owns the
 > *semantic probe* lifecycle, which is currently coupled to the index lifecycle and over-invalidates.
 
@@ -89,18 +89,13 @@ is consulted and written during `audit` regardless of which index `cache_id` is 
 
 ### Worker import graph (the new capability)
 
-`closure_digest` needs each module's transitive import set. The worker does not expose this today. Two sourcing options,
-in preference order:
-
-1. **`.ilean` / olean import headers, pure Rust.** Lean's `.olean`/`.ilean` files carry the direct-import list in their
-   header; the transitive closure is a fixed point over those. This is parseable without a Lean runtime (cf. the
-   `.ilean` JSON-v5 format used elsewhere), so it can live in the index crate with no worker round-trip. Preferred — no
-   protocol change.
-2. **A worker `import_graph` command.** If header parsing proves brittle across toolchains, add a typed worker command
-   returning `module -> [direct imports]` and compute the closure in Rust. Costs a protocol-version bump.
-
-Per-module content digests already exist in the workspace cache key; the closure digest folds them along the import
-edges.
+`closure_digest` needs each module's transitive import set. As implemented, option 1 (pure Rust) carries this:
+`crates/index/src/import_graph.rs` parses each built module's `.ilean` `directImports` JSON, computes the transitive
+closure as a fixpoint, and folds each member's Lean **source** digest into the closure digest (falling back to the
+`.ilean` bytes when a source is not visible). Resolution searches the workspace build directory and every
+`.lake/packages/*` build directory, so dependency modules resolve alongside workspace modules. No worker round-trip,
+no protocol change. Option 2 (a worker `import_graph` command) remains the fallback if header parsing proves brittle
+across toolchains.
 
 ### Lifecycle integration
 

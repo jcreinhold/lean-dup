@@ -11,8 +11,9 @@ One rule sits above everything else:
 - **Lean** computes semantic facts that require the elaborated Lean environment.
 - **Rust** owns everything else: persistence, workflow, retrieval, ranking, reporting, evaluation, release.
 
-Rust asks Lean semantic questions through a narrow, versioned [worker protocol](worker-protocol.md), carried by a pooled
-shared-facet capability (`lean-rs-worker-parent` loading the `LeanDup` dylib through `lean-dup-worker-child`). The
+Rust asks Lean semantic questions through a narrow, versioned [worker protocol](worker-protocol.md), carried by a
+line-framed JSONL subprocess: the native `lean-dup-worker` executable, spawned under `lake env` in the audited
+workspace, one warm child per audit. The
 request schema and JSON payloads are transport encodings, not architecture. Rust must not inspect Lean expressions,
 recompute semantic fingerprints from pretty-printed types, or let SQLite layout leak into audit, ranking, or reporting
 code.
@@ -36,8 +37,9 @@ features, and probe-like checks from strings. It looks convenient because Rust o
 semantics into the scale layer and turns display text into a false abstraction.
 
 The chosen design hides Lean expression traversal entirely behind the worker. Rust stores opaque ids and keys, never
-parses Lean syntax, and never calls into a Lean FFI on the default path. A measured FFI spike remains optional; it is
-not the production starting point.
+parses Lean syntax, and never links the Lean runtime: the worker is a separate process, so process exit reclaims all
+imported-environment memory (imported compacted regions are process-global and never returned by `Drop`). A measured
+FFI spike remains optional; it is not the production starting point.
 
 ## The five layers
 
@@ -106,8 +108,8 @@ These capabilities are preserved across the rewrite; new work must not regress t
 
 `lean-dup` is not a theorem prover or a semantic search service. The default auditor does not perform broad proof
 search, use embeddings, call network services, or rewrite Lean files. The default route is a versioned worker API
-carried by a pooled shared-facet capability: only the `lean-dup-worker-child` binary links `libleanshared`, so the audit
-process itself stays free of the Lean runtime ABI.
+carried by the native `lean-dup-worker` subprocess: only that executable links `libleanshared`, so the audit process
+itself stays free of the Lean runtime ABI.
 
 ## Architectural commitments
 

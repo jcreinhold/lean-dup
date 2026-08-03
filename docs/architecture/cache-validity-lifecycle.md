@@ -99,6 +99,17 @@ Cleanup may remove only index directories that are not:
 Active latest entries are protected even when stale. Rebuilds publish a new latest pointer before old active entries
 become cleanup candidates.
 
+## Probe cache
+
+Semantic probe verdicts follow a lifecycle **independent of the index lifecycle**. They live in a shared store at
+`<cache_root>/probes/<label>.sqlite` — outside every `cache_id` index directory, so index rebuilds do not discard them.
+A verdict's key covers the prover semantics (probe/policy versions, obligation kind), the two declarations' content
+digests, and the transitive import-closure digests of the two declarations' modules (see
+[probe-cache-scoping.md](probe-cache-scoping.md)). Editing a file outside both closures leaves the key unchanged and the
+cached verdict is reused; editing inside a closure re-probes exactly the affected pairs. `cache-cleanup` treats the
+shared store as a managed artifact and never removes it; `doctor` reports its row count and size alongside the
+per-label index facts.
+
 ## Why this shape
 
 The tempting design—`git status --porcelain` plus an ad hoc cleanup script—leaks project-wide state into every index

@@ -26,12 +26,12 @@ lean-dup install-worker
 lean-dup --version
 ```
 
-`install-worker` builds the toolchain-specific worker (the `lean-dup-worker-child` binary plus the `LeanDup` capability
-dylib) into `<data_local>/lean-dup/workers/<toolchain-id>/`, runs a smoke test that loads it through the real dlopen
-chain, and records a provenance sidecar. Audits resolve the worker from the audited project's `lean-toolchain` pin; if
-one is not installed, `lean-dup` prints the exact `install-worker --toolchain <id>` command to run. Run `lean-dup
-doctor` to confirm the worker is reachable. Building a worker requires the matching elan toolchain (`elan toolchain
-install <id>`) and a Rust toolchain.
+`install-worker` builds the toolchain-specific worker — the native `lean-dup-worker` Lean executable — into
+`<data_local>/lean-dup/workers/<toolchain-id>/` with that toolchain's own `lake`, runs a smoke test that spawns it and
+answers a `version` command over the JSONL transport, and records a provenance sidecar. Audits resolve the worker from
+the audited project's `lean-toolchain` pin; if one is not installed, `lean-dup` prints the exact `install-worker
+--toolchain <id>` command to run. Run `lean-dup doctor` to confirm the worker is reachable. Building a worker requires
+only the matching elan toolchain (`elan toolchain install <id>`) — no Rust toolchain.
 
 Optional tools such as `lean-dup-vector` are external extensions and are not required for the core audit workflow.
 
@@ -42,7 +42,7 @@ cargo build --release -p lean-dup
 target/release/lean-dup install-worker --source-dir .
 ```
 
-`--source-dir .` builds the worker-child from the checkout instead of crates.io.
+`--source-dir .` builds the worker from the checkout's `lean/` project instead of the packaged Lean source.
 
 For a walkthrough with sample output, the full audit/show loop, and what each field means, see
 [docs/getting-started.md](docs/getting-started.md).

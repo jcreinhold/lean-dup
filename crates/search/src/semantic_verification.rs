@@ -8,7 +8,7 @@ use tracing::{debug, info, instrument};
 
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_index::ComparisonEvidencePolicy;
-use lean_dup_index::{HydratedDeclaration, OpenedIndex, ProbeCacheEntry};
+use lean_dup_index::{HydratedDeclaration, ModuleClosureResolver, OpenedIndex, ProbeCacheEntry, ProbeStore};
 use lean_dup_project::ResolvedWorkspace;
 use lean_dup_worker::{ModuleDescriptor, ProbeBatch, ProbePair, ProbeResult, WorkerClient, WorkerError};
 
@@ -66,15 +66,44 @@ pub struct SemanticVerificationInput<'a> {
 /// The slice of an opened index that semantic verification needs.
 ///
 /// Exposes an opaque probe cache; hides SQLite paths, table names,
-/// declaration handles, and index construction.
+/// declaration handles, and index construction. When a shared [`ProbeStore`]
+/// is attached, probe verdicts are scoped by content + import-closure digests
+/// and survive index rebuilds (see `docs/architecture/probe-cache-scoping.md`);
+/// otherwise verdicts fall back to the per-index table.
 #[derive(Debug, Clone, Copy)]
 pub struct VerificationIndex<'a> {
     index: &'a OpenedIndex,
+    probe_store: Option<&'a ProbeStore>,
 }
 
 impl<'a> VerificationIndex<'a> {
+    #[allow(dead_code, reason = "test-only constructor; production uses with_probe_store")]
     pub fn new(index: &'a OpenedIndex) -> Self {
-        Self { index }
+        Self { index, probe_store: None }
+    }
+
+    pub fn with_probe_store(index: &'a OpenedIndex, probe_store: &'a ProbeStore) -> Self {
+        Self { index, probe_store: Some(probe_store) }
+    }
+
+    fn cached_probe(&self, cache_key: &str) -> Result<Option<lean_dup_worker::ProbeResult>> {
+        match self.probe_store {
+            Some(store) => Ok(store.cached_result(cache_key)?),
+            None => Ok(self.index.cached_probe_result(cache_key)?),
+        }
+    }
+
+    fn store_probes(&self, entries: &[ProbeCacheEntry]) -> Result<()> {
+        match self.probe_store {
+            Some(store) => {
+                let rows = entries
+                    .iter()
+                    .map(|entry| (entry.cache_key.clone(), entry.result.clone()))
+                    .collect::<Vec<_>>();
+                Ok(store.store_results(&rows)?)
+            }
+            None => Ok(self.index.cache_probe_results(entries)?),
+        }
     }
 }
 
@@ -284,7 +313,10 @@ pub fn verify_candidate_probes(
         });
     }
 
-    let plan = plan_probes(&input, &mut diagnostics);
+    // Import-closure scoping: one resolver shared across every planned pair so
+    // each module's transitive closure digest is computed at most once.
+    let closure_resolver = ModuleClosureResolver::for_workspace(&input.workspace.root);
+    let plan = plan_probes(&input, Some(&closure_resolver), &mut diagnostics);
     reporter.event(
         "semantic.probe.plan",
         Some(plan.planned.len() as u64),
@@ -295,7 +327,7 @@ pub fn verify_candidate_probes(
     let mut evidence = plan.preflight_evidence;
     let mut missing = Vec::new();
     for planned_probe in plan.planned {
-        if let Some(cached) = input.local_index.index.cached_probe_result(&planned_probe.cache_key)? {
+        if let Some(cached) = input.local_index.cached_probe(&planned_probe.cache_key)? {
             diagnostics.cached_hits += 1;
             record_probe_status(&mut diagnostics, &planned_probe.facts, ProbeStatus::Cached);
             increment_yield(
@@ -539,7 +571,11 @@ impl DeclarationProbeSummary {
     }
 }
 
-fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDiagnostics) -> ProbePlan {
+fn plan_probes(
+    input: &SemanticVerificationInput<'_>,
+    closure_resolver: Option<&ModuleClosureResolver>,
+    diagnostics: &mut ProbeDiagnostics,
+) -> ProbePlan {
     let groups = input
         .cheap_review
         .groups
@@ -673,6 +709,7 @@ fn plan_probes(input: &SemanticVerificationInput<'_>, diagnostics: &mut ProbeDia
                         &candidate.declaration,
                         input.settings.policy,
                         obligation,
+                        closure_resolver,
                     ),
                     pair,
                     obligation,
@@ -782,7 +819,7 @@ fn run_probe_chunk(
                     })
                 })
                 .collect::<Vec<_>>();
-            input.local_index.index.cache_probe_results(&entries)?;
+            input.local_index.store_probes(&entries)?;
             for result in call.rows {
                 if let Some(planned) = by_pair.get(result.pair_id.as_str()) {
                     let semantic = semantic_evidence(planned, &result);
@@ -818,7 +855,7 @@ fn run_probe_chunk(
             diagnostics.recovered_failures += 1;
             let planned = &chunk[0];
             let result = unavailable_probe_result(&planned.pair, &error);
-            input.local_index.index.cache_probe_results(&[ProbeCacheEntry {
+            input.local_index.store_probes(&[ProbeCacheEntry {
                 cache_key: planned.cache_key.clone(),
                 pair: planned.pair.clone(),
                 result: result.clone(),
@@ -1447,6 +1484,7 @@ fn probe_cache_key(
     right: &HydratedDeclaration,
     policy: ProbePolicy,
     obligation: ProbeObligation,
+    closure_resolver: Option<&ModuleClosureResolver>,
 ) -> String {
     let payload = serde_json::json!({
         "cache_version": PROBE_CACHE_VERSION,
@@ -1454,10 +1492,26 @@ fn probe_cache_key(
         "policy": probe_policy_label(policy),
         "obligation": obligation_label(obligation),
         "pair": pair,
-        "left": declaration_cache_facts(left),
-        "right": declaration_cache_facts(right),
+        "left": declaration_cache_facts(left, closure_resolver),
+        "right": declaration_cache_facts(right, closure_resolver),
     });
     let encoded = serde_json::to_vec(&payload).expect("probe cache key ingredients serialize");
+    let digest = Sha256::digest(encoded);
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// Digest of the declaration content a probe verdict can depend on: kind,
+/// visibility, modifiers, statement, and definition body summary — the columns
+/// the index already persists.
+fn declaration_content_digest(declaration: &HydratedDeclaration) -> String {
+    let payload = serde_json::json!({
+        "kind": declaration.kind,
+        "visibility": declaration.visibility,
+        "modifiers": declaration.modifiers,
+        "statement_text": declaration.statement_text,
+        "definition_body_summary": declaration.definition_body_summary,
+    });
+    let encoded = serde_json::to_vec(&payload).expect("declaration content digest ingredients serialize");
     let digest = Sha256::digest(encoded);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
@@ -1466,13 +1520,28 @@ fn obligation_label(obligation: ProbeObligation) -> &'static str {
     obligation.semantic_kind().label()
 }
 
-fn declaration_cache_facts(declaration: &HydratedDeclaration) -> serde_json::Value {
+fn declaration_cache_facts(
+    declaration: &HydratedDeclaration,
+    closure_resolver: Option<&ModuleClosureResolver>,
+) -> serde_json::Value {
+    // Scope the key to what a probe verdict can actually reach: the two
+    // declarations' content plus the transitive import closures of their
+    // modules. Editing a file outside both closures leaves the key unchanged,
+    // so cached verdicts survive unrelated edits (design C in
+    // `docs/architecture/probe-cache-scoping.md`). Without a resolver (unit
+    // tests) the closure degrades to a constant and scoping is content-only.
+    let closure_digest = closure_resolver.map_or_else(
+        || "unscoped".to_owned(),
+        |resolver| resolver.closure_digest(&declaration.module),
+    );
     serde_json::json!({
         "declaration_id": declaration.declaration_id,
         "feature_version": declaration.feature_version,
         "fingerprints": declaration.fingerprints,
         "binder_count": declaration.binder_count,
         "kind": declaration.kind,
+        "content_digest": declaration_content_digest(declaration),
+        "closure_digest": closure_digest,
     })
 }
 
@@ -1604,7 +1673,7 @@ mod tests {
             },
         };
 
-        assert_eq!(plan_probes(&input, &mut diagnostics).planned.len(), 1);
+        assert_eq!(plan_probes(&input, None, &mut diagnostics).planned.len(), 1);
         assert_eq!(
             diagnostics
                 .status_by_match_class
@@ -1660,7 +1729,7 @@ mod tests {
             },
         };
 
-        assert_eq!(plan_probes(&input, &mut diagnostics).planned.len(), 2);
+        assert_eq!(plan_probes(&input, None, &mut diagnostics).planned.len(), 2);
         assert_eq!(diagnostics.skipped_by_budget, 1);
         assert_eq!(
             diagnostics
@@ -1739,7 +1808,7 @@ mod tests {
             },
         };
 
-        let plan = plan_probes(&input, &mut diagnostics);
+        let plan = plan_probes(&input, None, &mut diagnostics);
 
         assert_eq!(plan.planned.len(), 6);
         assert_eq!(diagnostics.planned_exact_theorem, 3);
@@ -1797,7 +1866,7 @@ mod tests {
             },
         };
 
-        let plan = plan_probes(&input, &mut diagnostics);
+        let plan = plan_probes(&input, None, &mut diagnostics);
 
         assert_eq!(plan.planned.len(), 1);
         assert!(plan.planned[0].include_private);
@@ -1845,7 +1914,7 @@ mod tests {
             },
         };
 
-        let plan = plan_probes(&input, &mut diagnostics);
+        let plan = plan_probes(&input, None, &mut diagnostics);
 
         assert!(plan.planned.is_empty());
         assert_eq!(plan.preflight_evidence.len(), 1);
@@ -1977,6 +2046,92 @@ mod tests {
             },
             source_evidence: Vec::new(),
         }
+    }
+
+    #[test]
+    fn probe_cache_key_tracks_content_closure_and_obligation() {
+        use super::{ProbeObligation, probe_cache_key};
+        use crate::ProbePolicy;
+        use lean_dup_worker::ProbePair;
+
+        let left = declaration("workspace:Tiny:Tiny.a", "workspace", "Tiny.a");
+        let right = declaration("workspace:Tiny:Tiny.b", "workspace", "Tiny.b");
+        let pair = ProbePair {
+            pair_id: "p".to_owned(),
+            left_declaration_id: left.declaration_id.clone(),
+            right_declaration_id: right.declaration_id.clone(),
+        };
+        let base = probe_cache_key(&pair, &left, &right, ProbePolicy::Broad, ProbeObligation::ExactTheorem, None);
+        // Identical inputs re-key identically.
+        assert_eq!(
+            base,
+            probe_cache_key(&pair, &left, &right, ProbePolicy::Broad, ProbeObligation::ExactTheorem, None)
+        );
+        // Obligation kinds scope the key.
+        assert_ne!(
+            base,
+            probe_cache_key(&pair, &left, &right, ProbePolicy::Broad, ProbeObligation::ReducibleDefinition, None)
+        );
+        // Statement content scopes the key.
+        let mut edited = right.clone();
+        edited.statement_text = "theorem edited".to_owned();
+        assert_ne!(
+            base,
+            probe_cache_key(&pair, &left, &edited, ProbePolicy::Broad, ProbeObligation::ExactTheorem, None)
+        );
+        // Definition body summaries scope the key.
+        let mut edited = right.clone();
+        edited.definition_body_summary = Some("body".to_owned());
+        assert_ne!(
+            base,
+            probe_cache_key(&pair, &left, &edited, ProbePolicy::Broad, ProbeObligation::ExactTheorem, None)
+        );
+    }
+
+    #[test]
+    fn probe_cache_key_closure_digest_resolves_edits() {
+        use super::{ModuleClosureResolver, ProbeObligation, probe_cache_key};
+        use crate::ProbePolicy;
+        use lean_dup_worker::ProbePair;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        let write = |module: &str, imports: &[&str], source: &str| {
+            let relative = module.replace('.', "/");
+            let ilean = root.join(".lake/build/lib/lean").join(relative.clone() + ".ilean");
+            std::fs::create_dir_all(ilean.parent().unwrap()).unwrap();
+            let entries: Vec<String> = imports.iter().map(|name| format!("[\"{name}\",false,false,false]")).collect();
+            std::fs::write(
+                ilean,
+                format!("{{\"decls\":{{}},\"directImports\":[{}],\"module\":\"{module}\",\"version\":5}}", entries.join(",")),
+            )
+            .unwrap();
+            let source_path = root.join(relative + ".lean");
+            std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+            std::fs::write(source_path, source).unwrap();
+        };
+        write("Tiny", &["Dep"], "def tiny := 1");
+        write("Dep", &[], "def dep := 1");
+        write("Other", &[], "def other := 1");
+
+        let left = declaration("workspace:Tiny:Tiny.a", "workspace", "Tiny.a");
+        let right = declaration("workspace:Tiny:Tiny.b", "workspace", "Tiny.b");
+        let pair = ProbePair {
+            pair_id: "p".to_owned(),
+            left_declaration_id: left.declaration_id.clone(),
+            right_declaration_id: right.declaration_id.clone(),
+        };
+        let key = |root: &std::path::Path| {
+            let resolver = ModuleClosureResolver::for_workspace(root);
+            probe_cache_key(&pair, &left, &right, ProbePolicy::Broad, ProbeObligation::ExactTheorem, Some(&resolver))
+        };
+        let before = key(root);
+        // Editing a module outside the pair's closure leaves the key unchanged.
+        write("Other", &[], "def other := 2");
+        assert_eq!(before, key(root));
+        // Editing a module inside the closure changes it (soundness guard).
+        write("Dep", &[], "def dep := 2");
+        assert_ne!(before, key(root));
     }
 
     fn declaration(id: &str, origin: &str, name: &str) -> HydratedDeclaration {

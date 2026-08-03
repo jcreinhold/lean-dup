@@ -368,6 +368,16 @@ pub struct CacheDiagnosticsReport {
     pub cache_root: PathBuf,
     pub total_disk_bytes: u64,
     pub labels: Vec<CacheLabelDiagnosticsReport>,
+    pub probe_stores: Vec<ProbeStoreDiagnosticsReport>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ProbeStoreDiagnosticsReport {
+    pub label: String,
+    #[serde(serialize_with = "serialize_path_ref")]
+    pub path: PathBuf,
+    pub rows: u64,
+    pub disk_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1210,6 +1220,16 @@ pub fn cache_diagnostics_report(diagnostics: CacheDiagnostics) -> CacheDiagnosti
     CacheDiagnosticsReport {
         cache_root: diagnostics.cache_root,
         total_disk_bytes: diagnostics.total_disk_bytes,
+        probe_stores: diagnostics
+            .probe_stores
+            .into_iter()
+            .map(|store| ProbeStoreDiagnosticsReport {
+                label: store.label,
+                path: store.path,
+                rows: store.rows,
+                disk_bytes: store.disk_bytes,
+            })
+            .collect(),
         labels: diagnostics
             .labels
             .into_iter()
