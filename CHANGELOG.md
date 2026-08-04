@@ -6,6 +6,8 @@ All notable changes to lean-dup are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-04
+
 ### Changed
 
 - **Native Lean worker transport.** The `lean-rs-worker` FFI pool (a dlopen'd `LeanDup` capability dylib behind
@@ -31,20 +33,18 @@ All notable changes to lean-dup are documented here. The format is based on
   Editing a file outside both closures no longer discards every cached verdict — measured: adding an unrelated file
   reused 54/54 probes (0 re-run) where the whole cache previously invalidated. `doctor` reports the shared store;
   `cache-cleanup` treats it as a managed artifact.
-
-### Removed
-
-- The `lean-rs` worker stack dependency and the FFI capability transport (see above).
-
 - Bumped the Lean toolchain pin to `leanprover/lean4:v4.33.0-rc2` and moved the upstream dependencies in lockstep:
   the `lean-semantic-search-*` crates and the `lean/lakefile.lean` Lake git require to release tag `v0.7.0`, which
   advances the transitive `lean-rs` line from `0.4` to `0.7` (`lean-rs-worker-protocol`, `lean-rs-abi`,
   `lean-toolchain`). lean-rs 0.7.0 adds 4.33.0-rc2 (byte-identical `lean.h` ABI with rc1) to its supported window;
   the wire protocol is unchanged. All six `lean-toolchain` files and `PINNED_TOOLCHAIN` moved together; the Rust
   floor stays 1.91.
-
 - The `Report` enum's `Doctor` and `Perf` variants are now boxed (matching the already-boxed `Audit`/`Eval`/`Show`
   variants) to satisfy the `large_enum_variant` lint under current stable clippy.
+
+### Removed
+
+- The `lean-rs` worker stack dependency and the FFI capability transport (see above).
 
 ### Fixed
 
