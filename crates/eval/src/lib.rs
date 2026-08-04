@@ -27,7 +27,7 @@ pub enum EvalSuite {
     Default,
     /// Checked-in labels that guard against known false-positive patterns.
     HardNegatives,
-    /// Private operator suite over the local KanProofs corpus.
+    /// Private operator suite over the local Proofs corpus.
     ManualInternal,
     /// Private operator suite comparing local declarations against mathlib.
     ManualMathlib,

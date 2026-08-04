@@ -68,7 +68,7 @@
       "static_evidence_acceptable": true
     },
     {
-      "left": "_private.KanProofs.ModelTheory.SetTheory.ZFC.Arithmetic.Nat.Recursion.0.FirstOrder.SetTheory.ZFC.omegaRecursiveGraph_functional",
+      "left": "_private.Proofs.ModelTheory.SetTheory.ZFC.Arithmetic.Nat.Recursion.0.FirstOrder.SetTheory.ZFC.omegaRecursiveGraph_functional",
       "right": "IUT.Foundation.MorphismOfMutations.naturality_component",
       "polarity": "hard-negative",
       "match_class": "hard-negative",

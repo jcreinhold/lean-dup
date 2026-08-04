@@ -1902,7 +1902,7 @@ mod tests {
                 suite: EvalSuite::ManualMathlib,
                 workspace: None,
                 mathlib_workspace: None,
-                manual_module: Some("KanProofs".to_owned()),
+                manual_module: Some("Proofs".to_owned()),
                 k_values: vec![1, 5, 10],
                 write_search_dataset: false,
                 write_scorer_ablations: false,
@@ -1913,7 +1913,7 @@ mod tests {
 
         assert_eq!(report.status, "skipped");
         let prerequisites = report.manual_prerequisites.expect("manual prerequisites");
-        assert_eq!(prerequisites.module_selector, "KanProofs");
+        assert_eq!(prerequisites.module_selector, "Proofs");
         assert_eq!(prerequisites.workspace.status, super::PrerequisiteStatus::Missing);
         assert_eq!(prerequisites.labels.status, super::PrerequisiteStatus::Ok);
         assert!(prerequisites.mathlib.is_some());

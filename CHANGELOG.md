@@ -25,7 +25,7 @@ All notable changes to lean-dup are documented here. The format is based on
   import per module signature per worker session. Previously `extract` and `features` re-imported the full
   (Mathlib-scale) environment per command, and each audit pipeline stage spawned a fresh worker that re-imported
   again; one `WorkerClient` engine is now shared across all stages of an audit. Measured on a Mathlib-importing
-  workspace (`KanProofs.Topology` audit): worker physical footprint 4.5 GiB → 0.6 GiB, cold audit 21 s → 16 s,
+  workspace (`Proofs.Topology` audit): worker physical footprint 4.5 GiB → 0.6 GiB, cold audit 21 s → 16 s,
   identical findings.
 - **Probe cache scoping (design C).** Semantic probe verdicts moved from the per-`cache_id` index SQLite into a shared
   store at `<cache_root>/probes/<label>.sqlite`, keyed by the two declarations' content digests plus the transitive
