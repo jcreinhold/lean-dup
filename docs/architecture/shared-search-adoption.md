@@ -6,8 +6,7 @@ what moved to the shared package, what stays local, and why.
 
 The shared package was extracted from `lean-dup` (prompt sequence 02–06), so the migration is an adoption, not a
 redesign. The worker transport was a separate effort, since completed: Rust now drives Lean through the
-`lean-rs-worker-parent` pool capability rather than a subprocess (see [worker-protocol.md](worker-protocol.md) and
-[validation/worker-migration-validation.md](validation/worker-migration-validation.md)). The `lean-dup.worker.v1` schema
+`lean-dup-worker` executable over JSONL (see [worker-protocol.md](worker-protocol.md)). The `lean-dup.worker.v1` schema
 and command semantics are unchanged.
 
 ## What moved to `lean-semantic-search`

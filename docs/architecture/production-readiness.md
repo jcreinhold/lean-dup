@@ -26,8 +26,8 @@ of:
 
 | Gate | Evidence artifact |
 | --- | --- |
-| `G1 regression_quality` | [search-quality.md](search-quality.md), [evaluation/production-gates.md](evaluation/production-gates.md), `target/eval/production-gate.json` |
-| `G2 precision_control` | search-quality.md, production-gates.md hard-negative section, fixture and manual eval JSON |
+| `G1 regression_quality` | [search-quality.md](search-quality.md), `target/eval/production-gate.json` |
+| `G2 precision_control` | search-quality.md hard-negative section, fixture and manual eval JSON |
 | `G3 semantic_probe_yield` | real-workload probe evidence under `target/audit-runs/` |
 | `G4 external_comparison_provenance` | [external-comparison-provenance.md](external-comparison-provenance.md) + JSON/profile fixtures |
 | `G5 cache_validity_lifecycle` | [cache-validity-lifecycle.md](cache-validity-lifecycle.md) + `target/cache/doctor-production.json` |
@@ -107,8 +107,7 @@ target/release/lean-dup --version \
   > target/release-diagnostics/version.txt
 ```
 
-Evidence locations: `docs/architecture/evaluation/` for quality gates, `docs/architecture/validation/` for real-workload
-inspection, `report-contract.md` and `release-hardening.md` for their gates; JSON under `target/eval/`,
+Evidence locations: `report-contract.md` and `release-hardening.md` for their gates; JSON under `target/eval/`,
 `target/audit-runs/`, `target/perf/`, `target/report-contract/`, `target/release-diagnostics/`.
 
 ## No-go criteria

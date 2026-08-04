@@ -153,8 +153,7 @@ profile output remain stderr-only so JSON stdout stays parseable. `diff` compare
 
 `eval.rs` owns suite definitions, label provenance, manual/private-path policy, audit observation, hard-negative gate
 enforcement, and raw denominator metrics. The scorer is general: it scores unordered pairs and queue membership without
-learning corpus paths or cache internals. Production-gate detail:
-[evaluation/production-gates.md](evaluation/production-gates.md).
+learning corpus paths or cache internals.
 
 `perf.rs` owns named workloads, cost-class extraction, and artifact naming. The hidden command makes performance claims
 reproducible without exposing cache deletion, SQL probes, or shell timing sequences as public workflow.

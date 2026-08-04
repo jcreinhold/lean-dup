@@ -7,7 +7,7 @@
 ## Problem
 
 Semantic probe results — the verdicts from running the Lean worker to decide whether two declarations are
-definitionally/statement equal — are the most expensive artifact lean-dup produces. On KanProofs (`v4.31.0-rc2`, 10,789
+definitionally/statement equal — are the most expensive artifact lean-dup produces. On Proofs (`v4.31.0-rc2`, 10,789
 declarations) the probe run dominates an audit:
 
 | Audit (measured, static tree) | probes run | wall time |
@@ -121,14 +121,14 @@ across toolchains.
 ## Expected payoff
 
 The edit→re-audit loop drops from ~186 s toward the ~54 s index-rebuild floor plus the handful of probes whose closures
-actually changed — roughly **3×** on KanProofs, and larger on projects with more probed pairs. The index rebuild itself
+actually changed — roughly **3×** on Proofs, and larger on projects with more probed pairs. The index rebuild itself
 (extract + features over all modules) is mandatory and unchanged; only the preventable probe re-run is eliminated.
 
 ## Out of scope (related findings)
 
 - **`index-mathlib` frame-size failure.** Indexing a real mathlib dependency fails fast with
   `worker protocol frame too large`. This is a worker-transport concern, independent of probe caching, with its own
-  design in [worker-frame-sizing.md](worker-frame-sizing.md).
+  design (the fix hoists module payloads per request; see `worker-protocol.md`).
 - **Whole-workspace re-extract.** The index rebuild re-extracts all modules on any edit. Extraction reads compiled
   oleans (cheap relative to probes), so this is lower priority, but the same closure machinery could later make
   extraction incremental.

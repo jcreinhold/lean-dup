@@ -27,4 +27,3 @@ Reference material for contributors. For a Lean-developer-facing walkthrough, se
 **Search quality**
 
 - [search-quality.md](search-quality.md): match-class taxonomy, four-stage pipeline, quality contract.
-- [evaluation/](evaluation/): labels, metrics, gates, scorer, dataset artifacts.

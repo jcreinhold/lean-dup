@@ -236,7 +236,7 @@ env LEAN_DUP_CACHE_DIR=target/report-contract/cache \
 
 env LEAN_DUP_CACHE_DIR=target/report-contract/cache LEAN_NUM_THREADS=2 \
   cargo run -q -p lean-dup-cli -- audit \
-  --workspace <kan-proofs-workspace> --module KanProofs \
+  --workspace <proofs-workspace> --module Proofs \
   --no-semantic-probes --diagnostics --format json \
   > target/report-contract/truncated-audit.json
 ```
