@@ -152,7 +152,8 @@ run_gate "cargo clippy --workspace --all-targets --locked -- -D warnings" \
 	cargo clippy --workspace --all-targets --locked -- -D warnings
 
 # Release link invariant: `cargo install lean-dup` must be pure Rust, so the
-# parent CLI must never link libleanshared (only the worker-child does).
+# parent CLI must never link libleanshared (only the native lean-dup-worker
+# executable, built separately by install-worker, touches Lean).
 gate_link_invariant() {
 	cargo build --release -p lean-dup --locked
 	local bin="target/release/lean-dup" linked=""

@@ -14,13 +14,12 @@ name: Release
 # `CARGO_REGISTRY_TOKEN` must be set in the repository secrets before the first
 # tag push — a scoped publish token from <https://crates.io/settings/tokens>.
 #
-# Lean split drives the job layout. Only the `verify` gate installs Lean: it
-# builds per-member, asserts the parent CLI ⊥ libleanshared link invariant, and
-# packages the leaf crates. The `publish` job is Lean-free — it uploads every
-# crate with `--no-verify` in dependency order, relying on that gate. This is
-# necessary, not just an optimization: the worker-child links libleanshared, and
-# even building it pulls lean-rs-sys, whose build script requires a Lean
-# toolchain. A Lean-free publish must skip verification; the gate performed it.
+# Lean split drives the job layout. Only the `verify` gate installs Lean; the
+# `publish` job is Lean-free — it uploads every crate with `--no-verify` in
+# dependency order, relying on that gate. (Since v0.3.0 nothing links
+# libleanshared — the native `lean-dup-worker` executable is built by
+# `install-worker` on the user's machine — but keeping publish Lean-free means
+# the gate, not the publisher, performs all builds.)
 
 on:
   push:
@@ -68,10 +67,10 @@ jobs:
       - name: Install elan + pinned Lean toolchain
         run: |
           set -euo pipefail
-          # A real Lean toolchain is mandatory to build the worker-child
-          # (lean-rs-sys's build.rs hashes lean.h and fails unless it matches a
-          # supported toolchain). Track lean/lean-toolchain so the gate follows
-          # the pin automatically.
+          # Nothing links libleanshared since v0.3.0, but keep the pinned
+          # toolchain installed so the gate still exercises the environment a
+          # user provisions in (and catches a dependency reintroducing a
+          # Lean-needing build script). Tracks lean/lean-toolchain.
           toolchain="$(tr -d '[:space:]' < lean/lean-toolchain)"
           curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
             | sh -s -- -y --default-toolchain "$toolchain"
@@ -98,9 +97,9 @@ jobs:
       - name: clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
-      # Build the parent CLI PER-MEMBER, never workspace-wide: a `--all-targets`
-      # workspace build unifies the lean-rs-sys feature set across the CLI and the
-      # worker-child, which would silently re-link libleanshared into the parent.
+      # Build the parent CLI PER-MEMBER, never workspace-wide: a per-member
+      # build keeps the CLI's feature set isolated so a dependency change cannot
+      # silently re-link libleanshared into the parent.
       - name: parent CLI ⊥ libleanshared
         run: |
           set -euo pipefail
@@ -109,9 +108,6 @@ jobs:
             echo "::error::parent CLI links libleanshared — cargo install lean-dup would require a Lean runtime" >&2
             exit 1
           fi
-
-      - name: build worker-child
-        run: cargo build --release -p lean-dup-worker-child --locked
 
       - name: Packaging sanity
         run: |
@@ -129,7 +125,7 @@ jobs:
       - name: Publish dry-run (leaf crates)
         run: |
           set -euo pipefail
-          for crate in lean-dup-capability-source lean-dup-diagnostics lean-dup-worker lean-dup-worker-child; do
+          for crate in lean-dup-capability-source lean-dup-diagnostics lean-dup-worker; do
             cargo publish -p "$crate" --no-verify --dry-run
           done
 
@@ -178,8 +174,7 @@ jobs:
             # minutes). A first release creates many new crates, so 429s are
             # expected mid-sequence; wait out the limit and retry rather than
             # aborting a half-finished publish. --no-verify: this Lean-free job
-            # cannot build the worker-child (links libleanshared) or run Lake; the
-            # verify gate already built per-member.
+            # delegates all builds to the verify gate.
             attempt=0
             while :; do
               attempt=$((attempt + 1))
@@ -208,12 +203,10 @@ jobs:
             sleep 15
           }
           # Dependency order (leaves first): a dependent crate's deps must already
-          # be on crates.io, and a user must never install a parent whose
-          # install-worker resolves a not-yet-published worker-child.
+          # be on crates.io when it publishes.
           publish_one lean-dup-capability-source
           publish_one lean-dup-diagnostics
           publish_one lean-dup-worker
-          publish_one lean-dup-worker-child
           publish_one lean-dup-project
           publish_one lean-dup-index
           publish_one lean-dup-search
