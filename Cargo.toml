@@ -51,10 +51,10 @@ lean-dup-vector-index = { path = "crates/vector-index", version = "0.2.4" }
 lean-dup-worker = { path = "crates/worker", version = "0.2.4" }
 # Shared semantic-search Rust crates (published crates.io releases). The runtime
 # crate owns the packaged Lean source materialized by the worker build.
-lean-semantic-search-contract = { version = "0.4" }
-lean-semantic-search-retrieval = { version = "0.4" }
-lean-semantic-search-runtime = { version = "0.4" }
-lean-semantic-search-store = { version = "0.4" }
+lean-semantic-search-contract = { version = "0.7" }
+lean-semantic-search-retrieval = { version = "0.7" }
+lean-semantic-search-runtime = { version = "0.7" }
+lean-semantic-search-store = { version = "0.7" }
 predicates = "3"
 rusqlite = { version = "0.40", features = ["bundled"] }
 rustc-hash = "2"

@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 /// `lean-dup`'s development-pinned toolchain: what `<repo>/lean` builds against
 /// and the default when an audited workspace has no readable `lean-toolchain`.
 /// A drift test asserts it equals `<repo>/lean/lean-toolchain`.
-pub const PINNED_TOOLCHAIN: &str = "leanprover/lean4:v4.33.0-rc1";
+pub const PINNED_TOOLCHAIN: &str = "leanprover/lean4:v4.33.0-rc2";
 
 /// File name of the per-toolchain worker executable inside an install dir.
 pub const WORKER_FILE_NAME: &str = "lean-dup-worker";
@@ -88,7 +88,7 @@ impl ToolchainId {
     /// `unwrap_or_else` keeps the function total without a panic.
     #[must_use]
     pub fn pinned() -> Self {
-        Self::parse(PINNED_TOOLCHAIN).unwrap_or_else(|_| Self("v4.33.0-rc1".to_owned()))
+        Self::parse(PINNED_TOOLCHAIN).unwrap_or_else(|_| Self("v4.33.0-rc2".to_owned()))
     }
 
     /// Resolved path to the elan toolchain root
@@ -290,7 +290,9 @@ pub struct WorkerSidecar {
     built_by_host_version: String,
     /// Absolute Lean sysroot the worker was built against.
     lean_sysroot: String,
-    /// Post-build runtime smoke outcome. `None` for a sidecar predating it.
+    /// Post-build runtime smoke outcome. `None` for a sidecar predating it or
+    /// one written while the smoke test is still pending (resolution treats
+    /// `None` as no recorded failure).
     #[serde(default)]
     smoke: Option<SmokeOutcome>,
 }
@@ -298,12 +300,7 @@ pub struct WorkerSidecar {
 impl WorkerSidecar {
     /// Build a sidecar stamped with this host's build-time context.
     #[must_use]
-    pub fn new(
-        id: &ToolchainId,
-        header_digest: String,
-        lean_sysroot: &Path,
-        smoke: SmokeOutcome,
-    ) -> Self {
+    pub fn new(id: &ToolchainId, header_digest: String, lean_sysroot: &Path, smoke: SmokeOutcome) -> Self {
         Self {
             toolchain: id.as_str().to_owned(),
             header_digest,
@@ -311,6 +308,24 @@ impl WorkerSidecar {
             built_by_host_version: env!("CARGO_PKG_VERSION").to_owned(),
             lean_sysroot: lean_sysroot.display().to_string(),
             smoke: Some(smoke),
+        }
+    }
+
+    /// Build a sidecar with no smoke outcome recorded yet. `install-worker`
+    /// writes this *before* running the smoke test: the smoke run resolves the
+    /// worker through the same [`resolve_in`] path the parent uses, which
+    /// requires the sidecar to exist — a fresh install dir would otherwise fail
+    /// its own smoke test with `NotInstalled`. Overwritten with the real
+    /// outcome once the smoke run finishes.
+    #[must_use]
+    pub fn pending(id: &ToolchainId, header_digest: String, lean_sysroot: &Path) -> Self {
+        Self {
+            toolchain: id.as_str().to_owned(),
+            header_digest,
+            built_against_lean_version: id.as_str().to_owned(),
+            built_by_host_version: env!("CARGO_PKG_VERSION").to_owned(),
+            lean_sysroot: lean_sysroot.display().to_string(),
+            smoke: None,
         }
     }
 
@@ -464,7 +479,7 @@ mod tests {
 
     #[test]
     fn pinned_matches_the_constant() {
-        assert_eq!(ToolchainId::pinned().as_str(), "v4.33.0-rc1");
+        assert_eq!(ToolchainId::pinned().as_str(), "v4.33.0-rc2");
         assert_eq!(ToolchainId::pinned().elan_label(), PINNED_TOOLCHAIN);
     }
 
@@ -497,7 +512,7 @@ mod tests {
         let ProvisionError::NotInstalled { install_cmd, .. } = err else {
             panic!("expected NotInstalled, got {err:?}");
         };
-        assert!(install_cmd.contains("install-worker --toolchain v4.33.0-rc1"));
+        assert!(install_cmd.contains("install-worker --toolchain v4.33.0-rc2"));
     }
 
     #[test]

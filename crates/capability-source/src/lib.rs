@@ -16,12 +16,10 @@
 use std::fmt;
 use std::fs;
 use std::io;
-use std::path::{Path,PathBuf};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use lean_semantic_search_runtime::{
-    SemanticSearchRuntimeProvenance, SemanticSearchSourcePackageRequest,
-};
+use lean_semantic_search_runtime::{SemanticSearchRuntimeProvenance, SemanticSearchSourcePackageRequest};
 
 /// Packaged `lean-dup-worker` Lean source root, resolved at runtime to the
 /// crate's unpacked location (the registry cache after `cargo install`, or the
@@ -76,7 +74,12 @@ pub fn build_worker_into(
         })
         .map_err(|error| BuildError::context("materialize semantic-search source", error))?;
 
-    materialize_build_root(&source_root, &build_root, &semantic_source.project_root, &semantic_source.provenance)?;
+    materialize_build_root(
+        &source_root,
+        &build_root,
+        &semantic_source.project_root,
+        &semantic_source.provenance,
+    )?;
 
     let lake = lean_sysroot.join("bin").join("lake");
     let status = Command::new(&lake)
@@ -90,7 +93,11 @@ pub fn build_worker_into(
             format_args!("exited with status {status}"),
         ));
     }
-    let exe_path = build_root.join(".lake").join("build").join("bin").join("lean-dup-worker");
+    let exe_path = build_root
+        .join(".lake")
+        .join("build")
+        .join("bin")
+        .join("lean-dup-worker");
     if !exe_path.is_file() {
         return Err(BuildError::context(
             "lake build lean-dup-worker",
@@ -240,10 +247,15 @@ mod tests {
             let mut hasher = Sha256::new();
             hasher.update(fs::read(&source)?);
             let digest = hasher.finalize();
-            entries.push((
-                relative.to_string_lossy().into_owned(),
-                digest.iter().map(|byte| format!("{byte:02x}")).collect(),
-            ));
+            let hex = digest.iter().fold(
+                String::with_capacity(digest.len().saturating_mul(2)),
+                |mut acc, byte| {
+                    use std::fmt::Write as _;
+                    let _ = write!(acc, "{byte:02x}");
+                    acc
+                },
+            );
+            entries.push((relative.to_string_lossy().into_owned(), hex));
         }
         Ok(())
     }

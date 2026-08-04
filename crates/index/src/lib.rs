@@ -6,12 +6,12 @@
 
 mod cache;
 mod cache_lifecycle;
-mod import_graph;
-mod probe_store;
 mod error;
 mod external_provenance;
 mod feature_dto;
+mod import_graph;
 mod index;
+mod probe_store;
 
 pub use cache::{CACHE_KEY_VERSION, CacheFacts, cache_root, resolve_cache, workspace_fingerprint};
 pub use cache_lifecycle::{
@@ -20,18 +20,18 @@ pub use cache_lifecycle::{
     cleanup_cache, diagnose_cache,
 };
 pub use error::{Error, Result};
-pub use import_graph::ModuleClosureResolver;
-pub use probe_store::{ProbeStore, ProbeStoreFacts};
 pub use external_provenance::{
     ComparisonEvidenceMode, ComparisonEvidencePolicy, ComparisonProvenance, ComparisonProvenanceReport,
     resolve as resolve_comparison_provenance,
 };
+pub use import_graph::ModuleClosureResolver;
 pub use index::{
     CacheStatus, DeclarationHandle, ExpectedIndexEntry, FingerprintKind, HydratedDeclaration,
     INDEX_DIAGNOSTIC_SCHEMA_VERSION, INDEX_SCHEMA_VERSION, IndexBuildKind, IndexBuildRequest, IndexProvenance,
     IndexProvenanceKind, IndexReference, IndexStore, IndexSummary, OpenedIndex, OpenedIndexFacts, ProbeCacheEntry,
     SemanticFeatureFanout, SemanticFeatureKey, SemanticFeatureMatches, SemanticFingerprintFeature, SemanticRoleFeature,
 };
+pub use probe_store::{ProbeStore, ProbeStoreFacts};
 
 /// Release-facing index schema label.
 ///

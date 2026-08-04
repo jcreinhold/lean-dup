@@ -110,7 +110,9 @@ impl ProbeStore {
         let connection = Connection::open(&self.path)?;
         let rows: i64 = connection.query_row("SELECT COUNT(*) FROM probe_cache", [], |row| row.get(0))?;
         let rows = u64::try_from(rows).unwrap_or(0);
-        let bytes = std::fs::metadata(&self.path).map(|metadata| metadata.len()).unwrap_or(0);
+        let bytes = std::fs::metadata(&self.path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
         Ok(ProbeStoreFacts { rows, bytes })
     }
 }
@@ -126,7 +128,13 @@ pub struct ProbeStoreFacts {
 fn safe_probe_label(label: &str) -> String {
     label
         .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' { ch } else { '_' })
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 

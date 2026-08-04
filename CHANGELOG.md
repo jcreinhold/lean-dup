@@ -36,6 +36,23 @@ All notable changes to lean-dup are documented here. The format is based on
 
 - The `lean-rs` worker stack dependency and the FFI capability transport (see above).
 
+- Bumped the Lean toolchain pin to `leanprover/lean4:v4.33.0-rc2` and moved the upstream dependencies in lockstep:
+  the `lean-semantic-search-*` crates and the `lean/lakefile.lean` Lake git require to release tag `v0.7.0`, which
+  advances the transitive `lean-rs` line from `0.4` to `0.7` (`lean-rs-worker-protocol`, `lean-rs-abi`,
+  `lean-toolchain`). lean-rs 0.7.0 adds 4.33.0-rc2 (byte-identical `lean.h` ABI with rc1) to its supported window;
+  the wire protocol is unchanged. All six `lean-toolchain` files and `PINNED_TOOLCHAIN` moved together; the Rust
+  floor stays 1.91.
+
+- The `Report` enum's `Doctor` and `Perf` variants are now boxed (matching the already-boxed `Audit`/`Eval`/`Show`
+  variants) to satisfy the `large_enum_variant` lint under current stable clippy.
+
+### Fixed
+
+- `install-worker` failed its own smoke test on a fresh install dir: the smoke run resolves the worker through the
+  parent's runtime path, which refuses a worker without a provenance sidecar, and the sidecar was only written
+  *after* the smoke test. `install-worker` now writes a pending sidecar (no smoke outcome) before the smoke run and
+  overwrites it with the real outcome.
+
 ## [0.2.4] - 2026-07-19
 
 ### Changed

@@ -57,9 +57,19 @@ pub(in crate::worker) struct SubprocessEngine {
 /// One framed line from the worker.
 #[derive(Debug)]
 enum Frame {
-    Row { stream: String, payload: Value },
-    Progress { phase: String, current: u64, total: Option<u64> },
-    Diagnostic { code: String, message: String },
+    Row {
+        stream: String,
+        payload: Value,
+    },
+    Progress {
+        phase: String,
+        current: u64,
+        total: Option<u64>,
+    },
+    Diagnostic {
+        code: String,
+        message: String,
+    },
     Metadata(Value),
     Result(Value),
 }
@@ -143,11 +153,11 @@ impl SubprocessEngine {
                 message: "version command did not produce a result frame".to_owned(),
             });
         };
-        let semantic = WorkerVersion::from(
-            serde_json::from_value::<WorkerVersionPayload>(payload).map_err(|error| WorkerError::Protocol {
+        let semantic = WorkerVersion::from(serde_json::from_value::<WorkerVersionPayload>(payload).map_err(
+            |error| WorkerError::Protocol {
                 message: format!("could not decode version payload: {error}"),
-            })?,
-        );
+            },
+        )?);
         let substrate = WorkerSubstrateFacts {
             protocol_version: TRANSPORT_PROTOCOL_VERSION,
             worker_version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -203,7 +213,10 @@ impl SubprocessEngine {
         }
         let skipped = outcome.skipped;
         if skipped > 0 {
-            debug!(command = command_name, skipped, "worker skipped declarations under budget");
+            debug!(
+                command = command_name,
+                skipped, "worker skipped declarations under budget"
+            );
         }
         Ok((rows, skipped))
     }
@@ -269,59 +282,52 @@ impl SubprocessEngine {
         let request = payload::index_request(&batch);
         let workspace_root = batch.workspace_root;
         let mut forward_err: Option<WorkerError> = None;
-        let outcome = self.run_command(
-            &workspace_root,
-            "index",
-            &request,
-            timeout,
-            &cancelled,
-            &mut |frame| {
-                if forward_err.is_some() {
-                    return;
+        let outcome = self.run_command(&workspace_root, "index", &request, timeout, &cancelled, &mut |frame| {
+            if forward_err.is_some() {
+                return;
+            }
+            if let Frame::Progress { phase, current, total } = frame {
+                if let Err(error) = sink(IndexStreamItem::Event(WorkerEvent {
+                    phase: phase.clone(),
+                    current: Some(*current),
+                    total: *total,
+                    module: None,
+                    declaration: None,
+                    elapsed_ms: None,
+                    message: String::new(),
+                })) {
+                    forward_err = Some(error);
                 }
-                if let Frame::Progress { phase, current, total } = frame {
-                    if let Err(error) = sink(IndexStreamItem::Event(WorkerEvent {
-                        phase: phase.clone(),
-                        current: Some(*current),
-                        total: *total,
-                        module: None,
-                        declaration: None,
-                        elapsed_ms: None,
-                        message: String::new(),
-                    })) {
+                return;
+            }
+            let Frame::Row { stream, payload } = frame else {
+                return;
+            };
+            let payload = payload.clone();
+            let item = match stream.as_str() {
+                "declarations" => serde_json::from_value::<DeclarationRow>(payload)
+                    .map(IndexStreamItem::Declaration)
+                    .map_err(|error| WorkerError::Protocol {
+                        message: format!("could not decode streamed declaration row: {error}"),
+                    }),
+                "features" => serde_json::from_value::<FeatureRow>(payload)
+                    .map(IndexStreamItem::Feature)
+                    .map_err(|error| WorkerError::Protocol {
+                        message: format!("could not decode streamed feature row: {error}"),
+                    }),
+                other => Err(WorkerError::Protocol {
+                    message: format!("index stream produced unknown stream `{other}`"),
+                }),
+            };
+            match item {
+                Ok(item) => {
+                    if let Err(error) = sink(item) {
                         forward_err = Some(error);
                     }
-                    return;
                 }
-                let Frame::Row { stream, payload } = frame else {
-                    return;
-                };
-                let payload = payload.clone();
-                let item = match stream.as_str() {
-                    "declarations" => serde_json::from_value::<DeclarationRow>(payload)
-                        .map(IndexStreamItem::Declaration)
-                        .map_err(|error| WorkerError::Protocol {
-                            message: format!("could not decode streamed declaration row: {error}"),
-                        }),
-                    "features" => serde_json::from_value::<FeatureRow>(payload)
-                        .map(IndexStreamItem::Feature)
-                        .map_err(|error| WorkerError::Protocol {
-                            message: format!("could not decode streamed feature row: {error}"),
-                        }),
-                    other => Err(WorkerError::Protocol {
-                        message: format!("index stream produced unknown stream `{other}`"),
-                    }),
-                };
-                match item {
-                    Ok(item) => {
-                        if let Err(error) = sink(item) {
-                            forward_err = Some(error);
-                        }
-                    }
-                    Err(error) => forward_err = Some(error),
-                }
-            },
-        )?;
+                Err(error) => forward_err = Some(error),
+            }
+        })?;
         if let Some(error) = forward_err {
             return Err(error);
         }
@@ -395,12 +401,15 @@ fn drive_command(
     on_frame: &mut dyn FnMut(&Frame),
 ) -> Result<CommandOutcome, WorkerError> {
     let envelope = serde_json::json!({ "command": command, "request": request });
-    writeln!(session.stdin, "{envelope}").and_then(|()| session.stdin.flush()).map_err(|error| {
-        WorkerError::NonZeroExit {
+    writeln!(session.stdin, "{envelope}")
+        .and_then(|()| session.stdin.flush())
+        .map_err(|error| WorkerError::NonZeroExit {
             status: 1,
-            stderr: format!("worker stdin closed while sending `{command}`: {error}; {}", session.stderr_text()),
-        }
-    })?;
+            stderr: format!(
+                "worker stdin closed while sending `{command}`: {error}; {}",
+                session.stderr_text()
+            ),
+        })?;
 
     let deadline = Instant::now() + timeout;
     let mut diagnostics: Vec<WorkerDiagnostic> = Vec::new();
@@ -440,7 +449,13 @@ fn drive_command(
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => {
                 return Err(WorkerError::NonZeroExit {
-                    status: session.child.try_wait().ok().flatten().and_then(|status| status.code()).unwrap_or(1),
+                    status: session
+                        .child
+                        .try_wait()
+                        .ok()
+                        .flatten()
+                        .and_then(|status| status.code())
+                        .unwrap_or(1),
                     stderr: session.stderr_text(),
                 });
             }
@@ -496,7 +511,8 @@ fn spawn_session(workspace_root: &std::path::Path) -> Result<Session, WorkerErro
     let installed = resolve_installed_worker(workspace_root).map_err(|error| WorkerError::NotProvisioned {
         message: error.to_string(),
     })?;
-    let in_lake_package = workspace_root.join("lakefile.lean").is_file() || workspace_root.join("lakefile.toml").is_file();
+    let in_lake_package =
+        workspace_root.join("lakefile.lean").is_file() || workspace_root.join("lakefile.toml").is_file();
     let mut command = if in_lake_package {
         let mut command = Command::new("lake");
         command.arg("env").arg(&installed.worker_exe);
@@ -575,13 +591,25 @@ fn decode_frame(value: &Value) -> Option<Frame> {
     }
     if let Some(diagnostic) = object.get("diagnostic") {
         return Some(Frame::Diagnostic {
-            code: diagnostic.get("code").and_then(Value::as_str).unwrap_or("worker.diagnostic").to_owned(),
-            message: diagnostic.get("message").and_then(Value::as_str).unwrap_or_default().to_owned(),
+            code: diagnostic
+                .get("code")
+                .and_then(Value::as_str)
+                .unwrap_or("worker.diagnostic")
+                .to_owned(),
+            message: diagnostic
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
         });
     }
     if let Some(progress) = object.get("progress") {
         return Some(Frame::Progress {
-            phase: progress.get("phase").and_then(Value::as_str).unwrap_or_default().to_owned(),
+            phase: progress
+                .get("phase")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
             current: progress.get("current").and_then(Value::as_u64).unwrap_or(0),
             total: progress.get("total").and_then(Value::as_u64),
         });

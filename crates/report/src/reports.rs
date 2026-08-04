@@ -18,13 +18,13 @@ use crate::report_contract::{AuditExplanations, GroupExplanation};
 #[derive(Debug, Serialize)]
 #[serde(tag = "command", rename_all = "kebab-case")]
 pub enum Report {
-    Doctor(DoctorReport),
+    Doctor(Box<DoctorReport>),
     CacheCleanup(CacheCleanupReportDto),
     Index(IndexReport),
     IndexMathlib(IndexReport),
     Audit(Box<AuditReport>),
     Eval(Box<EvalReportDto>),
-    Perf(PerfReport),
+    Perf(Box<PerfReport>),
     Show(Box<ShowReport>),
     Diff(DiffReport),
     Baseline(BaselineReport),

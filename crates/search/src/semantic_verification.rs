@@ -79,11 +79,17 @@ pub struct VerificationIndex<'a> {
 impl<'a> VerificationIndex<'a> {
     #[allow(dead_code, reason = "test-only constructor; production uses with_probe_store")]
     pub fn new(index: &'a OpenedIndex) -> Self {
-        Self { index, probe_store: None }
+        Self {
+            index,
+            probe_store: None,
+        }
     }
 
     pub fn with_probe_store(index: &'a OpenedIndex, probe_store: &'a ProbeStore) -> Self {
-        Self { index, probe_store: Some(probe_store) }
+        Self {
+            index,
+            probe_store: Some(probe_store),
+        }
     }
 
     fn cached_probe(&self, cache_key: &str) -> Result<Option<lean_dup_worker::ProbeResult>> {
@@ -2061,30 +2067,65 @@ mod tests {
             left_declaration_id: left.declaration_id.clone(),
             right_declaration_id: right.declaration_id.clone(),
         };
-        let base = probe_cache_key(&pair, &left, &right, ProbePolicy::Broad, ProbeObligation::ExactTheorem, None);
+        let base = probe_cache_key(
+            &pair,
+            &left,
+            &right,
+            ProbePolicy::Broad,
+            ProbeObligation::ExactTheorem,
+            None,
+        );
         // Identical inputs re-key identically.
         assert_eq!(
             base,
-            probe_cache_key(&pair, &left, &right, ProbePolicy::Broad, ProbeObligation::ExactTheorem, None)
+            probe_cache_key(
+                &pair,
+                &left,
+                &right,
+                ProbePolicy::Broad,
+                ProbeObligation::ExactTheorem,
+                None
+            )
         );
         // Obligation kinds scope the key.
         assert_ne!(
             base,
-            probe_cache_key(&pair, &left, &right, ProbePolicy::Broad, ProbeObligation::ReducibleDefinition, None)
+            probe_cache_key(
+                &pair,
+                &left,
+                &right,
+                ProbePolicy::Broad,
+                ProbeObligation::ReducibleDefinition,
+                None
+            )
         );
         // Statement content scopes the key.
         let mut edited = right.clone();
         edited.statement_text = "theorem edited".to_owned();
         assert_ne!(
             base,
-            probe_cache_key(&pair, &left, &edited, ProbePolicy::Broad, ProbeObligation::ExactTheorem, None)
+            probe_cache_key(
+                &pair,
+                &left,
+                &edited,
+                ProbePolicy::Broad,
+                ProbeObligation::ExactTheorem,
+                None
+            )
         );
         // Definition body summaries scope the key.
         let mut edited = right.clone();
         edited.definition_body_summary = Some("body".to_owned());
         assert_ne!(
             base,
-            probe_cache_key(&pair, &left, &edited, ProbePolicy::Broad, ProbeObligation::ExactTheorem, None)
+            probe_cache_key(
+                &pair,
+                &left,
+                &edited,
+                ProbePolicy::Broad,
+                ProbeObligation::ExactTheorem,
+                None
+            )
         );
     }
 
@@ -2100,10 +2141,16 @@ mod tests {
             let relative = module.replace('.', "/");
             let ilean = root.join(".lake/build/lib/lean").join(relative.clone() + ".ilean");
             std::fs::create_dir_all(ilean.parent().unwrap()).unwrap();
-            let entries: Vec<String> = imports.iter().map(|name| format!("[\"{name}\",false,false,false]")).collect();
+            let entries: Vec<String> = imports
+                .iter()
+                .map(|name| format!("[\"{name}\",false,false,false]"))
+                .collect();
             std::fs::write(
                 ilean,
-                format!("{{\"decls\":{{}},\"directImports\":[{}],\"module\":\"{module}\",\"version\":5}}", entries.join(",")),
+                format!(
+                    "{{\"decls\":{{}},\"directImports\":[{}],\"module\":\"{module}\",\"version\":5}}",
+                    entries.join(",")
+                ),
             )
             .unwrap();
             let source_path = root.join(relative + ".lean");
@@ -2123,7 +2170,14 @@ mod tests {
         };
         let key = |root: &std::path::Path| {
             let resolver = ModuleClosureResolver::for_workspace(root);
-            probe_cache_key(&pair, &left, &right, ProbePolicy::Broad, ProbeObligation::ExactTheorem, Some(&resolver))
+            probe_cache_key(
+                &pair,
+                &left,
+                &right,
+                ProbePolicy::Broad,
+                ProbeObligation::ExactTheorem,
+                Some(&resolver),
+            )
         };
         let before = key(root);
         // Editing a module outside the pair's closure leaves the key unchanged.

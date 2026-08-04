@@ -66,9 +66,22 @@ fn install(args: &InstallWorkerArgs) -> Result<PathBuf, String> {
 
     let header_digest = hash_lean_header(&lean_sysroot).map_err(|error| format!("hash toolchain lean.h: {error}"))?;
 
+    // The smoke test resolves the worker through the parent's runtime path,
+    // which refuses to serve a worker without a sidecar — write a pending one
+    // first so a fresh install dir can pass its own smoke test.
+    WorkerSidecar::pending(&id, header_digest.clone(), &lean_sysroot)
+        .write(&dest)
+        .map_err(|error| format!("write pending worker sidecar: {error}"))?;
+
     eprintln!("==> smoke test: spawn the worker and run `version` for {id}");
     if let Err(detail) = smoke_test(&id) {
-        write_sidecar(&dest, &id, &header_digest, &lean_sysroot, SmokeOutcome::Failed { detail: detail.clone() })?;
+        write_sidecar(
+            &dest,
+            &id,
+            &header_digest,
+            &lean_sysroot,
+            SmokeOutcome::Failed { detail: detail.clone() },
+        )?;
         return Err(format!(
             "worker for {id} built but FAILED its smoke test ({detail}); the worker is recorded as unusable and \
              will not be served — audit a project on a toolchain lean-dup supports, or rebuild against a \
@@ -134,11 +147,20 @@ fn build_worker_exe(args: &InstallWorkerArgs, id: &ToolchainId, lean_sysroot: &P
             .status()
             .map_err(|error| format!("spawn lake build: {error}"))?;
         if !status.success() {
-            return Err(format!("lake build lean-dup-worker (toolchain {id}) failed with status {status}"));
+            return Err(format!(
+                "lake build lean-dup-worker (toolchain {id}) failed with status {status}"
+            ));
         }
-        let exe = lean_project.join(".lake").join("build").join("bin").join(WORKER_FILE_NAME);
+        let exe = lean_project
+            .join(".lake")
+            .join("build")
+            .join("bin")
+            .join(WORKER_FILE_NAME);
         if !exe.is_file() {
-            return Err(format!("expected worker executable at {} but found none", exe.display()));
+            return Err(format!(
+                "expected worker executable at {} but found none",
+                exe.display()
+            ));
         }
         return Ok(exe);
     }

@@ -133,9 +133,7 @@ impl ModuleClosureResolver {
         if let Some(cached) = self.direct.borrow().get(module) {
             return cached.clone().unwrap_or_default();
         }
-        let imports = self
-            .ilean_path(module)
-            .and_then(|path| parse_ilean_imports(&path).ok());
+        let imports = self.ilean_path(module).and_then(|path| parse_ilean_imports(&path).ok());
         self.direct.borrow_mut().insert(module.to_owned(), imports.clone());
         imports.unwrap_or_default()
     }
@@ -228,8 +226,14 @@ mod tests {
         let relative = module.replace('.', "/");
         let path = root.join(".lake/build/lib/lean").join(relative + ".ilean");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let entries: Vec<String> = imports.iter().map(|name| format!("[\"{name}\",false,false,false]")).collect();
-        let document = format!("{{\"decls\":{{}},\"directImports\":[{}],\"module\":\"{module}\",\"version\":5}}", entries.join(","));
+        let entries: Vec<String> = imports
+            .iter()
+            .map(|name| format!("[\"{name}\",false,false,false]"))
+            .collect();
+        let document = format!(
+            "{{\"decls\":{{}},\"directImports\":[{}],\"module\":\"{module}\",\"version\":5}}",
+            entries.join(",")
+        );
         std::fs::write(path, document).unwrap();
     }
 

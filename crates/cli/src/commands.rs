@@ -49,7 +49,7 @@ pub fn run(cli: Cli) -> Result<Outcome> {
         Command::Doctor(args) => {
             let format = args.format;
             render_options.verbose = args.verbose;
-            (Report::Doctor(doctor(args, &mut reporter)?), format, None)
+            (Report::Doctor(Box::new(doctor(args, &mut reporter)?)), format, None)
         }
         Command::CacheCleanup(args) => {
             let format = args.format;
@@ -81,7 +81,11 @@ pub fn run(cli: Cli) -> Result<Outcome> {
         }
         Command::Perf(args) => {
             let _format = args.format;
-            (Report::Perf(crate::perf::run(args)?), OutputFormat::Json, None)
+            (
+                Report::Perf(Box::new(crate::perf::run(args)?)),
+                OutputFormat::Json,
+                None,
+            )
         }
         Command::Show(args) => {
             let format = args.format;
