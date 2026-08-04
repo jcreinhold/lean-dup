@@ -29,6 +29,12 @@ scripts/prerelease.sh            # mirrors ci.yml's check job; --quick skips the
 Stop on any failure. This is the same gate CI runs (fmt, clippy `-D warnings`, the full test suite, `boundaries`, and
 the `jq` schema/eval/report-contract assertions); passing locally is the fast feedback loop.
 
+`prerelease.sh` does **not** exercise `.github/workflows/release.yml`'s `verify` job. If the commits being released
+added or removed any workspace crate (or renamed one), diff the workflow's publish/dry-run crate lists against
+`[workspace] members` in the root `Cargo.toml` before tagging — the `v0.3.0` tag push failed exactly this way
+(`release.yml` still built and published the deleted `lean-dup-worker-child`, and nothing caught it until the tag
+push).
+
 ### 2. Version bump (one source of truth, mirrored in two places)
 
 Pick the new `X.Y.Z` (patch unless the change is breaking/feature — it is pre-1.0, so breaking changes bump the minor).
