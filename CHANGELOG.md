@@ -6,6 +6,13 @@ All notable changes to lean-dup are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- Bumped the Lean toolchain pin from `leanprover/lean4:v4.33.0-rc2` to `leanprover/lean4:v4.33.0` (the final
+  release, header-identical to rc2). The upstream `lean-semantic-search` release stays at tag `v0.7.0` (its
+  `lean-toolchain` pins rc2; the final is ABI-identical, so the shared package compiles cleanly under it). All six
+  `lean-toolchain` files and `PINNED_TOOLCHAIN` moved together; no Cargo, Rust-floor, or protocol changes.
+
 ## [0.3.0] - 2026-08-04
 
 ### Changed
