@@ -15,3 +15,6 @@ target/
 # leak back into the dependency graph).
 .venv/
 __pycache__/
+
+# Pi harness state
+.pi/sessions/
