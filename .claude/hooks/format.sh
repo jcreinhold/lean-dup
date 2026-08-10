@@ -30,8 +30,8 @@ case "$file" in
 	command -v taplo >/dev/null 2>&1 && taplo fmt "$file" >/dev/null 2>&1 || true
 	;;
 *.md)
-	# .mdwright.toml excludes .claude/** and CLAUDE.md (and AGENTS.md is a
-	# symlink to CLAUDE.md). Hard-code those so we never reflow them
+	# Never reflow the agent-guidance files (AGENTS.md is the real policy
+	# file; CLAUDE.md just imports it) or anything under .claude/.
 	# regardless of whether the config's other (stale) globs match.
 	case "$file" in
 	*/.claude/* | */CLAUDE.md | */AGENTS.md) : ;;

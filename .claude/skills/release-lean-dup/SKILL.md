@@ -8,13 +8,12 @@ description: Cut a lean-dup release — run the pre-release gate, bump the works
 This skill is the release checklist plus the cross-file invariants that are easy to get wrong. Reversible prep (steps
 1–4) is free; **step 5 (tag push) is irreversible — stop and get explicit human confirmation before running it.**
 
-> **Release mechanism — read this first.** lean-dup **is** a crates.io workspace: as of the `v0.2.2` release,
+> **Release mechanism — read this first.** lean-dup **is** a crates.io workspace:
 > `.github/workflows/release.yml` is tag-triggered (`v[0-9]+.[0-9]+.[0-9]+` or `-rc`-style prereleases). Pushing the
 > tag runs the full `verify` gate, then a Lean-free `publish` job uploads every crate to crates.io in dependency order
 > (idempotent — a crate already at that version on crates.io is skipped, since crates.io versions are immutable) and
 > creates a GitHub Release via `softprops/action-gh-release`, whose body is the matching `## [X.Y.Z]` section of
-> `CHANGELOG.md`. Releases before `v0.2.2` (`v0.2.0`, `v0.2.1`) were tag-only, with nothing published — the workflow
-> didn't exist yet. Do **not** run `cargo publish` by hand; the tag push does it. `workflow_dispatch` with `dry_run:
+> `CHANGELOG.md`. Do **not** run `cargo publish` by hand; the tag push does it. `workflow_dispatch` with `dry_run:
 > true` exercises the gates without publishing or creating a release, useful for testing the workflow itself without
 > burning a crates.io version.
 
@@ -66,12 +65,11 @@ in **three** places already, in the commits being released:
 CI asserts the exact strings (`lean-dup.report.v3`, `lean-dup.worker.v1`); a drift here fails the check job. If they are
 out of sync, fix before tagging.
 
-### 5. Land the version bump, then tag — irreversible
+### 5. Tag — irreversible
 
-Default to a PR with the version + CHANGELOG changes, merged after `ci.yml` is green; push directly to `main` only if
-the human explicitly says to skip the PR. Either way, before tagging, re-verify on the commit that will be tagged:
+Before tagging, re-verify on the commit that will be tagged:
 
-- `git rev-parse --abbrev-ref HEAD` is `main` and up to date with `origin/main`.
+- `ci.yml` is green on that commit.
 - the `[workspace.package].version` and every `[workspace.dependencies]` `lean-dup-*` version match the intended
   `X.Y.Z`.
 - `CHANGELOG.md` has a `## [X.Y.Z]` heading.

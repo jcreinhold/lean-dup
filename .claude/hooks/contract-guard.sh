@@ -6,11 +6,11 @@
 # guidance to stderr and exit 2 so the text is returned to Claude to act
 # on. We never undo anything.
 #
-#   1. Schema/protocol versions are contracts (CLAUDE.md). Touching a
+#   1. Schema/protocol versions are contracts (AGENTS.md). Touching a
 #      `lean-dup.<x>.vN` literal or a *_SCHEMA_VERSION / protocol_version
 #      constant means the matching jq assertion in .github/workflows/ci.yml
 #      and the relevant docs/architecture/*.md must move in lockstep.
-#   2. stdout stays parseable (CLAUDE.md). `println!`/`print!` outside the
+#   2. stdout stays parseable (AGENTS.md). `println!`/`print!` outside the
 #      CLI/render output path can corrupt `--format json` stdout.
 #
 # KNOWN TRADEOFF: check 2 is a plain grep, so it can false-positive on
@@ -34,7 +34,7 @@ msgs=()
 
 # 1. Schema / protocol contract touch.
 if grep -Eq '"lean-dup\.[a-z]+\.v[0-9]|REPORT_SCHEMA_VERSION|CACHE_KEY_VERSION|protocol_version' "$file"; then
-	msgs+=("• You touched a schema/protocol version in $file. Per CLAUDE.md these are contracts: update the matching jq assertion in .github/workflows/ci.yml AND the relevant docs/architecture/*.md in the same change. Audit JSON must stay additive.")
+	msgs+=("• You touched a schema/protocol version in $file. Per AGENTS.md these are contracts: update the matching jq assertion in .github/workflows/ci.yml AND the relevant docs/architecture/*.md in the same change. Audit JSON must stay additive.")
 fi
 
 # 2. stdout cleanliness — printing is only allowed on the CLI/render output
@@ -43,7 +43,7 @@ case "$file" in
 */crates/cli/src/* | */crates/report/src/render.rs) : ;;
 *)
 	if grep -Eq '\b(println!|print!)[[:space:]]*\(' "$file"; then
-		msgs+=("• $file uses println!/print! outside the CLI/render output path. This can corrupt --format json stdout (CLAUDE.md: 'stdout stays parseable'). Route user-facing output through the report renderer; send progress to stderr via eprintln!/the diagnostics crate.")
+		msgs+=("• $file uses println!/print! outside the CLI/render output path. This can corrupt --format json stdout (AGENTS.md: 'stdout stays parseable'). Route user-facing output through the report renderer; send progress to stderr via eprintln!/the diagnostics crate.")
 	fi
 	;;
 esac

@@ -126,9 +126,10 @@ for f in tiny external source-backed large-type; do ( cd tests/fixtures/$f && la
 # surfaces build errors early.
 LEAN_DUP_WORKERS_DIR="$PWD/target/lean-dup-workers" \
   cargo run -p lean-dup --locked -- install-worker --source-dir . --toolchain "$(tr -d '[:space:]' < lean/lean-toolchain)"
-# Full workspace suite (CLAUDE.md "Test" section)
 LEAN_DUP_WORKERS_DIR="$PWD/target/lean-dup-workers" cargo test --workspace --locked
 ```
+
+(The full test command set is in AGENTS.md's "Commands" section.)
 
 `install-worker` writes a *pending* `worker.json` sidecar before the smoke test and overwrites it with the outcome —
 the smoke run resolves the worker through the parent's runtime path, which refuses a worker with no sidecar, so a
@@ -150,7 +151,7 @@ that's expected — refresh goldens only if the change is the intended additive 
 
 ### 6. Update docs and the CHANGELOG
 
-- Bump the toolchain string in the three prose locations: `CLAUDE.md` ("The pinned Lean toolchain is …"), `README.md`
+- Bump the toolchain string in the three prose locations: `AGENTS.md` ("The pinned Lean toolchain is …"), `README.md`
   ("Requirements"), and `docs/getting-started.md` (the requirements table). Grep for the *old* version to catch any
   other prose mention: `grep -rIn '<old-version>' --exclude-dir=target --exclude-dir=.lake .` (ignore test fixtures'
   source and historical `crates/**` test literals and dated validation docs — those record past runs and are not pins).
@@ -162,7 +163,7 @@ that's expected — refresh goldens only if the change is the intended additive 
 
 ### 7. Commit
 
-Branch first if you're on `main` (unless the user says commit there directly). Commit message in the repo's style,
+Commit message in the repo's style,
 e.g. `Bump Lean toolchain to vX.Y.Z and lean-semantic-search deps to vA.B.C`. Summarize in the body: the new
 toolchain, the upstream tag (and the transitive lean-rs line), any Rust-floor change, and the test result.
 
