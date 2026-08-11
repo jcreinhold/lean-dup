@@ -2,7 +2,7 @@ use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-env-changed=GITHUB_SHA");
-    println!("cargo:rerun-if-changed=../../.git/HEAD");
+    emit_git_rerun_paths();
 
     let revision = std::env::var("GITHUB_SHA")
         .ok()
@@ -12,10 +12,32 @@ fn main() {
     println!("cargo:rustc-env=LEAN_DUP_GIT_REVISION={revision}");
 }
 
+fn emit_git_rerun_paths() {
+    let Some(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR").ok() else {
+        return;
+    };
+    for git_path in ["HEAD", "packed-refs"] {
+        if let Some(path) = git_text(&manifest_dir, &["rev-parse", "--git-path", git_path]) {
+            println!("cargo:rerun-if-changed={path}");
+        }
+    }
+    if let Some(head_ref) = git_text(&manifest_dir, &["symbolic-ref", "-q", "HEAD"])
+        && let Some(path) = git_text(&manifest_dir, &["rev-parse", "--git-path", &head_ref])
+    {
+        println!("cargo:rerun-if-changed={path}");
+    }
+}
+
 fn git_revision() -> Option<String> {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").ok()?;
+    git_text(&manifest_dir, &["rev-parse", "--short=12", "HEAD"])
+}
+
+fn git_text(manifest_dir: &str, args: &[&str]) -> Option<String> {
     let output = Command::new("git")
-        .args(["-C", &manifest_dir, "rev-parse", "--short=12", "HEAD"])
+        .arg("-C")
+        .arg(manifest_dir)
+        .args(args)
         .output()
         .ok()?;
     if !output.status.success() {
