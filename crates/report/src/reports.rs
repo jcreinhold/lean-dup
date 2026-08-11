@@ -1265,10 +1265,15 @@ pub fn lint_report(output: AuditOutput) -> LintReport {
     {
         incomplete_reasons.push("semantic-probe chunk size is zero while focused candidates exist".to_owned());
     }
-    if output.semantic_verification.unavailable_results > 0 {
+    let blocking_unavailable = output.semantic_verification.unavailable_missing
+        + output.semantic_verification.unavailable_timeout
+        + output.semantic_verification.unavailable_internal;
+    if blocking_unavailable > 0 {
         incomplete_reasons.push(format!(
-            "{} semantic probe result(s) were unavailable",
-            output.semantic_verification.unavailable_results
+            "{blocking_unavailable} semantic probe result(s) failed measurement (missing={}, timeout={}, internal={})",
+            output.semantic_verification.unavailable_missing,
+            output.semantic_verification.unavailable_timeout,
+            output.semantic_verification.unavailable_internal,
         ));
     }
     if output.visible_groups_truncated {

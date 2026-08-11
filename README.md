@@ -92,7 +92,9 @@ source-located warnings. The full workspace remains the comparison corpus, but `
 Warnings are advisory and exit `0`; decide which declaration owns the API after checking types, generality, callers, and
 imports. Missing declarations, exhausted budgets, unavailable semantic probes, and other incomplete measurements exit
 `2`. Operational or CLI failures exit `1`. Use `--format json` for deterministic structured output. Static fingerprint
-collisions never become lint warnings.
+collisions never become lint warnings. Opaque, unsupported, or deliberately size-bounded definition comparisons remain
+silent; they are outside the lint contract. Missing declarations, timeouts, and internal probe failures still make the
+measurement incomplete.
 
 Before a longer run, ask the binary what it is and whether the workspace is auditable:
 

@@ -171,6 +171,9 @@ workspace or probe budgets skip evidence, semantic results are unavailable, or t
 workspace, Git, and worker failures exit `1`. This separation lets commit-time automation remain advisory without
 silently accepting an unmeasured workload.
 
+An opaque, unsupported, or definition-size-guarded pair is outside the lint's semantic domain and remains silent; it
+does not make the measurement incomplete. A missing declaration, timeout, or internal probe failure does.
+
 ## `show` Contract
 
 `show` explains one review family. It accepts a family id, ranked pair-group id, or pair id. It includes:
