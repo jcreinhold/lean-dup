@@ -2169,9 +2169,9 @@ checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
 
 [[package]]
 name = "futures"
-version = "0.3.33"
+version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a88cf1f829d945f548cf8fec32c61b1f202b6d93b45848602fc02af4b12ad218"
+checksum = "9a31d2a3fbaaeb2af2368bbdd904aa8e812d3c04a1ee10d3171f52d556e5d0a3"
 dependencies = [
  "futures-channel",
  "futures-core",
@@ -2184,9 +2184,9 @@ dependencies = [
 
 [[package]]
 name = "futures-channel"
-version = "0.3.33"
+version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "262590f4fe6afeb0bc83be1daa64e52657fe185690a958af7f3ad0e92085c5ae"
+checksum = "b1f9e3d69d39e4862ffed03ed071a76f9a13ba1d9109d355b0f0aa6b15e393c4"
 dependencies = [
  "futures-core",
  "futures-sink",
@@ -2194,15 +2194,15 @@ dependencies = [
 
 [[package]]
 name = "futures-core"
-version = "0.3.33"
+version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cd50c473c80f6d7c3670a752354b8e569b1a7cbfdc0419ec88e5edad85e0dc7"
+checksum = "92d699e522242e69e3003b94ecc1f960f3a5e015aa7c5d7486e65ad01dd94f5e"
 
 [[package]]
 name = "futures-executor"
-version = "0.3.33"
+version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6754879cc9f2c66f88c6e5c35344bb0bdb0708b0352b1201815667c7eabc7458"
+checksum = "031b47cf1a3c6cc8bc2fc76cd437f521619387907d469316e7c0bc278f1f5432"
 dependencies = [
  "futures-core",
  "futures-task",
@@ -2211,38 +2211,38 @@ dependencies = [
 
 [[package]]
 name = "futures-io"
-version = "0.3.33"
+version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4577ecaa3c4f96589d473f679a71b596316f6641bc350038b962a5daf0085d7a"
+checksum = "53c0fa8157de1303bfffdaa1cc2a673bfffb60102f76b0ef4441659124373fed"
 
 [[package]]
 name = "futures-macro"
-version = "0.3.33"
+version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d6d3cde68c518367be28956066ddfef33813991b77a55005a69dae04bf3b10b"
+checksum = "9fb9654ba8355388abeb8dcb4fc62f511300867002afc858860463bdd9fe0c44"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.3",
 ]
 
 [[package]]
 name = "futures-sink"
-version = "0.3.33"
+version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e34418ac499d6305c2fb5ad0ed2f6ac998c5f8ca209b4510f7f94242c647e307"
+checksum = "1944426bf7d03f1d14f708785e4b33efd750b36d48a157b836b3efc15ede8e1d"
 
 [[package]]
 name = "futures-task"
-version = "0.3.33"
+version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b231ed28831efb4a61a08580c4bc233ec56bc009f4cd8f52da2c3cb97df0c109"
+checksum = "cd417de3d1d015fc3bfd2b1ea46dfc7bab72ef86f1cc7cc9c78e728b34a6d1fd"
 
 [[package]]
 name = "futures-util"
-version = "0.3.33"
+version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a77a90a256fce34da66415271e30f94ee91c57b04b8a2c042d9cf3220179deaa"
+checksum = "0d50a92467f8ba5dd6e3ee5d4bd04d73ab2e4e1c44474a0674821dfce14b79bc"
 dependencies = [
  "futures-channel",
  "futures-core",
@@ -2747,9 +2747,9 @@ dependencies = [
 
 [[package]]
 name = "io-uring"
-version = "0.7.13"
+version = "0.7.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9080b15e63775b9a2ac7dca720f7050a8b955e092ea0f6020a4a80f69998cdc0"
+checksum = "d64d8ca234d152948ceaede1f419b6a83983a5ecccaac05fb337a809c96d3aa6"
 dependencies = [
  "bitflags 2.13.1",
  "cfg-if",
@@ -4170,15 +4170,15 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-abi"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98cdbaec8b33fa91517749ee8ee3ffba9d9d9149f758f86711f04b030a05ddea"
+checksum = "179365f57b07154a503310095bdfb32c1960520fed237f984ffbbc9a2384508d"
 
 [[package]]
 name = "lean-rs-worker-protocol"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65a216c8df8bf4f31f685e27dabd9b9a7b310a2ad0c06832a3fd0a057b8e8df4"
+checksum = "061f3686fd4631ff7ebd3b035c6be2decfd743f7fcddafc210b76bd4e11a9804"
 dependencies = [
  "lean-toolchain",
  "serde",
@@ -4187,9 +4187,9 @@ dependencies = [
 
 [[package]]
 name = "lean-semantic-search-capability"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ce7f3cdf04a399fdfc680eaffb82e10602529abe4efe5c759b024e484d60ffb"
+checksum = "c94c2c3f516e6afd57e7955a599a828adee2f173c2ef22da974cb1831a15562c"
 dependencies = [
  "lean-semantic-search-contract",
  "serde_json",
@@ -4197,9 +4197,9 @@ dependencies = [
 
 [[package]]
 name = "lean-semantic-search-contract"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "919835281b6e91632f60f4b6d17c2af692299110465971ac14267904f61cb69e"
+checksum = "bb9f77bfa32740b69bcc5fb4e78562ac603785600fb2fd4b98d83fec633abf95"
 dependencies = [
  "serde",
  "serde_json",
@@ -4207,9 +4207,9 @@ dependencies = [
 
 [[package]]
 name = "lean-semantic-search-retrieval"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d6474751b6cc8a20213f4bf18b2f3406a71f4a6c427db736eb0b0f0d867ff1b"
+checksum = "677be63435d3419adb9d569775390f423c7d1bf4ea8111840c3c1a6d31440bed"
 dependencies = [
  "lean-semantic-search-contract",
  "serde",
@@ -4218,9 +4218,9 @@ dependencies = [
 
 [[package]]
 name = "lean-semantic-search-runtime"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e59743e52979e44af41c179b63f5b6c2142d29a2cdaa3b674c3e078e75b71628"
+checksum = "eaedaf032483aa264d8c1fe74c23a308862692c0e5cd66b3004bb1fc0958336a"
 dependencies = [
  "fs4",
  "lean-rs-worker-protocol",
@@ -4235,9 +4235,9 @@ dependencies = [
 
 [[package]]
 name = "lean-semantic-search-store"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5718d79a61b2009e8f7c08cda13035eab077645b2243e3e95b90cbc0d699f35b"
+checksum = "ca25c073911473866f4ffb9154b8cccd1f50ac5cd83210c90c7d654291c4f38d"
 dependencies = [
  "lean-semantic-search-contract",
  "lean-semantic-search-retrieval",
@@ -4247,9 +4247,9 @@ dependencies = [
 
 [[package]]
 name = "lean-toolchain"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95a2d08c625b0ab812ef10bd87bc8478c584b411d2bc78615852b38d63113c20"
+checksum = "50ced716b87b674e322fa1e67c31a507d23f1501d3174ceb8f827c19f10a854e"
 dependencies = [
  "fs4",
  "lean-rs-abi",
@@ -5751,9 +5751,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.13"
+version = "0.103.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
+checksum = "0527518605e68109d875e248ea259b6758801cf165e4b2c2733ae3b51f12535a"
 dependencies = [
  "ring",
  "rustls-pki-types",
