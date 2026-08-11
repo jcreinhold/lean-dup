@@ -3959,7 +3959,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lean-dup"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -3984,7 +3984,7 @@ dependencies = [
 
 [[package]]
 name = "lean-dup-capability-source"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "lean-semantic-search-runtime",
  "serde_json",
@@ -3994,7 +3994,7 @@ dependencies = [
 
 [[package]]
 name = "lean-dup-diagnostics"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "indicatif",
  "serde",
@@ -4006,7 +4006,7 @@ dependencies = [
 
 [[package]]
 name = "lean-dup-embedding"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "fastembed",
  "hf-hub",
@@ -4021,7 +4021,7 @@ dependencies = [
 
 [[package]]
 name = "lean-dup-eval"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "lean-dup-diagnostics",
  "lean-dup-index",
@@ -4038,7 +4038,7 @@ dependencies = [
 
 [[package]]
 name = "lean-dup-index"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "lean-dup-diagnostics",
  "lean-dup-project",
@@ -4059,7 +4059,7 @@ dependencies = [
 
 [[package]]
 name = "lean-dup-project"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "lean-dup-diagnostics",
  "serde",
@@ -4072,7 +4072,7 @@ dependencies = [
 
 [[package]]
 name = "lean-dup-report"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "lean-dup-diagnostics",
  "lean-dup-eval",
@@ -4087,7 +4087,7 @@ dependencies = [
 
 [[package]]
 name = "lean-dup-search"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "lean-dup-diagnostics",
  "lean-dup-index",
@@ -4107,7 +4107,7 @@ dependencies = [
 
 [[package]]
 name = "lean-dup-test-support"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "lean-dup-capability-source",
  "lean-dup-worker",
@@ -4115,7 +4115,7 @@ dependencies = [
 
 [[package]]
 name = "lean-dup-vector-index"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -4133,7 +4133,7 @@ dependencies = [
 
 [[package]]
 name = "lean-dup-vector-search"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "clap",
  "lean-dup-diagnostics",
@@ -4156,7 +4156,7 @@ dependencies = [
 
 [[package]]
 name = "lean-dup-worker"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "dirs",
  "lean-dup-test-support",

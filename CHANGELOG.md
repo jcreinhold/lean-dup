@@ -6,6 +6,8 @@ All notable changes to lean-dup are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-08-11
+
 ### Changed
 
 - Bumped the Lean toolchain pin from `leanprover/lean4:v4.33.0` to `leanprover/lean4:v4.34.0-rc1` and moved the
@@ -13,6 +15,11 @@ All notable changes to lean-dup are documented here. The format is based on
   `v4.34.0-rc1`): the Lake git require moved to `v0.7.1` and `Cargo.lock` refreshed onto the `0.7.1` crates, staying
   on the transitive lean-rs 0.7 line (`lean-rs-worker-protocol` / `lean-rs-abi` / `lean-toolchain` at 0.7.2). All six
   `lean-toolchain` files and `PINNED_TOOLCHAIN` moved together; no Rust-floor (`1.91`) or protocol changes.
+
+### Fixed
+
+- Replaced the newly deprecated `String.trim` with `String.trimAscii.toString` in the worker entry point (`Main.lean`),
+  so the `lean-dup-worker` build under `v4.34.0-rc1` is warning-free.
 
 ## [0.3.1] - 2026-08-10
 
