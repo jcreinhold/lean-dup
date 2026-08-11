@@ -19,4 +19,4 @@ unsafe def main : IO Unit := do
     let line ← stdin.getLine
     if line.isEmpty then
       return
-    LeanDup.Server.serveLine line.trim
+    LeanDup.Server.serveLine line.trimAscii.toString
