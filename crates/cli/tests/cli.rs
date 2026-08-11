@@ -62,6 +62,7 @@ fn help_lists_foundation_commands() {
         "index",
         "index-mathlib",
         "audit",
+        "lint",
         "eval",
         "show",
         "diff",
@@ -82,6 +83,108 @@ fn help_lists_foundation_commands() {
         !stdout.contains("vector"),
         "external vector command should not be hardcoded into static help:\n{stdout}"
     );
+}
+
+#[test]
+fn lint_emits_source_located_verified_warning_without_failing() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let tiny = repo_root().join("tests/fixtures/tiny");
+
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["lint", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--declaration", "Tiny.same_left"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Tiny/Basic.lean:3:1: warning[lean-dup/exact-statement]",
+        ))
+        .stdout(predicate::str::contains("Lean verified semantic evidence"))
+        .stdout(predicate::str::contains("lean-dup show --group"))
+        .stdout(predicate::str::contains("1 warning(s) among 1 focused declaration(s)"));
+}
+
+#[test]
+fn lint_json_is_structured_and_does_not_report_rejected_fingerprint_collision() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let tiny = repo_root().join("tests/fixtures/tiny");
+
+    let assert = Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["lint", "--workspace"])
+        .arg(&tiny)
+        .args([
+            "--module",
+            "Tiny",
+            "--declaration",
+            "Tiny.dependent_left",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let payload: Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(payload["command"], "lint");
+    assert_eq!(payload["status"], "ok");
+    assert_eq!(payload["focus_requested"], true);
+    assert_eq!(payload["focused_declaration_count"], 1);
+    assert_eq!(payload["finding_count"], 0);
+    assert_eq!(payload["findings"], serde_json::json!([]));
+    assert!(!stdout.contains(tiny.to_string_lossy().as_ref()));
+}
+
+#[test]
+fn lint_unknown_declaration_is_an_incomplete_measurement() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let tiny = repo_root().join("tests/fixtures/tiny");
+
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["lint", "--workspace"])
+        .arg(&tiny)
+        .args(["--module", "Tiny", "--declaration", "Tiny.doesNotExist"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("lint: incomplete"))
+        .stdout(predicate::str::contains(
+            "focused declaration(s) were not found: Tiny.doesNotExist",
+        ));
+}
+
+#[test]
+fn lint_probe_budget_exhaustion_is_an_incomplete_measurement() {
+    let _worker = worker_cli_lock();
+    let cache = tempfile::TempDir::new().unwrap();
+    let tiny = repo_root().join("tests/fixtures/tiny");
+
+    Command::cargo_bin("lean-dup")
+        .unwrap()
+        .env("LEAN_DUP_CACHE_DIR", cache.path())
+        .args(["lint", "--workspace"])
+        .arg(&tiny)
+        .args([
+            "--module",
+            "Tiny",
+            "--declaration",
+            "Tiny.same_left",
+            "--probe-budget",
+            "0",
+        ])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("lint: incomplete"))
+        .stdout(predicate::str::contains(
+            "semantic-probe budget is zero while focused candidates exist",
+        ));
 }
 
 #[cfg(unix)]

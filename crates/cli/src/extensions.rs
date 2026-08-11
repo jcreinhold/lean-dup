@@ -65,6 +65,7 @@ fn built_in_about(name: &str) -> Option<&'static str> {
         "index" => Some("Build or refresh a labelled index for a workspace."),
         "index-mathlib" => Some("Build or refresh the project's mathlib index."),
         "audit" => Some("Find duplicate declarations across the selected workspace."),
+        "lint" => Some("Emit source-located advisory duplicate diagnostics."),
         "eval" => Some("Run the recall/precision evaluation suites."),
         "show" => Some("Print the full evidence for one duplicate group."),
         "diff" => Some("Compare current findings against a saved baseline."),

@@ -231,8 +231,24 @@ pub struct HeapTruncation {
 /// it does not perform ranking, probing, reporting, or replacement-hint policy.
 #[allow(dead_code)]
 pub fn retrieve_candidates(workspace: &[HydratedDeclaration], indexes: &[OpenedIndex]) -> Result<RetrievalOutput> {
+    retrieve_candidates_for(workspace, indexes, None)
+}
+
+/// Retrieve candidates for a focused subset of workspace declarations while
+/// retaining the complete workspace as the local comparison corpus.
+///
+/// `anchor_ids = None` preserves the ordinary full-audit behavior. An empty
+/// focused set performs no retrieval. Keeping focus at this boundary avoids
+/// spending semantic-probe budget on declarations the caller will not report.
+pub(crate) fn retrieve_candidates_for(
+    workspace: &[HydratedDeclaration],
+    indexes: &[OpenedIndex],
+    anchor_ids: Option<&std::collections::BTreeSet<String>>,
+) -> Result<RetrievalOutput> {
+    let anchor_count = anchor_ids.map_or(workspace.len(), std::collections::BTreeSet::len);
     tracing::debug!(
         workspace_declarations = workspace.len(),
+        anchor_declarations = anchor_count,
         external_indexes = indexes.len(),
         "retrieving candidates"
     );
@@ -243,17 +259,26 @@ pub fn retrieve_candidates(workspace: &[HydratedDeclaration], indexes: &[OpenedI
     );
     perf::record_count(
         CostClass::RetrievalRanking,
+        "retrieval.anchor_declarations",
+        anchor_count as u64,
+    );
+    perf::record_count(
+        CostClass::RetrievalRanking,
         "retrieval.external_indexes",
         indexes.len() as u64,
     );
     perf::measure_result(CostClass::RetrievalRanking, "retrieval.total", || {
-        retrieve_candidates_inner(workspace, indexes)
+        retrieve_candidates_inner(workspace, indexes, anchor_ids)
     })
 }
 
-fn retrieve_candidates_inner(workspace: &[HydratedDeclaration], indexes: &[OpenedIndex]) -> Result<RetrievalOutput> {
+fn retrieve_candidates_inner(
+    workspace: &[HydratedDeclaration],
+    indexes: &[OpenedIndex],
+    anchor_ids: Option<&std::collections::BTreeSet<String>>,
+) -> Result<RetrievalOutput> {
     let mut diagnostics = RetrievalDiagnostics::default();
-    if workspace.is_empty() {
+    if workspace.is_empty() || anchor_ids.is_some_and(std::collections::BTreeSet::is_empty) {
         return Ok(RetrievalOutput {
             candidate_sets: Vec::new(),
             diagnostics,
@@ -270,10 +295,14 @@ fn retrieve_candidates_inner(workspace: &[HydratedDeclaration], indexes: &[Opene
     let external_counts = external_counts(indexes, &workspace_plans)?;
     let external_postings = external_postings(indexes, &workspace_plans, &external_counts)?;
 
-    let mut selected_by_anchor = Vec::with_capacity(workspace.len());
+    let mut selected_by_anchor =
+        Vec::with_capacity(anchor_ids.map_or(workspace.len(), std::collections::BTreeSet::len));
     let mut external_needed: BTreeMap<usize, Vec<DeclarationHandle>> = BTreeMap::new();
 
     for anchor_index in 0..workspace.len() {
+        if anchor_ids.is_some_and(|ids| !ids.contains(&workspace[anchor_index].declaration_id)) {
+            continue;
+        }
         let mut accumulators: HashMap<CandidateId, CandidateAccumulator> = HashMap::default();
         let plans = sorted_plans(&workspace_plans[anchor_index]);
         for plan in plans {
@@ -307,12 +336,12 @@ fn retrieve_candidates_inner(workspace: &[HydratedDeclaration], indexes: &[Opene
                 external_needed.entry(*index).or_default().push(handle.clone());
             }
         }
-        selected_by_anchor.push(selected);
+        selected_by_anchor.push((anchor_index, selected));
     }
 
     let hydrated_external = hydrate_external(indexes, external_needed, &mut diagnostics)?;
     let mut candidate_sets = Vec::new();
-    for (anchor_index, selected) in selected_by_anchor.into_iter().enumerate() {
+    for (anchor_index, selected) in selected_by_anchor {
         let mut candidates = Vec::new();
         for candidate in selected {
             let declaration = match &candidate.id {
@@ -1187,13 +1216,14 @@ fn candidate_sort_key(candidate: &CandidateId) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::path::PathBuf;
     use std::process::Command;
     use std::time::Instant;
 
     use tempfile::TempDir;
 
-    use super::retrieve_candidates;
+    use super::{retrieve_candidates, retrieve_candidates_for};
     use lean_dup_diagnostics::progress::Reporter;
     use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore};
     use lean_dup_project::{WorkspaceRequest, resolve};
@@ -1281,6 +1311,23 @@ mod tests {
         let connective =
             candidate(&output, "Tiny.connective_and_left", "Tiny.connective_and_right").expect("connective candidate");
         assert!(has_contribution(connective, "connective-fingerprint"));
+    }
+
+    #[test]
+    fn focused_retrieval_keeps_the_complete_local_comparison_corpus() {
+        let cache = TempDir::new().unwrap();
+        let workspace = hydrated_workspace(&cache);
+        let anchor = workspace
+            .iter()
+            .find(|row| row.qualified_name == "Tiny.same_left")
+            .unwrap();
+        let focus = BTreeSet::from([anchor.declaration_id.clone()]);
+
+        let output = retrieve_candidates_for(&workspace, &[], Some(&focus)).unwrap();
+
+        assert_eq!(output.candidate_sets.len(), 1);
+        assert_eq!(output.candidate_sets[0].anchor.qualified_name, "Tiny.same_left");
+        assert!(candidate(&output, "Tiny.same_left", "Tiny.same_right").is_some());
     }
 
     #[test]

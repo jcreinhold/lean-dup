@@ -65,6 +65,8 @@ pub enum Command {
     IndexMathlib(IndexMathlibArgs),
     /// Find duplicate declarations across the selected workspace.
     Audit(AuditArgs),
+    /// Emit source-located advisory diagnostics for focused duplicate declarations.
+    Lint(LintArgs),
     /// Run the recall/precision evaluation suites.
     Eval(EvalArgs),
     /// Print the full evidence for one duplicate group.
@@ -88,6 +90,7 @@ pub(crate) const VISIBLE_BUILT_IN_COMMANDS: &[&str] = &[
     "index",
     "index-mathlib",
     "audit",
+    "lint",
     "eval",
     "show",
     "diff",
@@ -101,6 +104,7 @@ pub(crate) const ALL_BUILT_IN_COMMANDS: &[&str] = &[
     "index",
     "index-mathlib",
     "audit",
+    "lint",
     "eval",
     "show",
     "diff",
@@ -338,6 +342,62 @@ pub struct AuditArgs {
 
     #[arg(long = "probe-policy", hide = true, value_enum, default_value_t = CliProbePolicy::Actionable)]
     pub probe_policy: CliProbePolicy,
+
+    #[arg(long = "probe-chunk-size", hide = true, default_value_t = 16)]
+    pub probe_chunk_size: usize,
+}
+
+#[derive(Debug, Clone, clap::Args)]
+#[command(after_help = "\
+Examples:
+  lean-dup lint --module Proofs
+  lean-dup lint --module Proofs --changed-since origin/main
+  lean-dup lint --module Proofs --file Proofs/Foo.lean
+  lean-dup lint --module Proofs --declaration Proofs.Foo.someTheorem
+")]
+pub struct LintArgs {
+    /// Workspace root to lint. Defaults to the current directory.
+    #[arg(long)]
+    pub workspace: Option<PathBuf>,
+
+    /// Positional form of `--workspace`.
+    #[arg(value_name = "WORKSPACE", conflicts_with = "workspace")]
+    pub workspace_positional: Option<PathBuf>,
+
+    /// Lean module root inside the workspace (e.g. `Proofs`).
+    #[arg(long = "module")]
+    pub module_root: Option<String>,
+
+    /// Output format. Text is source-located and compiler-style; JSON is stable and structured.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub format: OutputFormat,
+
+    /// Focus every declaration owned by this current Lean source file. May be repeated.
+    #[arg(long = "file")]
+    pub files: Vec<PathBuf>,
+
+    /// Focus one declaration by qualified name. May be repeated.
+    #[arg(long = "declaration")]
+    pub declarations: Vec<String>,
+
+    /// Focus declarations whose current source spans intersect Git changes since REVISION.
+    #[arg(long = "changed-since")]
+    pub changed_since: Option<String>,
+
+    /// Also compare focused declarations against the project's pinned mathlib index.
+    #[arg(long)]
+    pub compare_mathlib: bool,
+
+    /// Override the resolved mathlib workspace root (rare; for non-standard layouts).
+    #[arg(long)]
+    pub mathlib_workspace: Option<PathBuf>,
+
+    /// Per-declaration Lean elaboration heartbeat budget (0 = unlimited).
+    #[arg(long = "max-heartbeats")]
+    pub max_heartbeats: Option<u64>,
+
+    #[arg(long = "probe-budget", hide = true, default_value_t = 500)]
+    pub probe_budget: usize,
 
     #[arg(long = "probe-chunk-size", hide = true, default_value_t = 16)]
     pub probe_chunk_size: usize,

@@ -22,12 +22,42 @@ pub enum Report {
     CacheCleanup(CacheCleanupReportDto),
     Index(IndexReport),
     IndexMathlib(IndexReport),
+    Lint(Box<LintReport>),
     Audit(Box<AuditReport>),
     Eval(Box<EvalReportDto>),
     Perf(Box<PerfReport>),
     Show(Box<ShowReport>),
     Diff(DiffReport),
     Baseline(BaselineReport),
+}
+
+/// Source-located advisory duplicate diagnostics for commit-time and CI use.
+#[derive(Debug, Serialize)]
+pub struct LintReport {
+    pub report_schema_version: &'static str,
+    pub status: &'static str,
+    pub selected_roots: Vec<String>,
+    pub focus_requested: bool,
+    pub focused_declaration_count: usize,
+    pub finding_count: usize,
+    pub findings: Vec<LintFindingReport>,
+    pub incomplete_reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LintFindingReport {
+    pub code: &'static str,
+    pub severity: &'static str,
+    pub relation: String,
+    pub file: PathBuf,
+    pub line: u64,
+    pub column: u64,
+    pub declaration: String,
+    pub duplicate: String,
+    pub group: String,
+    pub evidence: String,
+    pub recommended_action: String,
+    pub help: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1203,6 +1233,116 @@ pub fn audit_report(output: AuditOutput) -> AuditReport {
         saved_baseline_name: output.saved_baseline_name,
         message: "audit ranking queue generated",
     }
+}
+
+/// Project an audit-backed focused search into high-precision advisory diagnostics.
+///
+/// Only proof-grade exact, safely permuted, and connective-equivalent relations
+/// become lint findings. Static fingerprint collisions remain audit evidence.
+pub fn lint_report(output: AuditOutput) -> LintReport {
+    let mut incomplete_reasons = Vec::new();
+    if output.declarations_skipped_by_budget > 0 {
+        incomplete_reasons.push(format!(
+            "{} workspace declaration(s) were skipped by the heartbeat budget",
+            output.declarations_skipped_by_budget
+        ));
+    }
+    if output.semantic_verification.skipped_by_budget > 0 {
+        incomplete_reasons.push(format!(
+            "{} candidate pair(s) were skipped by the semantic-probe budget",
+            output.semantic_verification.skipped_by_budget
+        ));
+    }
+    if output.semantic_verification.enabled
+        && output.semantic_verification.budget == 0
+        && output.retrieval.candidate_count > 0
+    {
+        incomplete_reasons.push("semantic-probe budget is zero while focused candidates exist".to_owned());
+    }
+    if output.semantic_verification.enabled
+        && output.semantic_verification.chunk_size == 0
+        && output.retrieval.candidate_count > 0
+    {
+        incomplete_reasons.push("semantic-probe chunk size is zero while focused candidates exist".to_owned());
+    }
+    if output.semantic_verification.unavailable_results > 0 {
+        incomplete_reasons.push(format!(
+            "{} semantic probe result(s) were unavailable",
+            output.semantic_verification.unavailable_results
+        ));
+    }
+    if output.visible_groups_truncated {
+        incomplete_reasons.push("the focused duplicate queue exceeded the report limit".to_owned());
+    }
+    if !output.unmatched_focus_declarations.is_empty() {
+        incomplete_reasons.push(format!(
+            "focused declaration(s) were not found: {}",
+            output.unmatched_focus_declarations.join(", ")
+        ));
+    }
+
+    let findings = output
+        .visible_groups
+        .iter()
+        .filter(|group| {
+            group.evidence_mode == "proof-grade"
+                && matches!(
+                    group.relation.as_str(),
+                    "exact-statement" | "permuted-statement" | "connective-equivalent"
+                )
+        })
+        .filter_map(|group| lint_finding(group, &output.lake_root))
+        .collect::<Vec<_>>();
+    let status = if incomplete_reasons.is_empty() {
+        "ok"
+    } else {
+        "incomplete"
+    };
+    LintReport {
+        report_schema_version: crate::report_contract::REPORT_SCHEMA_VERSION,
+        status,
+        selected_roots: output.selected_roots,
+        focus_requested: output.focus_requested,
+        focused_declaration_count: output.focused_declaration_count,
+        finding_count: findings.len(),
+        findings,
+        incomplete_reasons,
+    }
+}
+
+fn lint_finding(group: &AuditGroup, lake_root: &Path) -> Option<LintFindingReport> {
+    let declaration = group
+        .members
+        .iter()
+        .find(|member| member.origin == "workspace" && member.source_span.is_some())?;
+    let duplicate = group
+        .members
+        .iter()
+        .find(|member| member.declaration_id != declaration.declaration_id)?;
+    let span = declaration.source_span.as_ref()?;
+    let absolute = Path::new(&span.file);
+    let file = absolute.strip_prefix(lake_root).unwrap_or(absolute).to_path_buf();
+    let evidence = group
+        .probe_summary
+        .clone()
+        .unwrap_or_else(|| "Lean verified proof-grade semantic evidence".to_owned());
+    Some(LintFindingReport {
+        code: "duplicate-declaration",
+        severity: "warning",
+        relation: group.relation.clone(),
+        file,
+        line: span.start.line.max(1),
+        column: span.start.column.max(1),
+        declaration: declaration.qualified_name.clone(),
+        duplicate: duplicate.qualified_name.clone(),
+        group: group.id.clone(),
+        evidence,
+        recommended_action: group.recommended_action.clone(),
+        help: format!(
+            "inspect with `lean-dup show --group {} --workspace .`; verify API intent and callers before removing either declaration",
+            group.id
+        ),
+    })
 }
 
 /// Serialize a unit-like serde enum (e.g. `CorruptPointer`) to its kebab-case

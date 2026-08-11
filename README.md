@@ -78,6 +78,22 @@ For local development, swap `target/release/lean-dup` for `cargo run -p lean-dup
 (workspace, worker, Lake, cache health), `show --group <id>` (one ranked group), `diff` (saved baselines), `eval`
 (quality suites).
 
+## Lint focused declarations
+
+```sh
+lean-dup lint --workspace /path/to/lake/workspace --module MyLib --changed-since origin/main
+```
+
+`lint` turns only Lean-verified exact-statement, safe-premise-permutation, and connective-equivalence matches into
+source-located warnings. The full workspace remains the comparison corpus, but `--changed-since REV`, repeatable
+`--file PATH`, and repeatable `--declaration NAME` selectors restrict which declarations can be reported. Add
+`--compare-mathlib` only when the pinned mathlib index is part of the intended audit.
+
+Warnings are advisory and exit `0`; decide which declaration owns the API after checking types, generality, callers, and
+imports. Missing declarations, exhausted budgets, unavailable semantic probes, and other incomplete measurements exit
+`2`. Operational or CLI failures exit `1`. Use `--format json` for deterministic structured output. Static fingerprint
+collisions never become lint warnings.
+
 Before a longer run, ask the binary what it is and whether the workspace is auditable:
 
 ```sh
@@ -96,8 +112,9 @@ transitional alias.
 
 ## Current status
 
-Intra-workspace audits are usable today. `--compare-mathlib` runs but the release-quality gates `G1 regression_quality`
-and `G2 precision_control` are open: recall against real mathlib corpora has not been demonstrated yet. See
+Intra-workspace audits and source-located advisory linting are usable today. `--compare-mathlib` runs but the
+release-quality gates `G1 regression_quality` and `G2 precision_control` are open: recall against real mathlib corpora
+has not been demonstrated yet. See
 [docs/architecture/production-readiness.md](docs/architecture/production-readiness.md) for the gate table. The CLI is
 read-only with respect to your Lean source, so trying it costs only time.
 

@@ -1,3 +1,4 @@
+mod changed;
 mod cli;
 mod commands;
 mod error;
@@ -77,11 +78,12 @@ where
 
     match commands::run(cli) {
         Ok(outcome) => {
+            let exit_code = outcome.exit_code;
             if let Err(error) = render::write_outcome(outcome, stdout, stderr) {
                 let _ = writeln!(stderr, "error: {error}");
                 1
             } else {
-                0
+                exit_code
             }
         }
         Err(error) => {

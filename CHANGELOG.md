@@ -6,15 +6,22 @@ All notable changes to lean-dup are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- Added `lean-dup lint`, an installable, source-located advisory linter for exact, safely permuted, and
+  connective-equivalent duplicate declarations verified by Lean. It can inspect a whole module or focus work with
+  repeatable `--file` / `--declaration` selectors and Git-aware `--changed-since REV`; findings exit successfully, while
+  incomplete semantic analysis exits `2` so CI cannot mistake missing evidence for a clean result.
+
 ## [0.3.2] - 2026-08-11
 
 ### Changed
 
-- Bumped the Lean toolchain pin from `leanprover/lean4:v4.33.0` to `leanprover/lean4:v4.34.0-rc1` and moved the
-  upstream `lean-semantic-search` dependencies in lockstep to release tag `v0.7.1` (the tag whose toolchain is
-  `v4.34.0-rc1`): the Lake git require moved to `v0.7.1` and `Cargo.lock` refreshed onto the `0.7.1` crates, staying
-  on the transitive lean-rs 0.7 line (`lean-rs-worker-protocol` / `lean-rs-abi` / `lean-toolchain` at 0.7.2). All six
-  `lean-toolchain` files and `PINNED_TOOLCHAIN` moved together; no Rust-floor (`1.91`) or protocol changes.
+- Bumped the Lean toolchain pin from `leanprover/lean4:v4.33.0` to `leanprover/lean4:v4.34.0-rc1` and moved the upstream
+  `lean-semantic-search` dependencies in lockstep to release tag `v0.7.1` (the tag whose toolchain is `v4.34.0-rc1`):
+  the Lake git require moved to `v0.7.1` and `Cargo.lock` refreshed onto the `0.7.1` crates, staying on the transitive
+  lean-rs 0.7 line (`lean-rs-worker-protocol` / `lean-rs-abi` / `lean-toolchain` at 0.7.2). All six `lean-toolchain`
+  files and `PINNED_TOOLCHAIN` moved together; no Rust-floor (`1.91`) or protocol changes.
 
 ### Fixed
 
@@ -25,44 +32,42 @@ All notable changes to lean-dup are documented here. The format is based on
 
 ### Changed
 
-- Bumped the Lean toolchain pin from `leanprover/lean4:v4.33.0-rc2` to `leanprover/lean4:v4.33.0` (the final
-  release, header-identical to rc2). The upstream `lean-semantic-search` release stays at tag `v0.7.0` (its
-  `lean-toolchain` pins rc2; the final is ABI-identical, so the shared package compiles cleanly under it). All six
-  `lean-toolchain` files and `PINNED_TOOLCHAIN` moved together; no Cargo, Rust-floor, or protocol changes.
+- Bumped the Lean toolchain pin from `leanprover/lean4:v4.33.0-rc2` to `leanprover/lean4:v4.33.0` (the final release,
+  header-identical to rc2). The upstream `lean-semantic-search` release stays at tag `v0.7.0` (its `lean-toolchain` pins
+  rc2; the final is ABI-identical, so the shared package compiles cleanly under it). All six `lean-toolchain` files and
+  `PINNED_TOOLCHAIN` moved together; no Cargo, Rust-floor, or protocol changes.
 
 ## [0.3.0] - 2026-08-04
 
 ### Changed
 
 - **Native Lean worker transport.** The `lean-rs-worker` FFI pool (a dlopen'd `LeanDup` capability dylib behind
-  `lean-rs-worker-parent`/`lean-dup-worker-child`) is replaced by a native Lean 4 executable, `lean-dup-worker`,
-  spawned under `lake env` in the audited workspace and driven over line-framed JSONL (`lean/LeanDup/Server.lean`).
-  Command set, request payloads, row schemas, and stream names are unchanged; only the framing moves. One warm child
-  serves every command of an audit; timeouts and cancellation kill it (the next command respawns, bounded by the
-  Lean-side session cache). `install-worker` now builds the executable per toolchain with that toolchain's own `lake`
-  — no Rust toolchain needed — and the smoke test spawns it and answers `version`. The index cache substrate facts are
-  now Rust-owned transport constants (`2` = JSONL subprocess), so caches re-warm once across the swap. Deleted: the
+  `lean-rs-worker-parent`/`lean-dup-worker-child`) is replaced by a native Lean 4 executable, `lean-dup-worker`, spawned
+  under `lake env` in the audited workspace and driven over line-framed JSONL (`lean/LeanDup/Server.lean`). Command set,
+  request payloads, row schemas, and stream names are unchanged; only the framing moves. One warm child serves every
+  command of an audit; timeouts and cancellation kill it (the next command respawns, bounded by the Lean-side session
+  cache). `install-worker` now builds the executable per toolchain with that toolchain's own `lake` — no Rust toolchain
+  needed — and the smoke test spawns it and answers `version`. The index cache substrate facts are now Rust-owned
+  transport constants (`2` = JSONL subprocess), so caches re-warm once across the swap. Deleted: the
   `lean-dup-worker-child` crate, the FFI capability exports (`LeanDup.Capability`), the `lean-rs-*`/`lean-toolchain`
   dependencies, and the worker-pool machinery.
 - **Import-once everywhere.** The probe-only environment cache (from `8028780`) is generalized into a shared
   session-environment cache (`LeanDup.Extract.sessionEnv`) used by `extract`, `features`, `probe`, and `index`: one
   import per module signature per worker session. Previously `extract` and `features` re-imported the full
-  (Mathlib-scale) environment per command, and each audit pipeline stage spawned a fresh worker that re-imported
-  again; one `WorkerClient` engine is now shared across all stages of an audit. Measured on a Mathlib-importing
-  workspace (`Proofs.Topology` audit): worker physical footprint 4.5 GiB → 0.6 GiB, cold audit 21 s → 16 s,
-  identical findings.
+  (Mathlib-scale) environment per command, and each audit pipeline stage spawned a fresh worker that re-imported again;
+  one `WorkerClient` engine is now shared across all stages of an audit. Measured on a Mathlib-importing workspace
+  (`Proofs.Topology` audit): worker physical footprint 4.5 GiB → 0.6 GiB, cold audit 21 s → 16 s, identical findings.
 - **Probe cache scoping (design C).** Semantic probe verdicts moved from the per-`cache_id` index SQLite into a shared
   store at `<cache_root>/probes/<label>.sqlite`, keyed by the two declarations' content digests plus the transitive
-  import-closure digests of their modules (parsed from `.ilean` headers and Lean sources, no worker round-trip).
-  Editing a file outside both closures no longer discards every cached verdict — measured: adding an unrelated file
-  reused 54/54 probes (0 re-run) where the whole cache previously invalidated. `doctor` reports the shared store;
-  `cache-cleanup` treats it as a managed artifact.
-- Bumped the Lean toolchain pin to `leanprover/lean4:v4.33.0-rc2` and moved the upstream dependencies in lockstep:
-  the `lean-semantic-search-*` crates and the `lean/lakefile.lean` Lake git require to release tag `v0.7.0`, which
-  advances the transitive `lean-rs` line from `0.4` to `0.7` (`lean-rs-worker-protocol`, `lean-rs-abi`,
-  `lean-toolchain`). lean-rs 0.7.0 adds 4.33.0-rc2 (byte-identical `lean.h` ABI with rc1) to its supported window;
-  the wire protocol is unchanged. All six `lean-toolchain` files and `PINNED_TOOLCHAIN` moved together; the Rust
-  floor stays 1.91.
+  import-closure digests of their modules (parsed from `.ilean` headers and Lean sources, no worker round-trip). Editing
+  a file outside both closures no longer discards every cached verdict — measured: adding an unrelated file reused 54/54
+  probes (0 re-run) where the whole cache previously invalidated. `doctor` reports the shared store; `cache-cleanup`
+  treats it as a managed artifact.
+- Bumped the Lean toolchain pin to `leanprover/lean4:v4.33.0-rc2` and moved the upstream dependencies in lockstep: the
+  `lean-semantic-search-*` crates and the `lean/lakefile.lean` Lake git require to release tag `v0.7.0`, which advances
+  the transitive lean-rs 0.7 line from `0.4` to `0.7` (`lean-rs-worker-protocol`, `lean-rs-abi`, `lean-toolchain`).
+  lean-rs 0.7.0 adds 4.33.0-rc2 (byte-identical `lean.h` ABI with rc1) to its supported window; the wire protocol is
+  unchanged. All six `lean-toolchain` files and `PINNED_TOOLCHAIN` moved together; the Rust floor stays 1.91.
 - The `Report` enum's `Doctor` and `Perf` variants are now boxed (matching the already-boxed `Audit`/`Eval`/`Show`
   variants) to satisfy the `large_enum_variant` lint under current stable clippy.
 
@@ -73,9 +78,9 @@ All notable changes to lean-dup are documented here. The format is based on
 ### Fixed
 
 - `install-worker` failed its own smoke test on a fresh install dir: the smoke run resolves the worker through the
-  parent's runtime path, which refuses a worker without a provenance sidecar, and the sidecar was only written
-  *after* the smoke test. `install-worker` now writes a pending sidecar (no smoke outcome) before the smoke run and
-  overwrites it with the real outcome.
+  parent's runtime path, which refuses a worker without a provenance sidecar, and the sidecar was only written *after*
+  the smoke test. `install-worker` now writes a pending sidecar (no smoke outcome) before the smoke run and overwrites
+  it with the real outcome.
 
 ## [0.2.4] - 2026-07-19
 

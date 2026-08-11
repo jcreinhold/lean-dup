@@ -9,7 +9,7 @@ use lean_dup_diagnostics::perf::{self, CostClass};
 use lean_dup_diagnostics::progress::Reporter;
 use lean_dup_index::{self, CacheFacts};
 use lean_dup_index::{ComparisonProvenance, ComparisonProvenanceReport};
-use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
+use lean_dup_index::{HydratedDeclaration, IndexBuildKind, IndexBuildRequest, IndexReference, IndexStore, OpenedIndex};
 use lean_dup_project::{ResolvedWorkspace, WorkspaceRequest, resolve, resolve_workspace_mathlib};
 use lean_dup_worker::WorkerClient;
 
@@ -71,7 +71,7 @@ use crate::replacement_hints::{
     CallerImpact, ReplacementHint, ReplacementHintProfile, attach_replacement_hints, reference_declarations_for_hints,
 };
 use crate::retrieval::RetrievalDiagnostics;
-use crate::retrieval::retrieve_candidates;
+use crate::retrieval::{retrieve_candidates, retrieve_candidates_for};
 use crate::review_policy::{self, SearchReviewPolicySummary};
 use crate::scorer::{SearchScoringSummary, default_summary};
 use crate::semantic_reranking::{
@@ -87,6 +87,71 @@ use crate::{ProbePolicy, ProbeStatusBreakdown, Result};
 
 const DEFAULT_VISIBLE_GROUP_LIMIT: usize = 500;
 const ORDINARY_PAIR_SUMMARY_LIMIT: usize = 8;
+
+/// One current-source line range whose owning declarations should anchor an audit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditSourceRange {
+    pub file: PathBuf,
+    pub start_line: u64,
+    pub end_line: u64,
+}
+
+/// Optional declaration focus for an audit-backed command.
+///
+/// An empty focus means the complete selected module corpus. Otherwise a
+/// declaration is focused when its qualified/id name is selected or its
+/// source span intersects one selected current-source range.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AuditFocus {
+    restricted: bool,
+    source_ranges: Vec<AuditSourceRange>,
+    declarations: BTreeSet<String>,
+}
+
+impl AuditFocus {
+    pub fn new(source_ranges: Vec<AuditSourceRange>, declarations: Vec<String>) -> Self {
+        Self {
+            restricted: true,
+            source_ranges,
+            declarations: declarations.into_iter().collect(),
+        }
+    }
+
+    pub fn is_restricted(&self) -> bool {
+        self.restricted
+    }
+
+    fn matches(&self, declaration: &HydratedDeclaration) -> bool {
+        if !self.is_restricted() {
+            return true;
+        }
+        if self.declarations.contains(&declaration.declaration_id)
+            || self.declarations.contains(&declaration.qualified_name)
+        {
+            return true;
+        }
+        let Some(span) = declaration.source_span.as_ref() else {
+            return false;
+        };
+        let span_file = Path::new(&span.file);
+        self.source_ranges.iter().any(|range| {
+            range.file == span_file && range.start_line <= span.end.line && span.start.line <= range.end_line
+        })
+    }
+
+    fn unmatched_declarations(&self, declarations: &[HydratedDeclaration]) -> Vec<String> {
+        self.declarations
+            .iter()
+            .filter(|requested| {
+                let requested = requested.as_str();
+                !declarations.iter().any(|declaration| {
+                    declaration.declaration_id == requested || declaration.qualified_name == requested
+                })
+            })
+            .cloned()
+            .collect()
+    }
+}
 
 /// Request for a complete duplicate-audit computation.
 ///
@@ -109,6 +174,11 @@ pub struct AuditRequest {
     pub probe_budget: usize,
     pub probe_policy: ProbePolicy,
     pub probe_chunk_size: usize,
+    /// Optional declaration/source focus. The complete workspace remains the
+    /// comparison corpus even when only focused declarations anchor retrieval.
+    pub focus: AuditFocus,
+    /// Maximum semantic probes planned for one focused declaration.
+    pub probe_per_declaration_cap: usize,
     /// Per-declaration elaboration heartbeat budget for the worker. `None` leaves
     /// the worker default; `Some(0)` disables the limit.
     pub max_heartbeats: Option<u64>,
@@ -128,6 +198,9 @@ pub struct AuditOutput {
     pub compare_mathlib: bool,
     pub include_generated: bool,
     pub visibility: AuditVisibilityOptions,
+    pub focus_requested: bool,
+    pub focused_declaration_count: usize,
+    pub unmatched_focus_declarations: Vec<String>,
     /// Declarations omitted from the local workspace index because their
     /// elaboration exceeded the per-declaration heartbeat budget. `0` for the
     /// default budget on well-behaved corpora; raise `--max-heartbeats` to
@@ -429,6 +502,9 @@ struct WorkflowOutput {
     compare_mathlib: bool,
     include_generated: bool,
     visibility: AuditVisibilityOptions,
+    focus_requested: bool,
+    focused_declaration_count: usize,
+    unmatched_focus_declarations: Vec<String>,
     declarations_skipped_by_budget: u64,
     retrieval: RetrievalDiagnostics,
     comparison_provenance: Vec<ComparisonProvenanceReport>,
@@ -504,8 +580,22 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
     let local_handles = local_index.all_handles()?;
     let workspace_rows = local_index.hydrate(&local_handles)?;
     debug!(workspace_declarations = workspace_rows.len(), "hydrated local index");
+    let focus_requested = request.focus.is_restricted();
+    let focused_declaration_ids = workspace_rows
+        .iter()
+        .filter(|declaration| request.focus.matches(declaration))
+        .map(|declaration| declaration.declaration_id.clone())
+        .collect::<BTreeSet<_>>();
+    let focused_declaration_count = focused_declaration_ids.len();
+    let unmatched_focus_declarations = request.focus.unmatched_declarations(&workspace_rows);
     let compare = open_compare_indexes(&request, &store, &foundation.workspace, &worker, reporter)?;
-    let retrieval_output = reporter.measure("retrieval", |_| retrieve_candidates(&workspace_rows, &compare.indexes))?;
+    let retrieval_output = reporter.measure("retrieval", |_| {
+        if focus_requested {
+            retrieve_candidates_for(&workspace_rows, &compare.indexes, Some(&focused_declaration_ids))
+        } else {
+            retrieve_candidates(&workspace_rows, &compare.indexes)
+        }
+    })?;
     info!(
         candidate_sets = retrieval_output.candidate_sets.len(),
         "retrieval complete"
@@ -550,7 +640,7 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
             settings: ProbeSettings {
                 policy: request.probe_policy,
                 budget: request.probe_budget,
-                per_declaration_cap: 2,
+                per_declaration_cap: request.probe_per_declaration_cap,
                 chunk_size: request.probe_chunk_size,
                 max_heartbeats: request.max_heartbeats,
             },
@@ -648,6 +738,9 @@ fn run_audit_workflow(request: AuditRequest, reporter: &mut Reporter) -> Result<
         compare_mathlib: request.compare_mathlib,
         include_generated: request.include_generated,
         visibility: request.visibility,
+        focus_requested,
+        focused_declaration_count,
+        unmatched_focus_declarations,
         declarations_skipped_by_budget,
         retrieval: retrieval_output.diagnostics,
         comparison_provenance: compare.provenance.reports,
@@ -763,6 +856,9 @@ fn project_audit_output(workflow: WorkflowOutput) -> AuditOutput {
         compare_mathlib: workflow.compare_mathlib,
         include_generated: workflow.include_generated,
         visibility: workflow.visibility,
+        focus_requested: workflow.focus_requested,
+        focused_declaration_count: workflow.focused_declaration_count,
+        unmatched_focus_declarations: workflow.unmatched_focus_declarations,
         declarations_skipped_by_budget: workflow.declarations_skipped_by_budget,
         scoring: default_summary(),
         review_policy: review_policy::summary(),

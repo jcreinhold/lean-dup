@@ -171,6 +171,26 @@ explanation:
 
 That is the loop: `audit` gives you a list, `show <id>` gives you the evidence and the action.
 
+## Lint current work
+
+Use `lint` when the candidate-owning declarations are already known or come from a Git diff:
+
+```sh
+lean-dup lint --workspace /path/to/your/lake/project --module MyLib --changed-since origin/main
+lean-dup lint --workspace /path/to/your/lake/project --module MyLib \
+  --declaration MyLib.Foo.someTheorem
+```
+
+The selected declarations are retrieval anchors; unselected declarations in the workspace remain eligible local matches.
+A warning is emitted only when Lean's semantic probe certifies an exact statement, a safe premise permutation, or a
+connective equivalence. Static fingerprints are candidate-generation evidence, not lint findings.
+
+Warnings are advisory and exit `0`: inspect the named group with the printed `lean-dup show` command, then check API
+intent, generality, callers, and imports before deleting or forwarding either declaration. Exit `2` means the lint was
+incomplete (for example, a requested declaration was absent or a semantic budget was exhausted); it must not be treated
+as a clean result. CLI, workspace, Git, and worker failures exit `1`. `--format json` returns the report schema, status,
+focus count, findings with source locations and evidence, and any incomplete reasons.
+
 ## Run against your own project
 
 Replace the fixture workspace with your project root:

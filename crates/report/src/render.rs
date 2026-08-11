@@ -1,7 +1,7 @@
 use crate::report_contract::GroupExplanation;
 use crate::reports::{
     AuditReport, BaselineReport, BaselineSummaryReport, CacheCleanupReportDto, CacheLabelDiagnosticsReport, DiffReport,
-    DoctorReport, EvalReportDto, IndexReport, PerfReport, Report, ReviewGroupReport, ShowReport,
+    DoctorReport, EvalReportDto, IndexReport, LintReport, PerfReport, Report, ReviewGroupReport, ShowReport,
     cache_root_diagnostic_label, path_diagnostic_label, path_reference_label,
 };
 
@@ -28,6 +28,7 @@ pub fn render_text_with(report: &Report, options: RenderOptions) -> String {
         Report::CacheCleanup(report) => render_cache_cleanup(report, options),
         Report::Index(report) => render_index("index", report),
         Report::IndexMathlib(report) => render_index("index-mathlib", report),
+        Report::Lint(report) => render_lint(report),
         Report::Show(report) => render_show(report, options),
         Report::Diff(report) => render_diff(report, options),
         Report::Audit(report) => render_audit(report, options),
@@ -35,6 +36,48 @@ pub fn render_text_with(report: &Report, options: RenderOptions) -> String {
         Report::Perf(report) => render_perf(report),
         Report::Baseline(report) => render_baseline(report, options),
     }
+}
+
+fn render_lint(report: &LintReport) -> String {
+    let mut lines = Vec::new();
+    for finding in &report.findings {
+        lines.push(format!(
+            "{}:{}:{}: {}[lean-dup/{}]: `{}` has verified duplicate `{}`",
+            finding.file.display(),
+            finding.line,
+            finding.column,
+            finding.severity,
+            finding.relation,
+            finding.declaration,
+            finding.duplicate
+        ));
+        lines.push(format!("  = evidence: {}", finding.evidence));
+        lines.push(format!("  = action: {}", finding.recommended_action));
+        lines.push(format!("  = help: {}", finding.help));
+    }
+    if !report.findings.is_empty() {
+        lines.push(String::new());
+    }
+    if report.status == "incomplete" {
+        lines.push(format!(
+            "lean-dup lint: incomplete after {} focused declaration(s); {} warning(s)",
+            report.focused_declaration_count, report.finding_count
+        ));
+        for reason in &report.incomplete_reasons {
+            lines.push(format!("  = error: {reason}"));
+        }
+    } else if report.findings.is_empty() {
+        lines.push(format!(
+            "lean-dup lint: no verified duplicate declarations among {} focused declaration(s)",
+            report.focused_declaration_count
+        ));
+    } else {
+        lines.push(format!(
+            "lean-dup lint: {} warning(s) among {} focused declaration(s)",
+            report.finding_count, report.focused_declaration_count
+        ));
+    }
+    lines.join("\n")
 }
 
 fn render_baseline(report: &BaselineReport, options: RenderOptions) -> String {

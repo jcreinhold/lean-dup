@@ -1,7 +1,8 @@
 # Report Contract
 
 This document defines `G7 report_contract` in [production-readiness.md](production-readiness.md). It covers ordinary
-audit JSON/text, ordinary eval JSON/text, and targeted `show` detail for the 0.1.0 symbolic auditor.
+audit JSON/text, source-located lint JSON/text, ordinary eval JSON/text, and targeted `show` detail for the symbolic
+auditor.
 
 ## Design Note
 
@@ -152,6 +153,23 @@ Default text audit output includes, in order:
 10. the first visible groups, if any.
 
 When `visible_group_count = 0`, the text report explains why without requiring `jq`.
+
+## `lint` Contract
+
+`lint` is a high-precision projection of the audit workflow, not a second duplicate engine. The full selected workspace
+index remains its local comparison corpus, while optional source ranges and declaration names restrict candidate anchors
+before retrieval. Only proof-grade `exact-statement`, `permuted-statement`, and `connective-equivalent` groups become
+findings; static evidence never does.
+
+Text findings use `file:line:column` diagnostics and include the focused declaration, duplicate declaration, relation,
+semantic evidence, recommended action, and a targeted `show` command. JSON uses the ordinary report schema id and adds
+`status`, selected roots, focus metadata, a deterministic `findings` array, and `incomplete_reasons`. Source paths are
+workspace-relative when possible.
+
+Findings have severity `warning` and exit `0`. `status = incomplete` exits `2` when requested declarations are missing,
+workspace or probe budgets skip evidence, semantic results are unavailable, or the report queue is truncated. CLI,
+workspace, Git, and worker failures exit `1`. This separation lets commit-time automation remain advisory without
+silently accepting an unmeasured workload.
 
 ## `show` Contract
 

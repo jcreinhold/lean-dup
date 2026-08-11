@@ -9,17 +9,18 @@ use lean_dup_index::{IndexBuildKind, IndexBuildRequest, IndexStore, IndexSummary
 use lean_dup_project::{ResolvedWorkspace, WorkspaceRequest, resolve, resolve_project_mathlib};
 use lean_dup_report::{
     AuditReport, BaselineReport, BaselineSummaryReport, CacheCleanupReportDto, DiffReport, DoctorReport, IndexReport,
-    RenderOptions, Report, ShowReport,
+    LintReport, RenderOptions, Report, ShowReport,
 };
 use lean_dup_search::{
-    AuditRequest, BaselineSnapshot, DiffOutput, baseline_name_is_valid, baseline_path, baselines_dir, diff_snapshots,
-    load_last_audit_detail, load_last_audit_snapshot, load_named_baseline, run_audit, run_diff, run_show,
+    AuditFocus, AuditRequest, AuditSourceRange, BaselineSnapshot, DiffOutput, baseline_name_is_valid, baseline_path,
+    baselines_dir, diff_snapshots, load_last_audit_detail, load_last_audit_snapshot, load_named_baseline, run_audit,
+    run_diff, run_show,
 };
 use lean_dup_worker::{WorkerClient, WorkerVersion};
 
 use crate::cli::{
     AuditArgs, BaselineAction, BaselineArgs, BaselineCommonArgs, CacheCleanupArgs, Cli, Command, DiffArgs, DoctorArgs,
-    EvalArgs, EvalFormat, IndexArgs, IndexMathlibArgs, OutputFormat, ShowArgs,
+    EvalArgs, EvalFormat, IndexArgs, IndexMathlibArgs, LintArgs, OutputFormat, ShowArgs,
 };
 use crate::error::{AppError, Result};
 
@@ -30,6 +31,7 @@ pub struct Outcome {
     pub output_path: Option<PathBuf>,
     pub reporter: Reporter,
     pub render_options: RenderOptions,
+    pub exit_code: i32,
 }
 
 struct Foundation {
@@ -69,6 +71,10 @@ pub fn run(cli: Cli) -> Result<Outcome> {
             render_options.verbose = render_options.verbose || args.verbose;
             render_options.audit_limit = args.limit;
             (Report::Audit(Box::new(audit(args, &mut reporter)?)), format, None)
+        }
+        Command::Lint(args) => {
+            let format = args.format;
+            (Report::Lint(Box::new(lint(args, &mut reporter)?)), format, None)
         }
         Command::Eval(args) => {
             let format = if args.format == EvalFormat::Json {
@@ -115,12 +121,17 @@ pub fn run(cli: Cli) -> Result<Outcome> {
         }
     };
 
+    let exit_code = match &report {
+        Report::Lint(report) if report.status == "incomplete" => 2,
+        _ => 0,
+    };
     Ok(Outcome {
         report,
         output_format,
         output_path,
         reporter,
         render_options,
+        exit_code,
     })
 }
 
@@ -380,8 +391,70 @@ fn audit_request(args: AuditArgs) -> AuditRequest {
         probe_budget: args.probe_budget,
         probe_policy: args.probe_policy.into(),
         probe_chunk_size: args.probe_chunk_size,
+        focus: AuditFocus::default(),
+        probe_per_declaration_cap: 2,
         max_heartbeats: args.max_heartbeats,
     }
+}
+
+fn lint(args: LintArgs, reporter: &mut Reporter) -> Result<LintReport> {
+    let workspace = workspace_or_cwd(pick_workspace(args.workspace, args.workspace_positional));
+    let focus_requested = args.changed_since.is_some() || !args.files.is_empty() || !args.declarations.is_empty();
+    let mut ranges = Vec::new();
+    for file in args.files {
+        if file.extension().and_then(|extension| extension.to_str()) != Some("lean") {
+            return Err(AppError::Cli {
+                message: format!("lint focus file must end in .lean: {}", file.display()),
+            });
+        }
+        let requested = if file.is_absolute() { file } else { workspace.join(file) };
+        let file = requested.canonicalize().map_err(|source| AppError::Io {
+            message: "could not resolve lint focus file",
+            path: requested,
+            source,
+        })?;
+        ranges.push(AuditSourceRange {
+            file,
+            start_line: 1,
+            end_line: u64::MAX,
+        });
+    }
+    if let Some(revision) = args.changed_since.as_deref() {
+        ranges.extend(crate::changed::source_ranges(&workspace, revision)?);
+    }
+    if args.declarations.iter().any(String::is_empty) {
+        return Err(AppError::Cli {
+            message: "lint declaration focus must not be empty".to_owned(),
+        });
+    }
+    let focus = if focus_requested {
+        AuditFocus::new(ranges, args.declarations)
+    } else {
+        AuditFocus::default()
+    };
+    let probe_per_declaration_cap = args.probe_budget.max(1);
+    let output = run_audit(
+        AuditRequest {
+            workspace,
+            module_root: args.module_root,
+            include_private: false,
+            compare_indexes: Vec::new(),
+            compare_mathlib: args.compare_mathlib,
+            mathlib_workspace: args.mathlib_workspace,
+            include_generated: false,
+            visibility: Default::default(),
+            save_baseline: None,
+            semantic_probes: true,
+            probe_budget: args.probe_budget,
+            probe_policy: lean_dup_search::ProbePolicy::Actionable,
+            probe_chunk_size: args.probe_chunk_size,
+            focus,
+            probe_per_declaration_cap,
+            max_heartbeats: args.max_heartbeats,
+        },
+        reporter,
+    )?;
+    Ok(lean_dup_report::lint_report(output))
 }
 
 fn eval(args: EvalArgs, reporter: &mut Reporter) -> Result<lean_dup_report::EvalReportDto> {

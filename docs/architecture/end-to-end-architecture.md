@@ -14,6 +14,7 @@ For the layering rule, see [overview.md](overview.md). For release gates, see
 | `doctor` | inspect workspace, worker, Lake, and cache health |
 | `index` | build or reuse a workspace index |
 | `index-mathlib` | build or reuse the audited project's pinned mathlib index |
+| `lint` | emit source-located advisory warnings for focused, Lean-verified duplicates |
 | `audit` | produce duplicate-review groups from local, imported, mathlib, or external evidence |
 | `show` | explain one group resolvable from the current workspace/index context |
 | `diff` | compare two saved audit baselines |
@@ -43,8 +44,8 @@ flowchart TD
   SQLite --> Doctor["doctor / cache-cleanup"]
 ```
 
-A normal audit: parse the command, resolve the workspace and modules, ensure a compatible worker, open or build the
-required indexes, retrieve bounded candidates, optionally verify high-value pairs in Lean, rank and filter groups,
+A normal audit or lint: parse the command, resolve the workspace and modules, ensure a compatible worker, open or build
+the required indexes, retrieve bounded candidates, optionally verify high-value pairs in Lean, rank and filter groups,
 attach source-backed context, build stable explanation facts, render text or JSON. `eval` and `perf` use the same lower
 layers with different suite/workload ownership and artifact policy.
 
@@ -163,6 +164,9 @@ reproducible without exposing cache deletion, SQL probes, or shell timing sequen
 - **`audit`** compares selected workspace declarations with local candidates, direct imports, explicit import roots, a
   project-pinned mathlib index, or named external indexes. With source-backed evidence, proof-grade visible claims
   require semantic verification. With static indexes, findings remain explicitly static.
+- **`lint`** uses the workspace index as the full local comparison corpus while optional file, declaration, and Git
+  selectors restrict retrieval anchors. It emits warnings only for proof-grade exact, safe-permutation, or connective
+  relations. Findings are advisory; incomplete semantic coverage is a distinct nonzero outcome.
 - **`show`** explains a ranked group resolvable from the current workspace/index context. It is not a full report-file
   browser.
 - **`eval --suite default` / `eval --suite hard-negatives`** are fast fixture gates. `manual-internal` and
