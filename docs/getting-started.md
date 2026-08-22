@@ -16,8 +16,8 @@ use embeddings.
 
 | Component | Required |
 | --- | --- |
-| Lean toolchain | `leanprover/lean4:v4.34.0-rc1` (the pinned version; other 4.x versions are untested) |
-| Rust toolchain | 1.91+ (the workspace uses `edition = "2024"`) |
+| Lean toolchain | `leanprover/lean4:v4.34.0-rc2` (the pinned version; other 4.x versions are untested) |
+| Rust toolchain | 1.94+ (the workspace uses `edition = "2024"`) |
 | Target project | a Lake workspace whose `lake build` succeeds |
 | `.olean` files | the modules you want audited must be compiled |
 | Disk | the mathlib index alone is multi-gigabyte; default cache root is `~/.cache/lean-dup` |

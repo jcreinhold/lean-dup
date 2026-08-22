@@ -10,10 +10,10 @@ package lean_dup_worker where
 -- materializes these same crates' Lean sources before building the capability.
 --
 -- Shared neutral feature extraction (canonical fingerprints, role features) lives
--- in the lean-semantic-search package. The tag's toolchain (v4.34.0-rc1, pinned by the v0.7.1 tag) matches
+-- in the lean-semantic-search package. The tag's toolchain (v4.34.0-rc2, pinned by the v0.7.2 tag) matches
 -- this package's, so Lake compiles it cleanly under the root toolchain.
 require «lean-semantic-search» from git
-  "https://github.com/jcreinhold/lean-semantic-search.git" @ "v0.7.1" / "lean"
+  "https://github.com/jcreinhold/lean-semantic-search.git" @ "v0.7.2" / "lean"
 
 @[default_target]
 lean_lib LeanDup where

@@ -8,8 +8,8 @@ local and deterministic: no network, no embeddings, no proof-term analysis. The 
 only reads source, builds Lean artifacts through Lake, and writes indexes/reports/diagnostics under the cache root or
 `target/`.
 
-It is a Rust workspace (`edition = "2024"`, Rust 1.91+) plus a small Lean worker package under `lean/`. The pinned Lean
-toolchain is `leanprover/lean4:v4.34.0-rc1` (other 4.x untested).
+It is a Rust workspace (`edition = "2024"`, Rust 1.94+) plus a small Lean worker package under `lean/`. The pinned Lean
+toolchain is `leanprover/lean4:v4.34.0-rc2` (other 4.x untested).
 
 ## Commands
 
