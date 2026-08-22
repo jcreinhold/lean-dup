@@ -6,14 +6,7 @@ All notable changes to lean-dup are documented here. The format is based on
 
 ## [Unreleased]
 
-### Changed
-
-- Bumped the Lean toolchain pin from `leanprover/lean4:v4.34.0-rc1` to `leanprover/lean4:v4.34.0-rc2` and moved the
-  upstream `lean-semantic-search` dependencies in lockstep to release tag `v0.7.2` (the tag whose toolchain is
-  `v4.34.0-rc2`): the Lake git require moved to `v0.7.2` and `Cargo.lock` refreshed onto the `0.7.2` crates, which
-  carry the transitive lean-rs line forward to 0.7.3 (`lean-rs-worker-protocol` / `lean-rs-abi` / `lean-toolchain`).
-  All six `lean-toolchain` files and `PINNED_TOOLCHAIN` moved together. lean-rs 0.7.3 raises its MSRV to Rust 1.94,
-  so the workspace `rust-version` floor moved from 1.91 to 1.94 to match; no protocol changes.
+## [0.4.0] - 2026-08-22
 
 ### Added
 
@@ -22,20 +15,25 @@ All notable changes to lean-dup are documented here. The format is based on
   repeatable `--file` / `--declaration` selectors and Git-aware `--changed-since REV`; findings exit successfully, while
   incomplete semantic analysis exits `2` so CI cannot mistake missing evidence for a clean result.
 
-## [0.3.2] - 2026-08-11
-
 ### Changed
 
-- Bumped the Lean toolchain pin from `leanprover/lean4:v4.33.0` to `leanprover/lean4:v4.34.0-rc1` and moved the upstream
-  `lean-semantic-search` dependencies in lockstep to release tag `v0.7.1` (the tag whose toolchain is `v4.34.0-rc1`):
-  the Lake git require moved to `v0.7.1` and `Cargo.lock` refreshed onto the `0.7.1` crates, staying on the transitive
-  lean-rs 0.7 line (`lean-rs-worker-protocol` / `lean-rs-abi` / `lean-toolchain` at 0.7.2). All six `lean-toolchain`
-  files and `PINNED_TOOLCHAIN` moved together; no Rust-floor (`1.91`) or protocol changes.
+- Bumped the Lean toolchain pin from `leanprover/lean4:v4.33.0` to `leanprover/lean4:v4.34.0-rc2` and moved the
+  upstream `lean-semantic-search` dependencies in lockstep from release tag `v0.7.0` to `v0.7.2` (the tag whose
+  toolchain is `v4.34.0-rc2`): the Lake git require moved to `v0.7.2` and `Cargo.lock` refreshed onto the `0.7.2`
+  crates, which carry the transitive lean-rs line forward to 0.7.3 (`lean-rs-worker-protocol` / `lean-rs-abi` /
+  `lean-toolchain`). All six `lean-toolchain` files and `PINNED_TOOLCHAIN` moved together. lean-rs 0.7.3 raises its
+  MSRV to Rust 1.94, so the workspace `rust-version` floor moved from 1.91 to 1.94 to match; no protocol changes.
 
 ### Fixed
 
+- `lean-dup lint` no longer counts opaque, unsupported, or definition-size-guarded pairs as incomplete evidence:
+  those are outside the lint's semantic domain and stay silent. Only probe results that failed measurement (missing
+  declaration, timeout, internal error) make a run incomplete and exit `2`.
+- The CLI's embedded git revision now refreshes on branch commits: `crates/cli/build.rs` watches `HEAD`,
+  `packed-refs`, and the symbolic-ref target instead of `.git/HEAD` alone, so checkouts that only move a branch
+  pointer rebuild with the correct revision.
 - Replaced the newly deprecated `String.trim` with `String.trimAscii.toString` in the worker entry point (`Main.lean`),
-  so the `lean-dup-worker` build under `v4.34.0-rc1` is warning-free.
+  so the `lean-dup-worker` build under `v4.34.x` is warning-free.
 
 ## [0.3.1] - 2026-08-10
 
