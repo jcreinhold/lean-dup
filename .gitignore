@@ -18,3 +18,4 @@ __pycache__/
 
 # Pi harness state
 .pi/sessions/
+.pi/tasks/
