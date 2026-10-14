@@ -1978,7 +1978,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4170,15 +4170,15 @@ dependencies = [
 
 [[package]]
 name = "lean-rs-abi"
-version = "0.8.0"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3bb2a467f113e7c6b4da30eeabc2216dc248e4eb4e1b8dc84beaa68f8ef3401"
+checksum = "50d2ab69abf9b685c9d3c52a2a561c4b1dbb5de866deb6a0844ded52c4e194bd"
 
 [[package]]
 name = "lean-rs-worker-protocol"
-version = "0.8.0"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f64ef8d69ef25ddd229515ca8ee4cd4cf40f8fc0a2c35a6ff017d2ed6ce8c74"
+checksum = "6778d71329a65ffe572a808d3250af0d97d3c491a30f070d5b91b6b865d7b1a9"
 dependencies = [
  "lean-toolchain",
  "serde",
@@ -4187,9 +4187,9 @@ dependencies = [
 
 [[package]]
 name = "lean-semantic-search-capability"
-version = "0.7.3"
+version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bda6c6962e27564495319962a6ea322b1d369aa7f480055c6b9824706b0c67e8"
+checksum = "2748aaada7ea3a4090690651e0d9c54812054df923680a103fd92aa629233846"
 dependencies = [
  "lean-semantic-search-contract",
  "serde_json",
@@ -4197,9 +4197,9 @@ dependencies = [
 
 [[package]]
 name = "lean-semantic-search-contract"
-version = "0.7.3"
+version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69a7d67398f36d30da6d49b6f8edecda01afa6447117714d8b49dd6821232079"
+checksum = "732f9691d03904fd3bd5cb17b9d58def3263a3e315b5aa38a538e32b1c66465c"
 dependencies = [
  "serde",
  "serde_json",
@@ -4207,9 +4207,9 @@ dependencies = [
 
 [[package]]
 name = "lean-semantic-search-retrieval"
-version = "0.7.3"
+version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ff8c7163369b0dc1a88fead43165cffc229bc36a4190fa829b5a65ebebbecf7"
+checksum = "d247c640f31d61375ac4bdaab8ff2e91ac0614ce35d9df4cf31aa40d3a075bc4"
 dependencies = [
  "lean-semantic-search-contract",
  "serde",
@@ -4218,9 +4218,9 @@ dependencies = [
 
 [[package]]
 name = "lean-semantic-search-runtime"
-version = "0.7.3"
+version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2cb6bbae4180b30d1d66e6c9f57b57b4273cbcc3b3a02decee6bc2945bb3194"
+checksum = "ddc4990dca17b346c360843ef6c27623c9f7daf7e02470c70d89c5fc44cff5d1"
 dependencies = [
  "fs4",
  "lean-rs-worker-protocol",
@@ -4235,9 +4235,9 @@ dependencies = [
 
 [[package]]
 name = "lean-semantic-search-store"
-version = "0.7.3"
+version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a121e121e0fe44f227715710e62c04e878d8d04b48f1076e3e6aea2a5b2eacc8"
+checksum = "0bf1044834976464971770643d71cc803c3ce95c25403733f2191b635663463c"
 dependencies = [
  "lean-semantic-search-contract",
  "lean-semantic-search-retrieval",
@@ -4247,9 +4247,9 @@ dependencies = [
 
 [[package]]
 name = "lean-toolchain"
-version = "0.8.0"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73cc1005d5515e67d971f5e071db34bc9d58c1edf13e5742dd1d08b650eb4ffa"
+checksum = "041c960be76745c84d7059c84f878091fc6c6d61b7e17be5d96ae43bac93374e"
 dependencies = [
  "fs4",
  "lean-rs-abi",
@@ -5302,7 +5302,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5709,7 +5709,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6331,10 +6331,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7046,7 +7046,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

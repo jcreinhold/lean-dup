@@ -6,6 +6,15 @@ All notable changes to lean-dup are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- Bumped the Lean toolchain pin from `leanprover/lean4:v4.34.0-rc2` to `leanprover/lean4:v4.35.0` and moved the
+  upstream `lean-semantic-search` dependencies in lockstep to release tag `v0.7.7` (the tag whose toolchain is
+  `v4.35.0`): the Lake git require moved from `v0.7.2` to `v0.7.7` and `Cargo.lock` refreshed from the `0.7.3` crates
+  onto `0.7.7`, which carry the transitive lean-rs line forward from 0.8.0 to 0.9.4 (`lean-rs-worker-protocol` /
+  `lean-rs-abi` / `lean-toolchain`). All six `lean-toolchain` files and `PINNED_TOOLCHAIN` moved together. The Rust
+  floor is unchanged at 1.94; no protocol changes.
+
 ## [0.4.0] - 2026-08-22
 
 ### Added
