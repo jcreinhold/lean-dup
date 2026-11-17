@@ -7,8 +7,9 @@ assets.
 
 ## Requirements
 
-Lean toolchain `leanprover/lean4:v4.35.0` (other 4.x versions are untested); Rust 1.94+ (`edition = "2024"`); a Lake
-workspace whose `lake build` already succeeds, with `.olean` files present for the modules to be audited.
+The development Lean pin is `leanprover/lean4:v4.36.0`. Worker and Rust runtime qualification is pending.
+Use Rust 1.94+ (`edition = "2024"`) and a Lake workspace with a successful build and `.olean` files for the modules
+to be audited.
 
 ## Install
 

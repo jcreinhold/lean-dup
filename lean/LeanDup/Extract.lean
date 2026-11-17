@@ -1,5 +1,5 @@
 import Lean
-import Lean.Server.InfoUtils
+import Lean.Elab.InfoTree.Util
 
 /-!
 `LeanDup.Extract` owns declaration extraction facts from the Lean environment.

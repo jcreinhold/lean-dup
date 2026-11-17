@@ -4,16 +4,11 @@ open Lake DSL
 package lean_dup_worker where
   version := v!"0.1.0"
 
--- Dependencies resolve from the *published* upstream sources, pinned to release
--- tags, so a clean `lake build LeanDup` works without sibling checkouts or a
--- pre-materialized runtime root. This mirrors the worker `build.rs` path, which
--- materializes these same crates' Lean sources before building the capability.
---
--- Shared neutral feature extraction (canonical fingerprints, role features) lives
--- in the lean-semantic-search package. The tag's toolchain (v4.35.0, pinned by the v0.7.7 tag) matches
--- this package's, so Lake compiles it cleanly under the root toolchain.
+-- The development worker uses the approved semantic-search source revision.
+-- The packaged installer replaces this Git require with a local path to the
+-- Lean payload from the Rust semantic runtime crate.
 require «lean-semantic-search» from git
-  "https://github.com/jcreinhold/lean-semantic-search.git" @ "v0.7.7" / "lean"
+  "https://github.com/jcreinhold/lean-semantic-search.git" @ "c30d8b3d2001fbb7d7e28e9e74217ae711ea4d14" / "lean"
 
 @[default_target]
 lean_lib LeanDup where

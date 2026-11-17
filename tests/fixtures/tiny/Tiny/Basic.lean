@@ -26,9 +26,9 @@ theorem and_right (p q : Prop) : q ∧ p → p ∧ q := by
   intro h
   exact And.intro h.right h.left
 
-theorem dependent_left (α : Type) (x y : α) : x = x := rfl
+theorem dependent_left (α : Type) (x _y : α) : x = x := rfl
 
-theorem dependent_right (α : Type) (x y : α) : y = y := rfl
+theorem dependent_right (α : Type) (_x y : α) : y = y := rfl
 
 axiom independent_arrow_left (P Q R : Prop) : P → Q → R
 
