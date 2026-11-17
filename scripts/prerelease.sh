@@ -121,13 +121,13 @@ run_gate() {
 # -- Lake builds (prerequisite for the Rust tests) --------------------------
 
 build_lake() {
-	# The lean/ default target is the worker exe and does not pull in the
-	# top-level LeanDup.olean the audit pipeline imports; build the library
-	# explicitly alongside the exe, exactly as ci.yml does.
-	(cd lean && lake build LeanDup lean_dup_worker)
+	# Build both the library and the declared native worker executable before
+	# the fixtures, so audit tests and worker provisioning can reuse them.
+	# run_gate calls this function in an `if`, which disables implicit errexit.
+	(cd lean && lake build LeanDup lean-dup-worker) || return
 	local fixture
-	for fixture in tests/fixtures/tiny tests/fixtures/external tests/fixtures/source-backed; do
-		(cd "$fixture" && lake build)
+	for fixture in tests/fixtures/tiny tests/fixtures/external tests/fixtures/source-backed tests/fixtures/large-type; do
+		(cd "$fixture" && lake build) || return
 	done
 }
 run_gate "lake build (lean/ + fixtures)" build_lake
@@ -214,10 +214,10 @@ gate_report_contract() {
 	jq -e '.review.groups == null' target/report-contract/ordinary-audit.json >/dev/null
 }
 
-# Release portability: prove the worker builds from published crates with no
+# Release portability: prove the parent CLI builds from published crates with no
 # sibling `../lean-rs` / `../lean-semantic-search` checkout. Archives HEAD into a
-# throwaway tree, so a stray patch/path dependency fails here. Slow (runs a full
-# Lake build via the worker's build.rs), hence skippable with --quick.
+# throwaway tree, so a stray patch/path dependency fails here. This runs a full
+# Rust release build, not a packaged-worker provision, and is skippable with --quick.
 gate_portability() {
 	scripts/portability-smoke.sh
 }
