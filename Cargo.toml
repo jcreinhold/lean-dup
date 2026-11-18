@@ -49,12 +49,13 @@ lean-dup-search = { path = "crates/search", version = "0.4.0" }
 lean-dup-test-support = { path = "crates/test-support" }
 lean-dup-vector-index = { path = "crates/vector-index", version = "0.4.0" }
 lean-dup-worker = { path = "crates/worker", version = "0.4.0" }
-# Shared semantic-search Rust crates (published crates.io releases). The runtime
-# crate owns the packaged Lean source materialized by the worker build.
-lean-semantic-search-contract = { version = "0.7" }
-lean-semantic-search-retrieval = { version = "0.7" }
-lean-semantic-search-runtime = { version = "0.7" }
-lean-semantic-search-store = { version = "0.7" }
+# Shared semantic-search Rust crates. The 4.36 worker needs the source payload
+# prepared for 0.7.8; keep that minimum aligned with both Lake declarations.
+# Registry lockfile refresh follows the qualified upstream release.
+lean-semantic-search-contract = { version = "0.7.8" }
+lean-semantic-search-retrieval = { version = "0.7.8" }
+lean-semantic-search-runtime = { version = "0.7.8" }
+lean-semantic-search-store = { version = "0.7.8" }
 predicates = "3"
 rusqlite = { version = "0.40", features = ["bundled"] }
 rustc-hash = "2"

@@ -8,12 +8,23 @@ All notable changes to lean-dup are documented here. The format is based on
 
 ### Changed
 
+- Prepared Lean `4.36.0` across all six development and fixture pins and the worker fallback. Both Lake dependency
+  declarations select reviewed semantic-search candidate `f1202a42311fc0926edd617fc35cf5cf1231dc80`, and the four
+  Rust semantic-search requirements now start at `0.7.8` so the packaged worker cannot silently retain the older
+  `0.7.7` payload. The registry lockfile refresh, native-worker/Rust qualification and release remain pending the
+  qualified SDK and semantic releases. The Rust floor and protocol versions are unchanged.
+
 - Bumped the Lean toolchain pin from `leanprover/lean4:v4.34.0-rc2` to `leanprover/lean4:v4.35.0` and moved the
   upstream `lean-semantic-search` dependencies in lockstep to release tag `v0.7.7` (the tag whose toolchain is
   `v4.35.0`): the Lake git require moved from `v0.7.2` to `v0.7.7` and `Cargo.lock` refreshed from the `0.7.3` crates
   onto `0.7.7`, which carry the transitive lean-rs line forward from 0.8.0 to 0.9.4 (`lean-rs-worker-protocol` /
   `lean-rs-abi` / `lean-toolchain`). All six `lean-toolchain` files and `PINNED_TOOLCHAIN` moved together. The Rust
   floor is unchanged at 1.94; no protocol changes.
+
+### Fixed
+
+- The prerelease gate builds the declared native worker and all four CI fixtures, and propagates an earlier failed
+  library or fixture build instead of reporting a later successful fixture as a passing build gate.
 
 ## [0.4.0] - 2026-08-22
 
