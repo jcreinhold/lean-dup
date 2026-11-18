@@ -91,8 +91,8 @@ impl ToolchainId {
         Self::parse(PINNED_TOOLCHAIN).unwrap_or_else(|_| Self("v4.36.0".to_owned()))
     }
 
-    /// Resolved path to the elan toolchain root
-    /// (`~/.elan/toolchains/leanprover--lean4---<id>`).
+    /// Resolve the selected toolchain under `ELAN_HOME/toolchains`.
+    /// Defaults to `~/.elan/toolchains` when `ELAN_HOME` is unset.
     ///
     /// # Errors
     ///
@@ -110,14 +110,36 @@ impl ToolchainId {
     }
 
     fn elan_dir_path(&self) -> Result<PathBuf, ToolchainError> {
-        let home = dirs::home_dir().ok_or_else(|| ToolchainError::ElanMissing {
-            toolchain: self.clone(),
-            elan_dir: PathBuf::from(format!("~/.elan/toolchains/leanprover--lean4---{}", self.0)),
-        })?;
-        Ok(home
-            .join(".elan")
-            .join("toolchains")
-            .join(format!("leanprover--lean4---{}", self.0)))
+        self.elan_dir_path_from(
+            std::env::var_os("ELAN_HOME").map(PathBuf::from),
+            dirs::home_dir(),
+            std::env::current_dir().ok(),
+        )
+    }
+
+    fn elan_dir_path_from(
+        &self,
+        elan_home: Option<PathBuf>,
+        user_home: Option<PathBuf>,
+        current_dir: Option<PathBuf>,
+    ) -> Result<PathBuf, ToolchainError> {
+        let directory = format!("leanprover--lean4---{}", self.0);
+        let root = match elan_home {
+            Some(root) if root.is_absolute() => root,
+            Some(root) => current_dir
+                .map(|cwd| cwd.join(&root))
+                .ok_or_else(|| ToolchainError::ElanMissing {
+                    toolchain: self.clone(),
+                    elan_dir: root.join("toolchains").join(&directory),
+                })?,
+            None => user_home
+                .map(|home| home.join(".elan"))
+                .ok_or_else(|| ToolchainError::ElanMissing {
+                    toolchain: self.clone(),
+                    elan_dir: PathBuf::from(format!("~/.elan/toolchains/{directory}")),
+                })?,
+        };
+        Ok(root.join("toolchains").join(directory))
     }
 
     /// The elan-style label (`leanprover/lean4:<id>`) Lake and the toolchain
@@ -550,5 +572,86 @@ mod tests {
         let installed = resolve_in(tmp.path(), &id).expect("resolves");
         assert_eq!(installed.worker_exe, tmp.path().join(WORKER_FILE_NAME));
         assert_eq!(installed.lean_sysroot, tmp.path());
+    }
+    #[test]
+    fn elan_home_absolute_override_wins_without_a_user_home() {
+        let root = tempfile::tempdir().unwrap();
+        let id = ToolchainId::pinned();
+        let actual = id
+            .elan_dir_path_from(Some(root.path().to_path_buf()), None, None)
+            .unwrap();
+        assert_eq!(actual, root.path().join("toolchains/leanprover--lean4---v4.36.0"));
+    }
+
+    #[test]
+    fn elan_home_unset_preserves_the_default_location() {
+        let home = tempfile::tempdir().unwrap();
+        let id = ToolchainId::pinned();
+        let actual = id
+            .elan_dir_path_from(None, Some(home.path().to_path_buf()), None)
+            .unwrap();
+        assert_eq!(actual, home.path().join(".elan/toolchains/leanprover--lean4---v4.36.0"));
+    }
+
+    #[test]
+    fn elan_home_relative_override_is_resolved_from_the_current_directory() {
+        let cwd = tempfile::tempdir().unwrap();
+        let id = ToolchainId::pinned();
+        let actual = id
+            .elan_dir_path_from(
+                Some(PathBuf::from("private-elan")),
+                None,
+                Some(cwd.path().to_path_buf()),
+            )
+            .unwrap();
+        assert_eq!(
+            actual,
+            cwd.path().join("private-elan/toolchains/leanprover--lean4---v4.36.0")
+        );
+    }
+
+    #[test]
+    fn elan_home_empty_override_matches_elans_current_directory_semantics() {
+        let cwd = tempfile::tempdir().unwrap();
+        let id = ToolchainId::pinned();
+        let actual = id
+            .elan_dir_path_from(Some(PathBuf::new()), None, Some(cwd.path().to_path_buf()))
+            .unwrap();
+        assert_eq!(actual, cwd.path().join("toolchains/leanprover--lean4---v4.36.0"));
+    }
+
+    #[test]
+    fn elan_home_missing_override_does_not_fall_back_to_the_default() {
+        let root = tempfile::tempdir().unwrap();
+        let configured = root.path().join("missing-elan");
+        let default = root.path().join("user-home");
+        std::fs::create_dir_all(default.join(".elan/toolchains/leanprover--lean4---v4.36.0")).unwrap();
+        let id = ToolchainId::pinned();
+        let actual = id
+            .elan_dir_path_from(Some(configured.clone()), Some(default), None)
+            .unwrap();
+        assert_eq!(actual, configured.join("toolchains/leanprover--lean4---v4.36.0"));
+        assert!(!actual.is_dir());
+    }
+
+    #[test]
+    fn elan_home_relative_override_without_a_current_directory_fails() {
+        let home = tempfile::tempdir().unwrap();
+        let id = ToolchainId::pinned();
+        let result = id.elan_dir_path_from(
+            Some(PathBuf::from("private-elan")),
+            Some(home.path().to_path_buf()),
+            None,
+        );
+        assert!(matches!(result, Err(ToolchainError::ElanMissing { .. })));
+    }
+
+    #[test]
+    fn elan_home_unset_without_a_user_home_fails() {
+        let id = ToolchainId::pinned();
+        assert!(matches!(
+            id.elan_dir_path_from(None, None, None),
+            Err(ToolchainError::ElanMissing { .. })
+        ));
     }
 }

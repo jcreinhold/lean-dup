@@ -44,6 +44,11 @@ lean-dup install-worker
 worker into `<data_local>/lean-dup/workers/<toolchain-id>/` and runs a smoke test. Audits resolve the worker from the
 audited project's `lean-toolchain` pin, so a project on a different toolchain just needs its own `install-worker` run.
 
+Set `ELAN_HOME` to use an elan installation outside `~/.elan`. Toolchains are resolved under
+`$ELAN_HOME/toolchains`; an explicitly configured missing toolchain fails instead of falling back to the default root.
+Relative values are resolved from the invocation directory, following elan's convention. `LEAN_SYSROOT` and
+`LEAN_DUP_WORKERS_DIR` do not select the installer's toolchain root.
+
 To work from a checkout instead:
 
 ```sh
