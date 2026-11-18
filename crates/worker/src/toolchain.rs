@@ -313,7 +313,7 @@ impl WorkerSidecar {
 
     /// Build a sidecar with no smoke outcome recorded yet. `install-worker`
     /// writes this *before* running the smoke test: the smoke run resolves the
-    /// worker through the same [`resolve_in`] path the parent uses, which
+    /// worker through the same resolution path the parent uses, which
     /// requires the sidecar to exist — a fresh install dir would otherwise fail
     /// its own smoke test with `NotInstalled`. Overwritten with the real
     /// outcome once the smoke run finishes.
@@ -394,7 +394,7 @@ impl fmt::Display for ToolchainError {
 impl std::error::Error for ToolchainError {}
 
 /// Why a usable worker could not be resolved for an audited workspace. Every
-/// variant's [`Display`] names the `install-worker` command that fixes it.
+/// variant's [`std::fmt::Display`] names the `install-worker` command that fixes it.
 #[derive(Debug)]
 pub enum ProvisionError {
     /// No worker is installed for this toolchain.
