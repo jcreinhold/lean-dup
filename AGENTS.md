@@ -11,6 +11,17 @@ only reads source, builds Lean artifacts through Lake, and writes indexes/report
 It is a Rust workspace (`edition = "2024"`, Rust 1.94+) plus a small Lean worker package under `lean/`. The Lean
 development pin is `leanprover/lean4:v4.36.0`; worker and Rust runtime qualification is pending.
 
+## Local files and evidence
+
+- Keep no evidence by default. If a result changes a release or maintainer decision, record one short Git summary:
+  the revision, exact check, outcome, and first error needed to act. Do not save raw logs or traces.
+- Before writing generated files, name the allowed path, total byte limit, and when to remove them. Stop at the
+  limit. Afterward, check that no stray files remain and remove generated output when no named next check needs it.
+- Do not put work or evidence in `~/Documents/Codex`, `/private/tmp` (including `/tmp`), or in `.git` outside normal
+  Git data. Do not use another path, an alias, an archive, compression, or split files to evade these rules.
+- Use the installed Elan toolchain and one normal build cache for the work. Do not keep a copied toolchain, target,
+  or checkout as evidence.
+
 ## Commands
 
 ```sh
