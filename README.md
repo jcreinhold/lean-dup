@@ -34,6 +34,9 @@ the audited project's `lean-toolchain` pin; if one is not installed, `lean-dup` 
 --toolchain <id>` command to run. Run `lean-dup doctor` to confirm the worker is reachable. Building a worker requires
 only the matching elan toolchain (`elan toolchain install <id>`) — no Rust toolchain.
 
+After upgrading `lean-dup`, run `lean-dup install-worker --force` for an existing toolchain to rebuild its worker
+from the updated packaged source. The ordinary install reuses workers with a passing smoke test and matching Lean headers.
+
 Optional tools such as `lean-dup-vector` are external extensions and are not required for the core audit workflow.
 
 ### From a checkout
