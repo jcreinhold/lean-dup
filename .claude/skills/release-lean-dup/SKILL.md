@@ -28,11 +28,13 @@ scripts/prerelease.sh            # mirrors ci.yml's check job; --quick skips the
 Stop on any failure. This is the same gate CI runs (fmt, clippy `-D warnings`, the full test suite, `boundaries`, and
 the `jq` schema/eval/report-contract assertions); passing locally is the fast feedback loop.
 
-`prerelease.sh` does **not** exercise `.github/workflows/release.yml`'s `verify` job. If the commits being released
-added or removed any workspace crate (or renamed one), diff the workflow's publish/dry-run crate lists against
-`[workspace] members` in the root `Cargo.toml` before tagging — the `v0.3.0` tag push failed exactly this way
-(`release.yml` still built and published the deleted `lean-dup-worker-child`, and nothing caught it until the tag
-push).
+Both the full prerelease gate and release verification run `scripts/portability-smoke.sh` with current stable
+Cargo. It selects publishable members and runs `cargo package --workspace --locked`, keeping archive verification
+enabled. Cargo makes unpublished sibling archives available through its temporary registry; external SDK/semantic
+crates must already be published. No upload token is needed. Run this on a clean, committed candidate.
+
+If workspace membership changes, compare the live publish order with the publishable members before tagging.
+The full prerelease gate also verifies the parent CLI does not link `libleanshared`.
 
 ### 2. Version bump (one source of truth, mirrored in two places)
 

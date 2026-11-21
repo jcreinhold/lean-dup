@@ -72,10 +72,14 @@ jobs:
           # user provisions in (and catches a dependency reintroducing a
           # Lean-needing build script). Tracks lean/lean-toolchain.
           toolchain="$(tr -d '[:space:]' < lean/lean-toolchain)"
-          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
-            | sh -s -- -y --default-toolchain "$toolchain"
+          if [ ! -x "$HOME/.elan/bin/elan" ]; then
+            curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+              | sh -s -- -y --default-toolchain none
+          fi
+          "$HOME/.elan/bin/elan" toolchain install "$toolchain"
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-          echo "LEAN_SYSROOT=$HOME/.elan/toolchains/leanprover--lean4---${toolchain##*:}" >> "$GITHUB_ENV"
+          sysroot="$("$HOME/.elan/bin/elan" run "$toolchain" lean --print-prefix)"
+          echo "LEAN_SYSROOT=$sysroot" >> "$GITHUB_ENV"
 
       - name: Verify tag matches workspace version
         if: github.event_name == 'push'
@@ -120,14 +124,10 @@ jobs:
           cargo package --list -p lean-dup-capability-source | grep -qx 'lean/LeanDup.lean' \
             || { echo "::error::capability-source crate omits its packaged Lean source"; exit 1; }
 
-      # Only the leaf crates (no unpublished internal deps) can be dry-run before
-      # the ordered publish makes each dependency available on crates.io.
-      - name: Publish dry-run (leaf crates)
-        run: |
-          set -euo pipefail
-          for crate in lean-dup-capability-source lean-dup-diagnostics lean-dup-worker; do
-            cargo publish -p "$crate" --no-verify --dry-run
-          done
+      # Cargo verifies all publishable sibling archives without uploading them;
+      # the external SDK/semantic dependencies must already be published.
+      - name: Verify workspace packages
+        run: scripts/portability-smoke.sh
 
   publish:
     name: Publish

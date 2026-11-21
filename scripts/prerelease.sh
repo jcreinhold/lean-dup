@@ -214,10 +214,9 @@ gate_report_contract() {
 	jq -e '.review.groups == null' target/report-contract/ordinary-audit.json >/dev/null
 }
 
-# Release portability: prove the parent CLI builds from published crates with no
-# sibling `../lean-rs` / `../lean-semantic-search` checkout. Archives HEAD into a
-# throwaway tree, so a stray patch/path dependency fails here. This runs a full
-# Rust release build, not a packaged-worker provision, and is skippable with --quick.
+# Verify every publishable archive through Cargo's temporary sibling registry.
+# External SDK/semantic dependencies still resolve from crates.io. This reuses
+# the normal target and is skippable with --quick.
 gate_portability() {
 	scripts/portability-smoke.sh
 }
@@ -229,7 +228,7 @@ if [[ "$QUICK" == 1 ]]; then
 else
 	run_gate "fixture evals (default ok / hard-negatives clean)" gate_evals
 	run_gate "report contract fixture" gate_report_contract
-	run_gate "portability smoke (no sibling checkout)" gate_portability
+	run_gate "workspace package verification" gate_portability
 fi
 
 # -- summary ----------------------------------------------------------------
