@@ -29,7 +29,7 @@ Stop on any failure. This is the same gate CI runs (fmt, clippy `-D warnings`, t
 the `jq` schema/eval/report-contract assertions); passing locally is the fast feedback loop.
 
 Both the full prerelease gate and release verification run `scripts/portability-smoke.sh` with current stable
-Cargo. It selects publishable members and runs `cargo package --workspace --locked`, keeping archive verification
+Cargo. It explicitly excludes `publish = false` members from `cargo package --workspace --locked`, keeping verification
 enabled. Cargo makes unpublished sibling archives available through its temporary registry; external SDK/semantic
 crates must already be published. No upload token is needed. Run this on a clean, committed candidate.
 

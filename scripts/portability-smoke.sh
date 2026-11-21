@@ -11,25 +11,20 @@ if (($# != 0)); then
   exit 2
 fi
 
-packages="$(cargo metadata --locked --no-deps --format-version 1 | python3 -c '
+excluded="$(cargo metadata --locked --no-deps --format-version 1 | python3 -c '
 import json, sys
 metadata = json.load(sys.stdin)
 members = set(metadata["workspace_members"])
 for package in metadata["packages"]:
-    if package["id"] in members and package.get("publish") != []:
+    if package["id"] in members and package.get("publish") == []:
         print(package["name"])
 ')"
-package_args=()
+exclude_args=()
 while IFS= read -r package; do
   if [[ -n "$package" ]]; then
-    package_args+=(-p "$package")
+    exclude_args+=(--exclude "$package")
   fi
-done <<<"$packages"
-if ((${#package_args[@]} == 0)); then
-  echo "no publishable workspace members found" >&2
-  exit 1
-fi
-
-# Select explicitly: --workspace alone also packages publish=false members.
+done <<<"$excluded"
+# Exclude explicitly: --workspace includes publish=false members, even with -p.
 # Keep verification enabled; external SDK/semantic crates must really exist.
-cargo package --workspace --locked "${package_args[@]}"
+cargo package --workspace --locked "${exclude_args[@]}"
