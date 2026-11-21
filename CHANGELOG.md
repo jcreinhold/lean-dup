@@ -6,20 +6,23 @@ All notable changes to lean-dup are documented here. The format is based on
 
 ## [Unreleased]
 
-## [0.4.1] - 2026-11-18
+## [0.4.1] - 2026-11-21
 
 ### Changed
 
 - Updated all six development and fixture Lean pins and the worker fallback from `leanprover/lean4:v4.34.0-rc2`
   to `leanprover/lean4:v4.36.0`.
-- Both Lake dependency declarations select reviewed semantic-search source
-  `f1202a42311fc0926edd617fc35cf5cf1231dc80`, and the four Rust semantic-search requirements now start at `0.7.8`
-  so the packaged worker cannot silently retain the older `0.7.7` payload. The registry lockfile refresh,
-  packaged-worker/Rust qualification and release remain pending the qualified SDK and semantic releases.
+- Both Lake dependency declarations select the published semantic-search 0.7.8 source
+  `2b5868b305d5ca923e4d238ed90a7237954d5b80`. The Rust dependencies and registry lock now use semantic-search
+  0.7.8 and SDK 0.10.1, with rusqlite 0.41.1 sharing their bundled SQLite dependency.
   The Rust floor remains 1.94 and protocol versions are unchanged.
 
 ### Fixed
 
+- Regression coverage verifies duplicate-key requests are rejected without losing the native worker session, and
+  requires actual worker probes for the source-backed proof-grade audit. Fixture builds preserve their Lake cache.
+- Release checks verify every publishable workspace archive without uploads or copied checkouts; release CI explicitly
+  installs the pinned Lean toolchain.
 - The prerelease gate builds the declared native worker and all four CI fixtures, and propagates an earlier failed
   library or fixture build instead of reporting a later successful fixture as a passing build gate.
 

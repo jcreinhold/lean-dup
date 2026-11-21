@@ -1343,7 +1343,6 @@ fn source_backed_external_index_gets_proof_grade_probe_evidence() {
     let _worker = worker_cli_lock();
     let cache = tempfile::TempDir::new().unwrap();
     let source_backed = repo_root().join("tests/fixtures/source-backed");
-    let _ = fs::remove_dir_all(source_backed.join(".lake"));
     let lake = ProcessCommand::new("lake")
         .arg("build")
         .current_dir(&source_backed)
@@ -1386,6 +1385,9 @@ fn source_backed_external_index_gets_proof_grade_probe_evidence() {
 
     assert_eq!(payload["comparison_provenance"][0]["evidence_mode"], "proof-grade");
     assert!(payload["semantic_verification"]["planned_pairs"].as_u64().unwrap() > 0);
+    assert!(payload["semantic_verification"]["worker_pairs"].as_u64().unwrap() > 0);
+    assert!(payload["semantic_verification"]["worker_batches"].as_u64().unwrap() > 0);
+    println!("fresh-cache probe counters: {}", payload["semantic_verification"]);
     assert!(payload["semantic_verification"]["verified_results"].as_u64().unwrap() > 0);
     let groups = payload["visible_groups"].as_array().unwrap();
     let exact = groups

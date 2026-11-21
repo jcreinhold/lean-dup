@@ -622,3 +622,51 @@ fn decode_frame(value: &Value) -> Option<Frame> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use std::time::Duration;
+
+    use super::{Frame, spawn_session};
+
+    #[test]
+    fn duplicate_keys_are_rejected_without_losing_the_native_session() {
+        lean_dup_test_support::ensure_worker_provisioned();
+        let root = lean_dup_test_support::repo_root().join("tests/fixtures/tiny");
+        let mut session = spawn_session(&root).unwrap();
+        let pid = session.child.id();
+        // Keep duplicate keys in raw JSON: serde_json::Value would erase them.
+        for request in [
+            r#"{"command":"version","command":"features","request":{}}"#,
+            r#"{"command":"features","request":{"modules":[],"modules":[]}}"#,
+        ] {
+            writeln!(session.stdin, "{request}").unwrap();
+            session.stdin.flush().unwrap();
+            let frame = session.frames.recv_timeout(Duration::from_secs(10)).unwrap();
+            match frame {
+                Frame::Diagnostic { code, message } => {
+                    assert_eq!(code, "request.malformed");
+                    assert!(message.to_lowercase().contains("duplicate"), "{message}");
+                }
+                other => panic!("expected malformed-request diagnostic, got {other:?}"),
+            }
+            let frame = session.frames.recv_timeout(Duration::from_secs(10)).unwrap();
+            match frame {
+                Frame::Metadata(value) => assert_eq!(value["ok"], false),
+                other => panic!("expected failed terminal metadata, got {other:?}"),
+            }
+        }
+        writeln!(session.stdin, r#"{{"command":"version","request":{{}}}}"#).unwrap();
+        session.stdin.flush().unwrap();
+        let frame = session.frames.recv_timeout(Duration::from_secs(10)).unwrap();
+        match frame {
+            Frame::Result(value) => assert_eq!(value["protocol_version"], "lean-dup.worker.v1"),
+            other => panic!("expected recovered version result, got {other:?}"),
+        }
+        assert_eq!(session.child.id(), pid);
+        assert!(session.child.try_wait().unwrap().is_none());
+        session.kill();
+        assert!(session.child.try_wait().unwrap().is_some());
+    }
+}

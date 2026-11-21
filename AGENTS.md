@@ -9,7 +9,7 @@ only reads source, builds Lean artifacts through Lake, and writes indexes/report
 `target/`.
 
 It is a Rust workspace (`edition = "2024"`, Rust 1.94+) plus a small Lean worker package under `lean/`. The Lean
-development pin is `leanprover/lean4:v4.36.0`; worker and Rust runtime qualification is pending.
+development pin is `leanprover/lean4:v4.36.0`. The packaged installer uses the published semantic runtime payload.
 
 ## Local files and evidence
 
