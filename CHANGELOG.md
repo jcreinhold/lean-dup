@@ -6,6 +6,8 @@ All notable changes to lean-dup are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-27
+
 ### Changed
 
 - The semantic corpus store now lives in `lean-dup-index` as a private `store` module, moved from
