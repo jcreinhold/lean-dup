@@ -54,7 +54,6 @@ lean-dup-worker = { path = "crates/worker", version = "0.4.1" }
 lean-semantic-search-contract = { version = "0.7.8" }
 lean-semantic-search-retrieval = { version = "0.7.8" }
 lean-semantic-search-runtime = { version = "0.7.8" }
-lean-semantic-search-store = { version = "0.7.8" }
 predicates = "3"
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 rustc-hash = "2"

@@ -56,9 +56,9 @@ elan toolchain install leanprover/lean4:vX.Y.Z
 Two places, and they must match each other:
 
 - **Cargo** — in the root `Cargo.toml` `[workspace.dependencies]`, bump the minors:
-  `lean-semantic-search-{contract,retrieval,runtime,store}`. Then refresh the lockfile
-  (`cargo update -p lean-semantic-search-contract -p lean-semantic-search-retrieval -p lean-semantic-search-runtime
-  -p lean-semantic-search-store`) and confirm the transitive `lean-rs-*` crates moved to the expected line.
+  `lean-semantic-search-{contract,retrieval,runtime}`. Then refresh the lockfile
+  (`cargo update -p lean-semantic-search-contract -p lean-semantic-search-retrieval -p lean-semantic-search-runtime`)
+  and confirm the transitive `lean-rs-*` crates moved to the expected line.
 - **Lake** — in `lean/lakefile.lean`, bump the single git-require tag:
   `«lean-semantic-search» … @ "vA.B.C"`. Update the inline comment that names the matching toolchain so the next
   reader sees why the tag and the pin agree.

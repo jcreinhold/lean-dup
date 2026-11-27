@@ -4045,7 +4045,6 @@ dependencies = [
  "lean-dup-worker",
  "lean-semantic-search-contract",
  "lean-semantic-search-retrieval",
- "lean-semantic-search-store",
  "rusqlite",
  "rustc-hash",
  "serde",
@@ -4095,7 +4094,6 @@ dependencies = [
  "lean-dup-worker",
  "lean-semantic-search-contract",
  "lean-semantic-search-retrieval",
- "lean-semantic-search-store",
  "rustc-hash",
  "serde",
  "serde_json",
@@ -4230,18 +4228,6 @@ dependencies = [
  "sha2 0.11.0",
  "thiserror",
  "walkdir",
-]
-
-[[package]]
-name = "lean-semantic-search-store"
-version = "0.7.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "294c691b84dcff377a6d5b9302ed4f98fd7632d0cfdd69e0437c7ec3bd62fecc"
-dependencies = [
- "lean-semantic-search-contract",
- "lean-semantic-search-retrieval",
- "rusqlite",
- "serde_json",
 ]
 
 [[package]]

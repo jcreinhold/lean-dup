@@ -19,9 +19,9 @@ use lean_dup_worker::{
 };
 use lean_semantic_search_contract::OpaqueFeatureKey;
 use lean_semantic_search_retrieval::Corpus;
-use lean_semantic_search_store::{Ingest, Store, StoreBuilder, StoreError};
 
 use crate::feature_dto::{feature_to_contract, worker_fingerprints, worker_role_features};
+use crate::store::{Ingest, Store, StoreBuilder, StoreError};
 use crate::{Error, Result};
 
 pub const INDEX_SCHEMA_VERSION: &str = "lean-dup.index.sqlite.v3";
@@ -36,7 +36,7 @@ const MATHLIB_DECLARATION_CHUNK_SIZE: usize = 32;
 /// machines; raise it only with a measured memory budget.
 const MAX_MATHLIB_INDEX_THREADS: usize = 4;
 
-/// Upper bound on postings fetched per key from the shared corpus. The index
+/// Upper bound on postings fetched per key from the semantic corpus. The index
 /// returns every match for a key; retrieval applies its own selectivity
 /// pruning. The bound only guards against a pathologically broad key and is set
 /// far above any real per-key posting count.
@@ -677,7 +677,7 @@ impl OpenedIndex {
         })
     }
 
-    /// Open the shared semantic corpus that sits beside this index.
+    /// Open the semantic corpus that sits beside this index.
     fn open_store(&self) -> Result<Store> {
         Store::open(corpus_path(&self.path)).map_err(store_error)
     }
@@ -1340,7 +1340,7 @@ fn index_provenance(request: &IndexBuildRequest, version: &WorkerVersion) -> Res
 }
 
 /// Write one declaration's display/hydration row. The semantic feature row and
-/// its postings go to the shared store (see [`feed_store`]), keyed by the same
+/// its postings go to the corpus store (see [`feed_store`]), keyed by the same
 /// `declaration_id`; this table carries only the facts hydration and reporting
 /// need.
 fn insert_display(connection: &Connection, declaration: &DeclarationRow) -> Result<()> {
@@ -1365,9 +1365,9 @@ fn insert_display(connection: &Connection, declaration: &DeclarationRow) -> Resu
     Ok(())
 }
 
-/// Feed one declaration and its feature row to the shared corpus builder. The
-/// builder pairs the two by `declaration_id` and owns posting and feature-row
-/// storage; an unpaired half is simply not indexed.
+/// Feed one declaration and its feature row to the corpus builder. The builder
+/// pairs the two by `declaration_id` and owns posting and feature-row storage;
+/// an unpaired half is simply not indexed.
 fn feed_store(builder: &mut StoreBuilder, declaration: &DeclarationRow, feature: &FeatureRow) -> Result<()> {
     builder
         .accept(Ingest::Declaration(declaration.declaration_id.clone()))
@@ -1378,14 +1378,15 @@ fn feed_store(builder: &mut StoreBuilder, declaration: &DeclarationRow, feature:
     Ok(())
 }
 
-/// Path of the shared semantic corpus that sits beside a `lean-dup` index.
+/// Path of the semantic corpus that sits beside a `lean-dup` index.
 fn corpus_path(index_path: &Path) -> PathBuf {
     index_path.with_file_name("corpus.sqlite")
 }
 
 /// The opaque corpus identity handed to the store: the same content hash that
-/// names the cache entry, so the store rejects a corpus built for a different
-/// set of semantic inputs.
+/// names the cache entry. The store records it but never reads it back; the
+/// cache entry is reused only when the index beside the corpus carries the same
+/// cache key.
 fn corpus_token(cache_key_json: &str) -> String {
     hex_digest(cache_key_json.as_bytes())
 }
@@ -1474,7 +1475,7 @@ fn skipped_by_budget(index_path: &Path) -> Result<u64> {
 }
 
 /// Hydrate one declaration by joining its display row (from this index's
-/// `declarations` table) with its semantic feature row (from the shared corpus).
+/// `declarations` table) with its semantic feature row (from the corpus).
 /// The handle is the opaque, stable `declaration_id` that keys both stores.
 fn load_declaration(connection: &Connection, store: &Store, handle: &DeclarationHandle) -> Result<HydratedDeclaration> {
     let declaration_id = handle.as_str();

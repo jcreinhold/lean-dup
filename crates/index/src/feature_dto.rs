@@ -1,7 +1,7 @@
 //! Conversions between the worker-wire feature row and the shared contract row.
 //!
 //! The worker capability speaks `lean-dup.worker.v1` (`lean_dup_worker` types,
-//! plain `String` keys); the shared semantic-index store speaks the contract DTO
+//! plain `String` keys); the semantic corpus store speaks the contract DTO
 //! (`OpaqueFeatureKey`-typed keys). The two encode the same opaque keys, so these
 //! conversions are field-for-field and lossless. They live here so neither the
 //! worker wire nor the store schema leaks into the other: the store ingests
@@ -13,10 +13,10 @@ use lean_semantic_search_contract::{
     DeclarationFeatureRow, Fingerprints as ContractFingerprints, OpaqueFeatureKey, RoleFeature as ContractRoleFeature,
 };
 
-/// Translate a worker feature row into the shared store's contract row.
+/// Translate a worker feature row into the corpus store's contract row.
 ///
 /// `source` is left empty: `lean-dup` carries display and source metadata in its
-/// own declarations table, not in the shared semantic corpus.
+/// declarations table, not in the semantic corpus.
 pub(crate) fn feature_to_contract(feature: &WorkerFeatureRow) -> DeclarationFeatureRow {
     DeclarationFeatureRow {
         declaration_id: feature.declaration_id.clone(),

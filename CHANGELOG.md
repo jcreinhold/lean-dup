@@ -6,6 +6,15 @@ All notable changes to lean-dup are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- The semantic corpus store now lives in `lean-dup-index` as a private `store` module, moved from
+  `lean-semantic-search-store` 0.8.0, whose only user was lean-dup. lean-dup no longer depends on that crate, and no
+  shared crate links SQLite. The corpus file format and `lean-dup-index`'s public API are unchanged, so existing caches
+  stay valid.
+- Each corpus build writes its own temp file, so concurrent builds of one cache entry no longer share one. A build
+  killed mid-write leaves its temp file in the cache entry; no later build removes it.
+
 ## [0.4.1] - 2026-11-21
 
 ### Changed

@@ -12,6 +12,7 @@ mod feature_dto;
 mod import_graph;
 mod index;
 mod probe_store;
+mod store;
 
 pub use cache::{CACHE_KEY_VERSION, CacheFacts, cache_root, resolve_cache, workspace_fingerprint};
 pub use cache_lifecycle::{

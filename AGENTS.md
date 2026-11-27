@@ -88,7 +88,7 @@ lower-level steps.
 | `capability-source` | the vendored `LeanDup` Lean source + the runtime `build_worker_into` that produces the native `lean-dup-worker` executable with the target toolchain's Lake on the user's machine | install-dir layout, sidecar schema, worker transport |
 | `project` | `workspace.rs` (Lake discovery, module roots, source enumeration), `mathlib.rs` (project-pinned mathlib contract) | — |
 | `worker` | Rust side of the worker protocol; JSONL subprocess lifecycle (`engine/`: `WorkerEngine`/`SubprocessEngine`); per-workspace toolchain resolution + install-dir/sidecar (`toolchain.rs`), substrate facts, error mapping | Lean `Expr` constructors, pretty text, private worker batching, frame decoding, child lifecycle |
-| `index` | `index.rs` (SQLite local/external/mathlib), `cache.rs` + `cache_lifecycle.rs`, `external_provenance.rs` (source-backed vs static) | SQLite table names, cache-key JSON, latest-pointer details must stay inside this crate |
+| `index` | `index.rs` (SQLite local/external/mathlib), `store/` (semantic corpus: feature rows + postings), `cache.rs` + `cache_lifecycle.rs`, `external_provenance.rs` (source-backed vs static) | SQLite table names, cache-key JSON, latest-pointer details must stay inside this crate |
 | `search` | the full audit workflow (`audit::run_audit`): `retrieval.rs`, `semantic_verification.rs`, `ranking.rs`, `source_refs.rs`, `replacement_hints.rs`, `baseline.rs` | SQLite layout, worker command names |
 | `report` | stable explanation facts → text/JSON/`show`/`diff` (`report-contract.md`) | terminal layout leaking into audit/ranking |
 | `eval` | suite definitions, label provenance, hard-negative gate, raw metrics | corpus paths in default CI |

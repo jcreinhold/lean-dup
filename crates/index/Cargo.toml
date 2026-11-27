@@ -14,18 +14,15 @@ lean-dup-project = { workspace = true }
 lean-dup-worker = { workspace = true }
 lean-semantic-search-contract = { workspace = true }
 lean-semantic-search-retrieval = { workspace = true }
-lean-semantic-search-store = { workspace = true }
 rusqlite = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+tempfile = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 walkdir = { workspace = true }
-
-[dev-dependencies]
-tempfile = { workspace = true }
 
 [lib]
 doctest = false

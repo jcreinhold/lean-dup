@@ -43,9 +43,10 @@ Each crate root is the supported public facade. Submodules and internals stay pr
   resolution entry points. Lake path rules and `.olean` discovery sit on `ResolvedWorkspace`.
 - **`lean-dup-index`**: `IndexStore`, build/open/hydrate DTOs, `SemanticFeatureFanout`, provenance summaries, cache
   diagnostics, safe cleanup reports. SQLite schema, posting layout, and latest-pointer layout are private; feature keys
-  are opaque Lean-owned strings. The semantic index itself — feature rows and opaque-key postings — is served from the
-  shared `lean-semantic-search-store` corpus beside each cache entry; this crate keeps only the display/probe SQLite.
-  See [shared-search-adoption.md](shared-search-adoption.md).
+  are opaque Lean-owned strings. Each cache entry holds the display/probe SQLite and, beside it, the semantic corpus of
+  feature rows and opaque-key postings. The private `store` module builds and reads that corpus; it came from
+  `lean-semantic-search-store` 0.8.0, whose only user was `lean-dup`. See
+  [shared-search-adoption.md](shared-search-adoption.md).
 - **`lean-dup-vector-index`**: `VectorCorpusBuildRequest`, `VectorCorpusOpenRequest`, opaque `VectorCorpus`,
   nearest-declaration query DTOs, corpus summaries, provenance facts, and stable vector-index errors. LanceDB/Arrow
   rows, vector database layout, index parameters, score conversion, cache paths, and backend fallback rules are private.
