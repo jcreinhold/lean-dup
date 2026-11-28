@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
@@ -98,7 +98,6 @@ impl IndexBuildRequest {
 /// storage interface used by retrieval and audit callers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
-#[allow(dead_code)]
 pub enum IndexBuildKind {
     Local,
     External,
@@ -162,7 +161,6 @@ impl ExpectedIndexEntry {
 /// Labels resolve through the cache root. Paths may point either at an index
 /// directory or directly at its SQLite file.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum IndexReference {
     Label(String),
     Path(PathBuf),
@@ -174,7 +172,6 @@ pub enum IndexReference {
 /// handles. The opened index keeps storage handles private and hydrates only
 /// the requested declarations.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct OpenedIndex {
     path: PathBuf,
 }
@@ -184,7 +181,6 @@ pub struct OpenedIndex {
 /// These facts identify the index for diagnostics and origin-aware pairing.
 /// They do not describe how declarations or postings are stored.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[allow(dead_code)]
 pub struct OpenedIndexFacts {
     pub origin: String,
     pub label: Option<String>,
@@ -259,6 +255,7 @@ impl DeclarationHandle {
 ///
 /// Callers may compare and store the keys Lean emitted, but must not parse
 /// them or reconstruct them from display text.
+#[cfg(test)]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct SemanticFeatureQuery {
     pub fingerprints: Vec<SemanticFingerprintFeature>,
@@ -267,7 +264,6 @@ struct SemanticFeatureQuery {
 
 /// One requested opaque fingerprint key.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[allow(dead_code)]
 pub struct SemanticFingerprintFeature {
     pub kind: FingerprintKind,
     pub key: String,
@@ -275,7 +271,6 @@ pub struct SemanticFingerprintFeature {
 
 /// Supported Lean-owned fingerprint classes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[allow(dead_code)]
 pub enum FingerprintKind {
     Statement,
     SafeBinderPermutation,
@@ -285,7 +280,6 @@ pub enum FingerprintKind {
 
 /// One requested opaque role-feature key.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[allow(dead_code)]
 pub struct SemanticRoleFeature {
     pub role: String,
     pub key: String,
@@ -296,7 +290,6 @@ pub struct SemanticRoleFeature {
 /// Callers may pass keys emitted by Lean and compare matching handles. The key
 /// value remains opaque and display text must not be used as a replacement key.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[allow(dead_code)]
 pub enum SemanticFeatureKey {
     Fingerprint(SemanticFingerprintFeature),
     RoleFeature(SemanticRoleFeature),
@@ -307,7 +300,6 @@ pub enum SemanticFeatureKey {
 /// Retrieval uses fanout to distinguish selective evidence from broad evidence
 /// without learning posting storage or hydrating declarations first.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[allow(dead_code)]
 pub struct SemanticFeatureFanout {
     counts: BTreeMap<SemanticFeatureKey, usize>,
 }
@@ -331,7 +323,6 @@ impl SemanticFeatureFanout {
 /// Callers receive opaque handles grouped by the semantic key that matched.
 /// The index keeps storage rows and posting layout private.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[allow(dead_code)]
 pub struct SemanticFeatureMatches {
     matches: BTreeMap<SemanticFeatureKey, Vec<DeclarationHandle>>,
 }
@@ -360,7 +351,6 @@ impl SemanticFeatureMatches {
 /// later retrieval, ranking, and reporting layers. It does not reveal storage
 /// identity or table layout.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[allow(dead_code)]
 pub struct HydratedDeclaration {
     pub handle: DeclarationHandle,
     pub declaration_id: String,
@@ -389,7 +379,6 @@ pub struct HydratedDeclaration {
 /// derives the cache key and persists the payload without exposing storage
 /// shape or JSON fields.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[allow(dead_code)]
 pub struct ProbeCacheEntry {
     pub cache_key: String,
     pub pair: ProbePair,
@@ -447,7 +436,6 @@ struct FileDigest {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct LatestPointer {
     index_dir: PathBuf,
 }
@@ -608,7 +596,6 @@ impl IndexStore {
         sqlite_cache_is_current(&entry.index_path, &entry.cache_key_json)
     }
 
-    #[allow(dead_code)]
     pub fn resolve(&self, reference: IndexReference) -> Result<OpenedIndex> {
         let path = match reference {
             IndexReference::Label(label) => {
@@ -650,7 +637,6 @@ impl IndexStore {
     }
 }
 
-#[allow(dead_code)]
 impl OpenedIndex {
     pub fn from_fixture_path(path: PathBuf) -> Self {
         Self { path }
@@ -746,9 +732,10 @@ impl OpenedIndex {
         Ok(handles)
     }
 
+    #[cfg(test)]
     fn matching_handles(&self, query: SemanticFeatureQuery) -> Result<Vec<DeclarationHandle>> {
         let store = self.open_store()?;
-        let mut handles = BTreeSet::new();
+        let mut handles = std::collections::BTreeSet::new();
         for fingerprint in query.fingerprints {
             if fingerprint.key.is_empty() {
                 continue;
@@ -1422,7 +1409,6 @@ fn sqlite_cache_is_current(index_path: &Path, cache_key_json: &str) -> Result<bo
     })
 }
 
-#[allow(dead_code)]
 fn validate_index_schema(index_path: &Path) -> Result<()> {
     let connection = open_readonly(index_path)?;
     if metadata_value(&connection, "schema_version")?.as_deref() == Some(INDEX_SCHEMA_VERSION) {
@@ -1709,7 +1695,6 @@ fn write_text(path: &Path, text: &str) -> Result<()> {
     })
 }
 
-#[allow(dead_code)]
 fn expand_home(path: &Path) -> PathBuf {
     let Some(text) = path.to_str() else {
         return path.to_path_buf();

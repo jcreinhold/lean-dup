@@ -77,7 +77,7 @@ pub struct VerificationIndex<'a> {
 }
 
 impl<'a> VerificationIndex<'a> {
-    #[allow(dead_code, reason = "test-only constructor; production uses with_probe_store")]
+    #[cfg(test)]
     pub fn new(index: &'a OpenedIndex) -> Self {
         Self {
             index,

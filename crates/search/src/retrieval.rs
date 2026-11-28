@@ -25,7 +25,6 @@ pub(crate) const FANOUT_POLICY_ID: &str = "lean-dup.fanout-policy.v1";
 /// or semantic-probe stages, plus diagnostics that explain pruning and
 /// hydration decisions.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-#[allow(dead_code)]
 pub struct RetrievalOutput {
     pub candidate_sets: Vec<CandidateSet>,
     pub diagnostics: RetrievalDiagnostics,
@@ -37,7 +36,6 @@ pub struct RetrievalOutput {
 /// Candidates may come from the same workspace corpus or from one of the
 /// opened comparison indexes.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-#[allow(dead_code)]
 pub struct CandidateSet {
     pub anchor: HydratedDeclaration,
     pub candidates: Vec<RetrievedCandidate>,
@@ -48,7 +46,6 @@ pub struct CandidateSet {
 /// `score` is only an ordering signal for retrieval. Later stages decide
 /// review priority, replacement actions, and report wording.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-#[allow(dead_code)]
 pub struct RetrievedCandidate {
     pub pair_id: String,
     pub declaration: HydratedDeclaration,
@@ -62,7 +59,6 @@ pub struct RetrievedCandidate {
 /// The contributions are semantic keys emitted by Lean and matched through an
 /// index. They are evidence for retrieval only, not proof certificates.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-#[allow(dead_code)]
 pub struct CandidateExplanation {
     pub contributions: Vec<KeyContribution>,
 }
@@ -72,7 +68,6 @@ pub struct CandidateExplanation {
 /// Diagnostics are intended for audit logs and later `show` output. They
 /// explain how much work was avoided without exposing the index storage shape.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
-#[allow(dead_code)]
 pub struct RetrievalDiagnostics {
     pub fanout_policy: FanoutPolicySummary,
     pub candidate_count: usize,
@@ -87,7 +82,6 @@ pub struct RetrievalDiagnostics {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[allow(dead_code)]
 pub struct FanoutPolicySummary {
     pub policy_id: String,
     pub symbolic_top_k_per_anchor: usize,
@@ -139,7 +133,6 @@ pub(crate) enum CandidateLossStage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[allow(dead_code)]
 pub(crate) struct CandidateSourceEvidence {
     pub source_id: String,
     pub source_family: CandidateSourceFamily,
@@ -165,7 +158,6 @@ pub(crate) enum CandidateTopKStatus {
 
 /// One semantic key contribution to a retrieved candidate.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-#[allow(dead_code)]
 pub struct KeyContribution {
     pub kind: String,
     pub role: Option<String>,
@@ -194,7 +186,6 @@ impl KeyContribution {
 
 /// A semantic posting that retrieval chose not to expand.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[allow(dead_code)]
 pub struct PrunedPosting {
     pub anchor_declaration_id: String,
     pub source: String,
@@ -207,7 +198,6 @@ pub struct PrunedPosting {
 
 /// A broad semantic feature fanout that candidate generation did not expand.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[allow(dead_code)]
 pub struct PrunedFeatureFanout {
     pub policy: String,
     pub source: String,
@@ -218,7 +208,6 @@ pub struct PrunedFeatureFanout {
 
 /// Per-anchor count of lower-scoring candidates dropped from the bounded set.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[allow(dead_code)]
 pub struct HeapTruncation {
     pub anchor_declaration_id: String,
     pub dropped_count: usize,
@@ -229,7 +218,6 @@ pub struct HeapTruncation {
 /// Callers provide already-hydrated workspace declarations and any opened
 /// comparison indexes. Retrieval returns semantic candidates and explanations;
 /// it does not perform ranking, probing, reporting, or replacement-hint policy.
-#[allow(dead_code)]
 pub fn retrieve_candidates(workspace: &[HydratedDeclaration], indexes: &[OpenedIndex]) -> Result<RetrievalOutput> {
     retrieve_candidates_for(workspace, indexes, None)
 }
